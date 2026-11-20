@@ -13,6 +13,7 @@ Grafana, then restarts the affected containers.
 """
 import argparse
 import html
+import ipaddress
 import json
 import os
 import subprocess
@@ -24,7 +25,9 @@ import zoneinfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import advisor  # noqa: E402
 import solar_setup as ss  # noqa: E402
+import weather  # noqa: E402
 
 STACK = "/opt/solar-monitor/stack"
 SETUP_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "solar_setup.py")
@@ -47,8 +50,15 @@ DEFAULT_SITE = {
                {"name": "", "panels": "", "panel_watts": "", "tilt": "", "azimuth": "180"}],
     "generator": "manual",
     "generator_kw": "",
+    "generator_fuel": "gasoline",
+    "future_generator_kw": "28",
     "low_soc_alert": "25",
+    "inverter_model": "6000xp",
+    "costs": {"battery_each": "", "panel_per_w": "", "inverter_each": "", "generator": "", "fuel_per_gal": ""},
 }
+COST_FIELDS = [("battery_each", "Price per battery ($)"), ("panel_per_w", "Panels, $ per watt (installed)"),
+               ("inverter_each", "Price per inverter ($)"), ("generator", "Automatic generator, installed ($)"),
+               ("fuel_per_gal", "Fuel price ($ per gallon)")]
 
 
 def path(*p):
@@ -70,10 +80,90 @@ def version():
         return "unknown"
 
 
+ADVISOR_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "advisor.py")
+weather_lock = threading.Lock()
+advisor_lock = threading.Lock()
+
+
+def weather_settings():
+    d = ss.load_json(path("state", "weather.json"), {})
+    d.setdefault("source", "openmeteo")
+    return d
+
+
+def save_weather(d):
+    ss.write_if_changed(path("state", "weather.json"), json.dumps(d, indent=2) + "\n", 0o644)
+
+
+def vm_push(solar, temp_c, source):
+    lines = []
+    ts = int(time.time() * 1000)
+    if solar is not None:
+        lines.append(f'site_solar_radiation_wm2{{source="{source}"}} {solar} {ts}')
+    if temp_c is not None:
+        lines.append(f'site_outdoor_temp_c{{source="{source}"}} {temp_c:.2f} {ts}')
+    if lines:
+        import urllib.request
+        req = urllib.request.Request(os.environ.get("SOLAR_VM", "http://127.0.0.1:8428") + "/api/v1/import/prometheus",
+                                     data=("\n".join(lines) + "\n").encode(), method="POST")
+        urllib.request.urlopen(req, timeout=10).read()
+        w = weather_settings()
+        w["last_push"] = time.strftime("%Y-%m-%d %H:%M")
+        w["last_push_reading"] = {"solar_wm2": solar, "temp_c": temp_c}
+        save_weather(w)
+
+
+def in_background(lock, fn):
+    if lock.acquire(blocking=False):
+        def run():
+            try:
+                fn()
+            finally:
+                lock.release()
+        threading.Thread(target=run, daemon=True).start()
+        return True
+    return False
+
+
+def probe_station(host):
+    w = weather_settings()
+    w.update(source="station", station={"host": host, "type": "", "name": ""}, probe=f"checking {host}...")
+    save_weather(w)
+    r = weather.probe(host)
+    w = weather_settings()
+    if r:
+        w["station"] = {k: r[k] for k in ("type", "host", "name")}
+        w["probe"] = f"found {r['type']} at {host}: {fmt_reading(r.get('reading'))}"
+    else:
+        w["probe"] = (f"no supported station answered at {host} (Ecowitt, WeatherLink Live or Tempest). If it can only push data, "
+                      "choose 'the station sends its data here' instead.")
+    save_weather(w)
+
+
+def scan_stations():
+    save_weather({**weather_settings(), "scan": {"status": "scanning", "found": []}})
+    found = weather.scan(ss.local_networks())
+    save_weather({**weather_settings(), "scan": {"status": "done", "when": time.strftime("%Y-%m-%d %H:%M"), "found": found}})
+
+
+def fmt_reading(r):
+    if not r:
+        return "no reading"
+    if r.get("error"):
+        return "error: " + r["error"]
+    parts = []
+    if r.get("solar_wm2") is not None:
+        parts.append(f"sun {r['solar_wm2']:.0f} W/m²")
+    if r.get("temp_c") is not None:
+        parts.append(f"{r['temp_c']:.1f} °C")
+    return ", ".join(parts) or "no solar reading"
+
+
 def load_site():
     site = ss.load_json(path("state", "site.json"), {})
     merged = json.loads(json.dumps(DEFAULT_SITE))
-    merged.update({k: v for k, v in site.items() if k != "arrays"})
+    merged.update({k: v for k, v in site.items() if k not in ("arrays", "costs")})
+    merged["costs"].update(site.get("costs") or {})
     if site.get("arrays"):
         empty = {"name": "", "panels": "", "panel_watts": "", "tilt": "", "azimuth": "180"}
         merged["arrays"] = (site["arrays"] + [empty, empty])[:2]
@@ -113,7 +203,11 @@ def validate(form):
         "battery_kwh_each": num(form, "battery_kwh_each", 0.5, 100),
         "generator": form.get("generator") if form.get("generator") in ("none", "manual", "automatic") else "manual",
         "generator_kw": num(form, "generator_kw", 1, 200, required=False),
+        "generator_fuel": form.get("generator_fuel") if form.get("generator_fuel") in ("gasoline", "propane", "diesel") else "gasoline",
+        "future_generator_kw": num(form, "future_generator_kw", 1, 200, required=False),
         "low_soc_alert": num(form, "low_soc_alert", 5, 80, integer=True),
+        "inverter_model": form.get("inverter_model") if form.get("inverter_model") in advisor.INVERTERS else "6000xp",
+        "costs": {k: num(form, f"cost_{k}", 0, 100000, required=False) for k, _ in COST_FIELDS},
         "arrays": [],
     }
     if site["time_zone"] not in zoneinfo.available_timezones():
@@ -247,6 +341,26 @@ def status_page(handler):
     kwp = round(sum(int(a["panels"] or 0) * int(a["panel_watts"] or 0) for a in site["arrays"]) / 1000, 2)
     summary = (f"{html.escape(site['name'])}: {kwh} kWh battery, {kwp} kW of panels, generator {html.escape(site['generator'])}, "
                f"time zone {html.escape(site['time_zone'])}") if site["_configured"] else "not set up yet"
+    wth = weather_settings()
+    st = wth.get("station") or {}
+    weather_line = {
+        "openmeteo": "Open-Meteo (online).",
+        "station": f"weather station {html.escape(st.get('type') or '?')} at {html.escape(st.get('host', '?'))}. {html.escape(wth.get('probe', ''))}",
+        "push": "the weather station sends its data here. " + (f"Last received {html.escape(wth['last_push'])}." if wth.get("last_push") else "Nothing received yet."),
+    }[wth["source"]] + " <a href='/setup'>change</a>"
+    sc = wth.get("scan") or {}
+    scan_rows = ""
+    if sc.get("status") == "scanning":
+        scan_rows = "<p><small>Scanning... refresh in a minute.</small></p>"
+    elif sc.get("status") == "done":
+        scan_rows = "".join(
+            f"<form method='post' action='/weather/use'><p>{html.escape(r.get('name') or r['type'])} at {html.escape(r['host'])} "
+            f"({html.escape(fmt_reading(r.get('reading')))}) <input type='hidden' name='host' value='{html.escape(r['host'])}'>"
+            f"<button>Use this station</button></p></form>" for r in sc.get("found", [])
+        ) or (f"<p><small>No station found ({html.escape(sc.get('when', ''))}). It may not have a local network interface; "
+              "enter its IP on the setup page, or set it to send its data here.</small></p>")
+    adv = ss.load_json(path("state", "advisor.json"), {})
+    adv_note = (f"last run {adv.get('generated')}: " + (adv.get("message") or (adv.get("recommendation") or [""])[0])) if adv else "not run yet (runs weekly)"
     body = f"""<h1>Solar monitor</h1>{banner}
 <div class="card"><b>Home Assistant</b>: <a href="http://{host}:8123">http://{host}:8123</a><br>
 <small>First visit: create your own account. The inverter data appears by itself (the MQTT integration is pre-configured).</small></div>
@@ -257,6 +371,11 @@ def status_page(handler):
 ({'releases' if upd['channel'] == 'release' else 'every change on main'}). {html.escape(ust.get('message', 'not checked yet'))}
 {('(' + html.escape(ust.get('checked', '')) + ')') if ust.get('checked') else ''}</small>
 <form method="post" action="/update" style="margin-top:8px"><button>Check for updates now</button></form></div>
+<div class="card"><b>Advisor</b>: <a href="/advisor">what would help most &mdash; batteries, panels, an inverter or an automatic generator</a>
+<br><small>{html.escape(adv_note)}</small></div>
+<div class="card" id="weather"><b>Sunlight data</b>: {weather_line}
+<form method="post" action="/weather/scan" style="margin-top:8px"><button>Scan for weather stations</button>
+<small>Looks for Ecowitt gateways and WeatherFlow Tempest hubs (about a minute).</small></form>{scan_rows}</div>
 <h2>Inverter dongles</h2>
 <table><tr><th>Datalog</th><th>Inverter serial</th><th>IP address</th><th>Last seen</th><th>Present</th></tr>{rows}</table>
 <form method="post" action="/rescan"><p><button>Scan now</button> <small>Last scan: {html.escape(scan.get('last_scan', 'never'))}.
@@ -285,6 +404,19 @@ def setup_page(site, error="", done=None):
     gen = "".join(f"<option value='{v}'{' selected' if site['generator'] == v else ''}>{t}</option>" for v, t in
                   (("none", "No generator"), ("manual", "Started by hand (e.g. portable generator + Chargeverter)"),
                    ("automatic", "Auto-start from the inverter's generator dry contact")))
+    inv_opts = "".join(f"<option value='{k}'{' selected' if site.get('inverter_model') == k else ''}>{v['name']} "
+                       f"({v['ac_kw']:g} kW out, {v['pv_kw']:g} kW solar in)</option>" for k, v in advisor.INVERTERS.items())
+    fuel_opts = "".join(f"<option value='{v}'{' selected' if site.get('generator_fuel') == v else ''}>{v.title()}</option>"
+                        for v in ("gasoline", "propane", "diesel"))
+    n_inv = len(ss.load_json(path("state", "inverters.json"), {}))
+    wth = weather_settings()
+    cost_inputs = "".join(f"<label>{t} {inp('cost_' + k, site['costs'].get(k, ''), 'text', chr(32) + 'inputmode=decimal')}</label>"
+                          for k, t in COST_FIELDS)
+    station_note = html.escape(wth.get("probe", "")) or "To find a station, use <i>Scan for weather stations</i> on the start page."
+    if wth["source"] == "push":
+        station_note = ("Set the station's custom server to this box: Ecowitt (WS View &rarr; Customized) protocol Ecowitt, "
+                        "path <code>/weather/ecowitt</code>, port 80; Ambient Weather path <code>/weather/ambient?</code>. "
+                        + (f"Last data received {html.escape(wth['last_push'])}." if wth.get("last_push") else "Nothing received yet."))
     msg = f"<p class='err'>{html.escape(error)}</p>" if error else ""
     if done:
         msg = "<div class='card'>Saved: " + html.escape("; ".join(done)) + ". <a href='/'>Back to the start page</a></div>"
@@ -305,8 +437,21 @@ def setup_page(site, error="", done=None):
 <small>EG4 LifePower4 48V 100Ah = 5.12 kWh; EG4 LL-S = 5.12 kWh; EG4 WallMount 280Ah = 14.3 kWh.</small>
 <label>Low battery alert at (%) {inp('low_soc_alert', site['low_soc_alert'], 'number', 'min=5 max=80')}</label></fieldset>
 {arrays}
+<fieldset><legend>Inverters</legend><label>Model <select name="inverter_model">{inv_opts}</select></label>
+<small>{n_inv} inverter dongle(s) found on the network. Used by the advisor for output, solar input and charging limits.</small></fieldset>
 <fieldset><legend>Generator</legend><label>How is the generator started? <select name="generator">{gen}</select></label>
-<label>Generator size in kW (optional) {inp('generator_kw', site['generator_kw'], 'text', "inputmode='decimal'")}</label></fieldset>
+<div class="row"><label>Generator size in kW (optional) {inp('generator_kw', site['generator_kw'], 'text', "inputmode='decimal'")}</label>
+<label>Fuel <select name="generator_fuel">{fuel_opts}</select></label></div>
+<label>Size of an automatic generator to compare against, kW {inp('future_generator_kw', site['future_generator_kw'], 'text', "inputmode='decimal'")}</label></fieldset>
+<fieldset><legend>Sunlight data (for the advisor)</legend>
+<label><input type="radio" name="weather_source" value="openmeteo" style="width:auto"{' checked' if wth['source'] == 'openmeteo' else ''}>
+ Open-Meteo (free online weather service; sends the site location)</label>
+<label><input type="radio" name="weather_source" value="station" style="width:auto"{' checked' if wth['source'] == 'station' else ''}>
+ Our weather station at IP address {inp('station_ip', (wth.get('station') or {}).get('host', ''), 'text', "placeholder='e.g. 192.168.1.40' style='max-width:200px'")}</label>
+<label><input type="radio" name="weather_source" value="push" style="width:auto"{' checked' if wth['source'] == 'push' else ''}>
+ The station sends its data here (Ecowitt "customized" upload or Ambient Weather custom server)</label>
+<small>{station_note}</small></fieldset>
+<fieldset><legend>Prices (optional, for the advisor's cost comparison)</legend><div class="row">{cost_inputs}</div></fieldset>
 <fieldset><legend>Updates</legend>
 <label><input type="checkbox" name="auto_update" value="1" style="width:auto"{' checked' if upd['enabled'] else ''}> Install new versions automatically (checked daily, early morning)</label>
 <label>Follow <select name="update_channel"><option value="release"{' selected' if upd['channel'] == 'release' else ''}>Releases (recommended)</option>
@@ -314,6 +459,48 @@ def setup_page(site, error="", done=None):
 <p><button>Save</button> &nbsp;<a href="/">Cancel</a></p></form>
 <p><small>Saving restarts Home Assistant (about a minute) when the location, time zone or sizes changed.</small></p>"""
     return page("Site setup", body)
+
+
+def advisor_page():
+    a = ss.load_json(path("state", "advisor.json"), {})
+    running = advisor_lock.locked()
+    btn = ("<p><small>Analysis running... refresh in a minute.</small></p>" if running else
+           "<form method='post' action='/advisor/run'><p><button>Run the analysis now</button> <small>It also runs every week.</small></p></form>")
+    e = html.escape
+    if not a:
+        return page("Advisor", f"<h1>Advisor</h1><p>Not run yet.</p>{btn}<p><a href='/'>Start page</a></p>")
+    if a.get("status") != "ok":
+        return page("Advisor", f"<h1>Advisor</h1><div class='card warn'>{e(a.get('message', a.get('status', '')))}</div>{btn}<p><a href='/'>Start page</a></p>")
+    d = a["data"]
+    rec = "".join(f"<li>{e(x)}</li>" for x in a.get("recommendation", []))
+    def v(x, unit=""):
+        return "&ndash;" if x is None else f"{x:g}{unit}" if isinstance(x, (int, float)) else e(str(x))
+    sc = "".join(
+        f"<tr><td>{e(r['name'])}</td><td>{v(r.get('shortfall', 0))}</td><td>{v(r.get('short_days', 0))}</td><td>{v(r.get('hours', 0))}</td>"
+        f"<td>{v(r.get('fuel', 0))}</td><td>{v(r.get('wasted', 0))}</td><td>{('$' + format(r['price'], ',')) if r.get('price') else '&ndash;'}</td>"
+        f"<td>{v(r.get('payback_years'))}</td></tr>" for r in a.get("scenarios", []))
+    mo = "".join(
+        f"<tr><td>{e(m['month'])}</td><td>{v(m['days'])}</td><td>{v(m['load_per_day'])}</td><td>{v(m['pv_per_day'])}</td>"
+        f"<td>{v(m['potential_per_day'])}</td><td>{v(m['lost_to_full_per_day'])}</td><td>{v(m['generator_kwh'])}</td>"
+        f"<td>{v(m['generator_starts'])}</td><td>{v(m['low_battery_days'])}</td></tr>" for m in a.get("months", []))
+    h = a.get("headroom", {})
+    ag = a.get("automatic_generator")
+    body = f"""<h1>Advisor</h1><p><small>Analysed {e(a['generated'])}: {v(d['days'])} days ({e(d['from'])} to {e(d['to'])}),
+sunlight from {e(a['source'])}{', calibrated ' + format(d['calibration'], '.2f') + ' on ' + str(d['calibration_samples']) + ' samples' if d.get('calibration') else ' (not calibrated yet)'}.
+Confidence: <b>{e(d['confidence'])}</b>.</small></p>
+<div class="card"><ul>{rec}</ul></div>{btn}
+<h2>Options compared</h2>
+<p><small>{e(a.get('period_note', ''))} "Short" is the energy the batteries would have lacked to stay above 20% without a generator;
+generator hours and fuel are what it takes to make that up ({e(a['site']['inverter'])} x{a['site']['inverters']}).</small></p>
+<table><tr><th>Option</th><th>Short kWh</th><th>Days short</th><th>Gen hours</th><th>Fuel gal</th><th>Solar wasted kWh</th><th>Cost</th><th>Payback yrs</th></tr>{sc}</table>
+{('<p><small>An automatic ' + format(ag['kw'], 'g') + ' kW generator would make up the shortfall in about ' + str(ag['hours']) + ' h (' + format(ag['starts'], 'g') + ' starts, ' + str(ag['fuel']) + ' gal propane), charging at ' + str(ag['charge_kw']) + ' kW.</small></p>') if ag else ''}
+<h2>Capacity</h2>
+<table><tr><td>House load</td><td>peak {v(h.get('peak_load_kw'))} kW, 99% of the time below {v(h.get('p99_load_kw'))} kW, inverter output {v(h.get('inverter_output_kw'))} kW</td></tr>
+<tr><td>Solar</td><td>array {v(h.get('array_kwp'))} kW, peak seen {v(h.get('peak_pv_kw'))} kW, inverters accept up to {v(h.get('pv_input_limit_kw'))} kW</td></tr></table>
+<h2>By month (per day averages)</h2>
+<table><tr><th>Month</th><th>Days</th><th>Load kWh</th><th>Solar used</th><th>Solar possible</th><th>Lost (full)</th><th>Generator kWh</th><th>Gen runs</th><th>Low days</th></tr>{mo}</table>
+<p><a href="/">Start page</a></p>"""
+    return page("Advisor", body)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -336,8 +523,16 @@ class Handler(BaseHTTPRequestHandler):
         return {k: v[0] for k, v in urllib.parse.parse_qs(raw, keep_blank_values=True).items()}
 
     def do_GET(self):
+        url = urllib.parse.urlsplit(self.path)
+        if url.path == "/weather/ambient":
+            # Ambient Weather "custom server": GET <path>?...&solarradiation=..&tempf=..
+            q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
+            self.weather_push(q, "ambient")
+            return
         if self.path == "/":
             self.send(200, status_page(self))
+        elif self.path == "/advisor":
+            self.send(200, advisor_page())
         elif self.path == "/setup":
             self.send(200, setup_page(load_site()))
         elif self.path == "/api/status":
@@ -360,6 +555,19 @@ class Handler(BaseHTTPRequestHandler):
             ss.write_if_changed(path("state", "update.json"), json.dumps(
                 {"enabled": f.get("auto_update") == "1", "channel": "main" if f.get("update_channel") == "main" else "release"}, indent=2) + "\n", 0o644)
             msgs = apply_site(site)
+            src = f.get("weather_source") if f.get("weather_source") in ("openmeteo", "station", "push") else "openmeteo"
+            ip = f.get("station_ip", "").strip()
+            w = weather_settings()
+            if src == "station" and ip and ip != (w.get("station") or {}).get("host"):
+                try:
+                    ipaddress.ip_address(ip)
+                    in_background(weather_lock, lambda: probe_station(ip))
+                    msgs.append(f"checking the weather station at {ip}")
+                except ValueError:
+                    msgs.append(f"'{ip}' is not an IP address; weather station not changed")
+            elif src != w["source"]:
+                w["source"] = src
+                save_weather(w)
             self.send(200, setup_page(load_site(), done=msgs))
         elif self.path == "/update":
             if os.path.exists(UPDATE_SCRIPT):
@@ -367,6 +575,24 @@ class Handler(BaseHTTPRequestHandler):
                 subprocess.run(["systemd-run", "--unit=solar-update-manual", "--collect", "--no-block",
                                 UPDATE_SCRIPT, "--manual"], capture_output=True)
             self.send(303, "", extra={"Location": "/"})
+        elif self.path == "/weather/ecowitt":
+            self.weather_push(self.form(), "ecowitt")  # Ecowitt "customized" upload, protocol Ecowitt (form POST)
+        elif self.path == "/weather/scan":
+            in_background(weather_lock, scan_stations)
+            self.send(303, "", extra={"Location": "/#weather"})
+        elif self.path == "/weather/use":
+            f = self.form()
+            host = f.get("host", "")
+            try:
+                ipaddress.ip_address(host)
+                in_background(weather_lock, lambda: probe_station(host))
+            except ValueError:
+                pass
+            self.send(303, "", extra={"Location": "/#weather"})
+        elif self.path == "/advisor/run":
+            in_background(advisor_lock, lambda: subprocess.run([sys.executable, ADVISOR_SCRIPT, "--stack", STACK], timeout=1800,
+                                                                 capture_output=True))
+            self.send(303, "", extra={"Location": "/advisor"})
         elif self.path == "/rescan":
             if scan_lock.acquire(blocking=False):
                 def run():
@@ -378,6 +604,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send(303, "", extra={"Location": "/"})
         else:
             self.send(404, "not found", "text/plain")
+
+    def weather_push(self, q, kind):
+        try:
+            solar = float(q["solarradiation"]) if q.get("solarradiation") not in (None, "") else None
+            tf = float(q["tempf"]) if q.get("tempf") not in (None, "") else None
+            if weather_settings().get("source") == "push":
+                vm_push(solar, weather.f_to_c(tf), kind)
+            self.send(200, "OK", "text/plain")
+        except (ValueError, OSError) as e:
+            self.send(400, f"bad data: {e}", "text/plain")
 
     def log_message(self, fmt, *a):
         sys.stderr.write("%s %s\n" % (self.address_string(), fmt % a))

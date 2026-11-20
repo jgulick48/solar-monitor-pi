@@ -1,0 +1,9 @@
+[Unit]
+Description=Solar monitor: analyse what would help most (batteries, panels, inverter, generator)
+After=solar-stack.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/solar-monitor/setup/advisor.py --stack /opt/solar-monitor/stack
+TimeoutStartSec=30min
+Nice=10

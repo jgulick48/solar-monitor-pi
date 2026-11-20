@@ -15,6 +15,7 @@ read, never changed.
 | VictoriaMetrics | Long-term history (5 years) of every inverter value | localhost only |
 | Grafana | Dashboards, viewable without logging in | `http://<pi>:3000` |
 | Home Assistant | Inverter entities (MQTT discovery), dashboards, alerts | `http://<pi>:8123` |
+| Advisor | Weekly analysis: batteries, panels, inverter or generator? | `http://<pi>/advisor` |
 
 ## Hardware
 
@@ -35,6 +36,43 @@ read, never changed.
 
 Give each dongle a fixed IP (DHCP reservation) in the router if you can. If a dongle's IP changes anyway,
 the hourly scan finds it again by its serial number.
+
+## Advisor
+
+The start page's **Advisor** answers "what would help this system most?" from the site's own history. It
+runs every week (Sunday night) or on demand:
+
+1. **Solar that could have been made**: sunlight on each array's tilt and direction, from a local weather
+   station or Open-Meteo, calibrated against the inverters' actual output while the batteries weren't
+   full. That shows the solar lost because the batteries were full, which the inverters' own readings hide.
+2. **What happened**: load, solar, lost solar, low battery days and generator charging by month, plus
+   charging the inverters didn't do themselves (a Chargeverter or other DC charger shows up as the
+   battery's BMS current being higher than the inverters' battery power).
+3. **Options compared**: the period is replayed with +1/+2/+4 batteries, +25/50/100% panels (capped at
+   the inverters' solar input, with an extra inverter where that limits it) and an automatic generator.
+   For each it shows the energy the batteries would have lacked to stay above 20% without a generator,
+   the days that happened, generator hours and fuel to make it up, wasted solar, and with prices from
+   the setup page, cost and payback.
+4. **Capacity**: peak house load against inverter output, and the array against the inverters' solar input.
+
+It needs a week of data for a first rough answer and a full winter before the batteries vs. panels
+question is reliable; the page says how confident it is.
+
+### Sunlight data
+
+Set on the setup page:
+- **Open-Meteo** (default): hourly irradiance for each array's tilt and direction from the free
+  Open-Meteo API, fetched by `solar-collector`. It sends the site's location to Open-Meteo and tends to
+  see more sun than a local meter on cloudy days.
+- **A weather station on the network**: *Scan for weather stations* on the start page finds Ecowitt
+  gateways/consoles (UDP discovery) and WeatherFlow Tempest hubs (UDP broadcasts); or enter its IP
+  (Ecowitt local HTTP API, Davis WeatherLink Live). Read every minute.
+- **A station that pushes its data**: point the station's custom server at the box. Ecowitt (WS View,
+  *Customized*, protocol Ecowitt): server = the box's IP, path `/weather/ecowitt`, port 80. Ambient
+  Weather: path `/weather/ambient?`.
+
+Tested against the ranch's year of data: the advisor's monthly figures match a hand analysis, and on
+90 days Open-Meteo found ~20-30% more possible solar than the local meter in Oct-Nov (same conclusion).
 
 ## Logging in to the Pi itself
 
@@ -84,6 +122,9 @@ Home Assistant, Grafana and the rest.
 - `tools/install.sh` installs everything under `/opt/solar-monitor` on a Debian / Raspberry Pi OS host
   with Docker; the image build and the updater use it.
 - `tools/update.sh` (`solar-update.timer`) is the updater described above.
+- `setup/weather.py` finds and reads weather stations; `setup/collector.py` (`solar-collector.service`)
+  stores station and Open-Meteo sunlight in VictoriaMetrics; `setup/advisor.py` (`solar-advisor.timer`)
+  is the advisor.
 - `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the
   root partition, installs Docker, avahi (`solar-monitor.local`) and unattended-upgrades in a chroot, runs
   the installer and stores the arm64 container images in the image so the first boot works offline
