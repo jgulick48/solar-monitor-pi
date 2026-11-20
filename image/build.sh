@@ -2,7 +2,7 @@
 # Build the solar monitor SD/SSD image from Raspberry Pi OS Lite (arm64).
 #
 # Runs as root on a Linux host (or a --privileged container with /dev mounted)
-# that can execute arm64 binaries (binfmt_misc qemu-aarch64 with the F flag).
+# that is arm64 or can execute arm64 binaries (binfmt_misc qemu-aarch64, F flag).
 # Needs: curl xz-utils parted e2fsprogs util-linux skopeo rsync.
 #
 #   sudo image/build.sh [output-dir]
@@ -31,8 +31,10 @@ cleanup() {
 trap cleanup EXIT
 
 # arm64 emulation: in a container binfmt_misc may not be mounted even though the host registered qemu-aarch64 (F flag)
-[ -e /proc/sys/fs/binfmt_misc/status ] || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
-[ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] || { echo "arm64 emulation (binfmt qemu-aarch64) is not available" >&2; exit 1; }
+if [ "$(uname -m)" != aarch64 ]; then
+  [ -e /proc/sys/fs/binfmt_misc/status ] || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
+  [ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] || { echo "arm64 emulation (binfmt qemu-aarch64) is not available" >&2; exit 1; }
+fi
 
 echo "== Raspberry Pi OS Lite $RASPIOS_VERSION"
 mkdir -p "$REPO/.cache"
