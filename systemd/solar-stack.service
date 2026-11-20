@@ -1,0 +1,16 @@
+[Unit]
+Description=Solar monitor: Docker Compose stack
+Requires=docker.service
+After=docker.service solar-setup.service
+Wants=solar-setup.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/solar-monitor/stack
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose stop
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target

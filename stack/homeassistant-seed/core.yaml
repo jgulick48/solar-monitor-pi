@@ -1,0 +1,2 @@
+# Replaced by the setup page once the site details are entered.
+packages: !include_dir_named packages

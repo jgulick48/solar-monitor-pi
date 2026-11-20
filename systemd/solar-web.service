@@ -1,0 +1,11 @@
+[Unit]
+Description=Solar monitor: start page and setup form (port 80)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/solar-monitor/setup/solar_web.py --stack /opt/solar-monitor/stack --port 80
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

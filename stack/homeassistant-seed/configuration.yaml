@@ -1,0 +1,17 @@
+# Solar monitor Home Assistant configuration.
+# Core settings (name, location, time zone, units) come from core.yaml, which
+# the setup page writes (http://<this box>/setup). Site-specific helpers,
+# dashboards and automations live in packages/.
+default_config:
+
+homeassistant: !include core.yaml
+
+recorder:
+  # Long-term history lives in VictoriaMetrics/Grafana and HA's statistics;
+  # keep the detailed state history short to spare the SSD.
+  purge_keep_days: 14
+  commit_interval: 30
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
