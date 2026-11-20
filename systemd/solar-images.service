@@ -1,0 +1,16 @@
+[Unit]
+Description=Solar monitor: load the container images shipped with the image (first boot)
+Requires=docker.service
+# Load only after Raspberry Pi OS has grown the root filesystem to fill the SSD
+# (the archives plus the loaded images need ~8 GB; the image ships with ~2 GB free).
+After=docker.service rpi-resize.service systemd-growfs-root.service
+Before=solar-stack.service
+ConditionPathExistsGlob=/opt/solar-monitor/images/*.tar
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for f in /opt/solar-monitor/images/*.tar; do docker load -i "$f" && rm -f "$f"; done'
+TimeoutStartSec=30min
+
+[Install]
+WantedBy=multi-user.target

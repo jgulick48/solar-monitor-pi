@@ -36,6 +36,37 @@ read, never changed.
 Give each dongle a fixed IP (DHCP reservation) in the router if you can. If a dongle's IP changes anyway,
 the hourly scan finds it again by its serial number.
 
+## Logging in to the Pi itself
+
+Not needed for normal use. The image has an admin account `solar` with no password and SSH turned off.
+To get a shell, power off, put the SSD in a computer and create two files on the `bootfs` partition:
+an empty file named `ssh`, and `userconf.txt` containing `solar:<hash>` where the hash comes from
+`openssl passwd -6`. On the next boot SSH is on and `solar` has that password.
+
+## Updates
+
+- **The solar monitor** checks GitHub once a day (between 03:30 and 05:30) and installs a newer
+  **release**. Updates only follow published releases, not every commit, so nothing reaches a box until
+  you publish one. It downloads the release, reinstalls the files and units, pulls any new container
+  images and restarts the stack. If every container isn't running and the start page isn't answering
+  two minutes later, it puts the previous version back. The box's own settings, passwords and history
+  are never touched.
+- The start page shows the version and the last update result, and has a **Check for updates now**
+  button. Automatic updates can be turned off, or switched to follow every commit on `main` (for a
+  test box), on the setup page.
+- **The operating system** installs Debian security updates by itself (`unattended-upgrades`).
+
+### Publishing a release
+
+1. Merge the changes to `main`.
+2. Create a release with a new tag, e.g. `v0.2.0`:
+   `gh release create v0.2.0 --repo jgulick48/solar-monitor-pi --generate-notes`
+3. Boxes pick it up within a day. To build a fresh image for it, check out the tag and run
+   `sudo image/build.sh`; the image reports the tag as its version.
+
+Container versions are pinned in `stack/compose.yaml`; bump them there (and release) to update
+Home Assistant, Grafana and the rest.
+
 ## How it works
 
 - `setup/solar_setup.py` runs at boot (`solar-setup.service`) and hourly (`solar-setup.timer`). It sweeps
@@ -51,7 +82,12 @@ the hourly scan finds it again by its serial number.
   the system and Grafana time zone, and restarts what changed.
 - `stack/compose.yaml` runs the containers (`solar-stack.service`).
 - `tools/install.sh` installs everything under `/opt/solar-monitor` on a Debian / Raspberry Pi OS host
-  with Docker; the image build uses it.
+  with Docker; the image build and the updater use it.
+- `tools/update.sh` (`solar-update.timer`) is the updater described above.
+- `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the
+  root partition, installs Docker, avahi (`solar-monitor.local`) and unattended-upgrades in a chroot, runs
+  the installer and stores the arm64 container images in the image so the first boot works offline
+  (`solar-images.service` loads them). It needs root and arm64 emulation (binfmt `qemu-aarch64`).
 
 ## Development
 
@@ -72,7 +108,7 @@ Tested on an amd64 Docker host against an EG4 18kPV dongle: discovery, bridge, b
 Grafana, Home Assistant (185 inverter entities by MQTT discovery) and the setup form all work.
 
 To do:
-- Pi image build (pi-gen) with the containers pre-loaded, `solar-monitor.local` via mDNS.
+- First boot of the image on a real Raspberry Pi 4.
 - Home Assistant dashboards and alerts (low battery, inverter faults, dongle offline), the solar forecast,
   and the "start the generator before dark" check for sites with a manual generator.
 - EG4 6000XP: confirm the bridge's register map against a real 6000XP.

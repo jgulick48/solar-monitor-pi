@@ -55,6 +55,21 @@ def path(*p):
     return os.path.join(STACK, *p)
 
 
+UPDATE_SCRIPT = "/opt/solar-monitor/src/tools/update.sh"
+
+
+def update_settings():
+    d = ss.load_json(path("state", "update.json"), {})
+    return {"enabled": d.get("enabled", True), "channel": d.get("channel", "release") if d.get("channel") in ("release", "main") else "release"}
+
+
+def version():
+    try:
+        return open(os.path.join(os.path.dirname(STACK), "VERSION")).read().strip()
+    except OSError:
+        return "unknown"
+
+
 def load_site():
     site = ss.load_json(path("state", "site.json"), {})
     merged = json.loads(json.dumps(DEFAULT_SITE))
@@ -218,6 +233,8 @@ def status_page(handler):
     inv = ss.load_json(path("state", "inverters.json"), {})
     scan = ss.load_json(path("state", "scan.json"), {})
     sec = ss.load_json(path("state", "secrets.json"), {})
+    upd = update_settings()
+    ust = ss.load_json(path("state", "update-status.json"), {})
     rows = "".join(
         f"<tr><td>{html.escape(dl)}</td><td>{html.escape(i.get('serial') or 'not seen yet')}</td>"
         f"<td>{html.escape(i.get('host', ''))}</td><td>{html.escape(i.get('last_seen', ''))}</td>"
@@ -236,6 +253,10 @@ def status_page(handler):
 <div class="card"><b>Grafana</b>: <a href="http://{host}:3000">http://{host}:3000</a> &nbsp;<small>dashboards are visible without logging in</small><br>
 <small>Admin login (only to change dashboards): user <code>admin</code>, password <code>{html.escape(sec.get('grafana_admin', ''))}</code></small></div>
 <div class="card"><b>Site</b>: {summary} &nbsp;<a href="/setup">change</a></div>
+<div class="card"><b>Version</b> {html.escape(version())} &nbsp;<small>automatic updates {'on' if upd['enabled'] else '<b>off</b>'}
+({'releases' if upd['channel'] == 'release' else 'every change on main'}). {html.escape(ust.get('message', 'not checked yet'))}
+{('(' + html.escape(ust.get('checked', '')) + ')') if ust.get('checked') else ''}</small>
+<form method="post" action="/update" style="margin-top:8px"><button>Check for updates now</button></form></div>
 <h2>Inverter dongles</h2>
 <table><tr><th>Datalog</th><th>Inverter serial</th><th>IP address</th><th>Last seen</th><th>Present</th></tr>{rows}</table>
 <form method="post" action="/rescan"><p><button>Scan now</button> <small>Last scan: {html.escape(scan.get('last_scan', 'never'))}.
@@ -245,6 +266,7 @@ Scanning takes up to two minutes. Give each dongle a fixed IP (DHCP reservation)
 
 
 def setup_page(site, error="", done=None):
+    upd = update_settings()
     def inp(name, value, typ="text", extra=""):
         return f"<input name='{name}' type='{typ}' value='{html.escape(str(value))}' {extra}>"
     tzs = "".join(f"<option{' selected' if z == site['time_zone'] else ''}>{z}</option>"
@@ -285,6 +307,10 @@ def setup_page(site, error="", done=None):
 {arrays}
 <fieldset><legend>Generator</legend><label>How is the generator started? <select name="generator">{gen}</select></label>
 <label>Generator size in kW (optional) {inp('generator_kw', site['generator_kw'], 'text', "inputmode='decimal'")}</label></fieldset>
+<fieldset><legend>Updates</legend>
+<label><input type="checkbox" name="auto_update" value="1" style="width:auto"{' checked' if upd['enabled'] else ''}> Install new versions automatically (checked daily, early morning)</label>
+<label>Follow <select name="update_channel"><option value="release"{' selected' if upd['channel'] == 'release' else ''}>Releases (recommended)</option>
+<option value="main"{' selected' if upd['channel'] == 'main' else ''}>Every change on main (test boxes)</option></select></label></fieldset>
 <p><button>Save</button> &nbsp;<a href="/">Cancel</a></p></form>
 <p><small>Saving restarts Home Assistant (about a minute) when the location, time zone or sizes changed.</small></p>"""
     return page("Site setup", body)
@@ -331,8 +357,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(400, setup_page(cur, str(e)))
                 return
             ss.write_if_changed(path("state", "site.json"), json.dumps(site, indent=2) + "\n", 0o644)
+            ss.write_if_changed(path("state", "update.json"), json.dumps(
+                {"enabled": f.get("auto_update") == "1", "channel": "main" if f.get("update_channel") == "main" else "release"}, indent=2) + "\n", 0o644)
             msgs = apply_site(site)
             self.send(200, setup_page(load_site(), done=msgs))
+        elif self.path == "/update":
+            if os.path.exists(UPDATE_SCRIPT):
+                # Its own systemd unit: the update restarts this web service, which must not take the update with it.
+                subprocess.run(["systemd-run", "--unit=solar-update-manual", "--collect", "--no-block",
+                                UPDATE_SCRIPT, "--manual"], capture_output=True)
+            self.send(303, "", extra={"Location": "/"})
         elif self.path == "/rescan":
             if scan_lock.acquire(blocking=False):
                 def run():
