@@ -1,0 +1,14 @@
+[Unit]
+Description=Solar monitor: load the container images shipped with the image (first boot)
+Requires=docker.service
+After=docker.service
+Before=solar-stack.service
+ConditionPathExistsGlob=/opt/solar-monitor/images/*.tar
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for f in /opt/solar-monitor/images/*.tar; do docker load -i "$f" && rm -f "$f"; done'
+TimeoutStartSec=30min
+
+[Install]
+WantedBy=multi-user.target

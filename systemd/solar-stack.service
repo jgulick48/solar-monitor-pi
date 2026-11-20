@@ -1,7 +1,7 @@
 [Unit]
 Description=Solar monitor: Docker Compose stack
 Requires=docker.service
-After=docker.service solar-setup.service
+After=docker.service solar-images.service solar-setup.service
 Wants=solar-setup.service
 
 [Service]

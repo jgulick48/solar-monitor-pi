@@ -1,0 +1,9 @@
+[Unit]
+Description=Solar monitor: install a newer release from GitHub
+Wants=network-online.target
+After=network-online.target solar-stack.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/solar-monitor/src/tools/update.sh
+TimeoutStartSec=1h
