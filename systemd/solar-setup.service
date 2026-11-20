@@ -1,0 +1,13 @@
+[Unit]
+Description=Solar monitor: find inverter dongles and write the stack config
+Wants=network-online.target
+After=network-online.target docker.service
+Before=solar-stack.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/solar-monitor/setup/solar_setup.py --stack /opt/solar-monitor/stack --apply
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target

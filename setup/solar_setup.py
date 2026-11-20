@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+"""solar-setup: find EG4/LuxPower WiFi dongles on the LAN and configure the stack.
+
+Runs at every boot (before the stack starts) and hourly. Standard library only.
+
+  * Scans the local IPv4 networks for TCP port 8000 and identifies LuxPower
+    dataloggers by listening to the frames they send (heartbeats carry the
+    datalog serial, replies to the EG4 cloud's polls carry the inverter
+    serial). If nothing is polling a dongle, one read-only request (function 4,
+    input registers 0-39, placeholder inverter serial) gets the inverter
+    serial. Nothing is ever written to an inverter.
+  * Remembers dongles by datalog serial, so a dongle that gets a new IP from
+    DHCP is found again.
+  * Generates per-box secrets on first run (MQTT accounts, Grafana admin).
+  * Writes the bridge config, the Mosquitto password file, Grafana's .env and
+    the Home Assistant seed (first run only). The setup page (solar_web.py)
+    shows the result and collects the site details.
+  * With --apply, restarts the bridge when its config changed.
+"""
+import argparse
+import base64
+import concurrent.futures
+import datetime
+import hashlib
+import ipaddress
+import json
+import os
+import secrets
+import shutil
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+PORT = 8000
+FRAME_MAGIC = b"\xa1\x1a"
+TCP_HEARTBEAT = 0xC1
+TCP_TRANSLATED = 0xC2
+
+
+def log(*a):
+    print(time.strftime("%Y-%m-%d %H:%M:%S"), *a, flush=True)
+
+
+# --------------------------------------------------------------------------
+# LuxPower framing
+# --------------------------------------------------------------------------
+def crc16_modbus(data: bytes) -> int:
+    crc = 0xFFFF
+    for b in data:
+        crc ^= b
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+    return crc
+
+
+def read_input_request(datalog: bytes, serial: bytes = b"0000000000", reg: int = 0, count: int = 40) -> bytes:
+    """Read-only request: device function 4 (read input registers)."""
+    data = bytes([0, 4]) + serial + struct.pack("<HH", reg, count)
+    data += struct.pack("<H", crc16_modbus(data))
+    payload = bytes([1, TCP_TRANSLATED]) + datalog + struct.pack("<H", len(data)) + data
+    return bytes([0xA1, 0x1A, 1, 0]) + struct.pack("<H", len(payload)) + payload
+
+
+def parse_frames(buf: bytes):
+    """Yield (tcp_function, datalog, inverter_serial_or_None) for complete frames."""
+    i = 0
+    while i + 6 <= len(buf):
+        if buf[i:i + 2] != FRAME_MAGIC:
+            i += 1
+            continue
+        length = struct.unpack("<H", buf[i + 4:i + 6])[0]
+        frame = buf[i:i + 6 + length]
+        if len(frame) < 6 + length or length < 12:
+            break
+        i += 6 + length
+        func = frame[7]
+        datalog = frame[8:18]
+        serial = None
+        if func == TCP_TRANSLATED and len(frame) >= 32:
+            serial = frame[22:32]
+        yield func, datalog, serial
+
+
+def printable_serial(b) -> str:
+    if not b:
+        return ""
+    s = b.decode("ascii", errors="replace")
+    return s if s.isalnum() and len(s) == 10 else ""
+
+
+def identify(host: str, listen_s: float = 75.0, probe_after_s: float = 20.0):
+    """Return {'host', 'datalog', 'serial'} or None if host isn't a LuxPower dongle."""
+    try:
+        sock = socket.create_connection((host, PORT), timeout=3)
+    except OSError:
+        return None
+    sock.settimeout(1.0)
+    buf = b""
+    datalog = serial = ""
+    probed = False
+    start = time.time()
+    try:
+        while time.time() - start < listen_s:
+            try:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+            except socket.timeout:
+                pass
+            for func, dl, sn in parse_frames(buf):
+                datalog = datalog or printable_serial(dl)
+                if sn and printable_serial(sn) and printable_serial(sn) != "0000000000":
+                    serial = printable_serial(sn)
+            if datalog and serial:
+                break
+            if datalog and not serial and not probed and time.time() - start > probe_after_s:
+                sock.sendall(read_input_request(datalog.encode()))
+                probed = True
+            if len(buf) > 65536:
+                buf = buf[-8192:]
+    except OSError:
+        pass
+    finally:
+        sock.close()
+    if not datalog:
+        return None
+    return {"host": host, "datalog": datalog, "serial": serial}
+
+
+# --------------------------------------------------------------------------
+# Network scan
+# --------------------------------------------------------------------------
+def local_networks(max_prefix: int = 22):
+    out = subprocess.run(["ip", "-j", "-4", "addr"], capture_output=True, text=True, check=True).stdout
+    nets = []
+    for iface in json.loads(out):
+        name = iface.get("ifname", "")
+        if name == "lo" or name.startswith(("docker", "br-", "veth", "cni", "flannel", "tailscale")):
+            continue
+        for a in iface.get("addr_info", []):
+            net = ipaddress.ip_network(f"{a['local']}/{a['prefixlen']}", strict=False)
+            if net.prefixlen < max_prefix:  # don't sweep huge networks; scan the /22 around us
+                net = ipaddress.ip_network(f"{a['local']}/{max_prefix}", strict=False)
+            if net.is_private and net not in nets:
+                nets.append(net)
+    return nets
+
+
+def port_open(host: str, timeout: float = 0.6) -> bool:
+    try:
+        with socket.create_connection((host, PORT), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def scan(networks, extra_hosts):
+    hosts = list(dict.fromkeys(extra_hosts + [str(h) for n in networks for h in n.hosts()]))
+    log(f"scanning {len(hosts)} addresses on port {PORT} ({', '.join(map(str, networks)) or 'no networks'})")
+    with concurrent.futures.ThreadPoolExecutor(128) as ex:
+        open_hosts = [h for h, ok in zip(hosts, ex.map(port_open, hosts)) if ok]
+    log(f"port {PORT} open on: {', '.join(open_hosts) or 'none'}")
+    found = []
+    with concurrent.futures.ThreadPoolExecutor(16) as ex:
+        for r in ex.map(identify, open_hosts):
+            if r:
+                found.append(r)
+                log(f"dongle {r['datalog']} at {r['host']}, inverter {r['serial'] or '(serial not seen yet)'}")
+    return found
+
+
+# --------------------------------------------------------------------------
+# Generated files
+# --------------------------------------------------------------------------
+def mosquitto_hash(password: str) -> str:
+    """Mosquitto 2.x password file entry ($7$: PBKDF2-SHA512, 101 iterations)."""
+    salt = os.urandom(12)
+    dk = hashlib.pbkdf2_hmac("sha512", password.encode(), salt, 101, 64)
+    return f"$7$101${base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
+
+
+def write_if_changed(path: str, content: str, mode: int = 0o644) -> bool:
+    try:
+        with open(path) as f:
+            if f.read() == content:
+                return False
+    except FileNotFoundError:
+        pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(content)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+    return True
+
+
+def compose_cmd(stack):
+    """docker compose for the stack; SOLAR_COMPOSE overrides (e.g. a containerised compose for tests)."""
+    base = os.environ.get("SOLAR_COMPOSE", "docker compose").split()
+    return base + ["--project-directory", stack]
+
+
+def load_json(path, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return default
+
+
+def ensure_secrets(stack):
+    path = os.path.join(stack, "state", "secrets.json")
+    s = load_json(path, {})
+    changed = False
+    for key in ("mqtt_bridge", "mqtt_homeassistant", "grafana_admin"):
+        if not s.get(key):
+            s[key] = secrets.token_urlsafe(18)
+            changed = True
+    if changed:
+        write_if_changed(path, json.dumps(s, indent=2) + "\n", 0o600)
+    passwd = os.path.join(stack, "mosquitto", "passwd")
+    if not os.path.exists(passwd) or changed:
+        lines = [f"bridge:{mosquitto_hash(s['mqtt_bridge'])}", f"homeassistant:{mosquitto_hash(s['mqtt_homeassistant'])}"]
+        if os.geteuid() == 0:
+            # Mosquitto runs as uid/gid 1883 in its image and wants to own a 0600 file.
+            write_if_changed(passwd, "\n".join(lines) + "\n", 0o600)
+            os.chown(passwd, 1883, 1883)
+        else:
+            write_if_changed(passwd, "\n".join(lines) + "\n", 0o644)  # dev runs: can't chown, keep it readable
+    return s
+
+
+def host_timezone():
+    try:
+        return open("/etc/timezone").read().strip() or "UTC"
+    except OSError:
+        link = os.path.realpath("/etc/localtime")
+        return link.split("zoneinfo/", 1)[1] if "zoneinfo/" in link else "UTC"
+
+
+def load_env_text(sec, tz):
+    return (
+        "# Generated by solar-setup\n"
+        "GF_SECURITY_ADMIN_USER=admin\n"
+        f"GF_SECURITY_ADMIN_PASSWORD={sec['grafana_admin']}\n"
+        f"TZ={tz}\n"
+    )
+
+
+def site_timezone(stack):
+    tz = load_json(os.path.join(stack, "state", "site.json"), {}).get("time_zone")
+    return tz or host_timezone()
+
+
+def write_env(stack, sec):
+    return write_if_changed(os.path.join(stack, ".env"), load_env_text(sec, site_timezone(stack)), 0o600)
+
+
+def lan_ip():
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 9))  # no packet is sent; picks the outgoing interface
+            return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
+def write_bridge_config(stack, inverters, sec):
+    # JSON is valid YAML, so no YAML library is needed.
+    cfg = {
+        "loglevel": "info",
+        "read_only": True,
+        "inverters": [
+            {
+                "enabled": True,
+                "host": inv["host"],
+                "port": PORT,
+                "datalog": dl,
+                "serial": inv.get("serial") or "0000000000",
+                "read_timeout": "300s",
+                "short_read": "10s",
+                "long_read": "30s",
+                "hold_read": "15m",
+                "health_check_duration": "5m",
+            }
+            for dl, inv in sorted(inverters.items())
+        ],
+        "mqtt": {
+            "enabled": True,
+            "host": "mosquitto",
+            "port": 1883,
+            "username": "bridge",
+            "password": sec["mqtt_bridge"],
+            "namespace": "lxp",
+            "homeassistant": {"enabled": True, "prefix": "homeassistant"},
+        },
+        "statsd": {"server": ""},
+        "prometheus": {"enabled": True},
+    }
+    header = "# Generated by solar-setup from the discovered dongles; edits are overwritten.\n"
+    return write_if_changed(os.path.join(stack, "bridge", "config.yml"), header + json.dumps(cfg, indent=2) + "\n", 0o644)
+
+
+def seed_homeassistant(stack, sec):
+    """First run only: copy the seed config and pre-create the MQTT integration."""
+    ha = os.path.join(stack, "homeassistant")
+    entries = os.path.join(ha, ".storage", "core.config_entries")
+    if os.path.exists(entries):
+        return False
+    seed = os.path.join(stack, "homeassistant-seed")
+    if os.path.isdir(seed):
+        shutil.copytree(seed, ha, dirs_exist_ok=True)
+    os.makedirs(os.path.dirname(entries), exist_ok=True)
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    mqtt_entry = {
+        "created_at": now,
+        "data": {"broker": "127.0.0.1", "port": 1883, "username": "homeassistant",
+                 "password": sec["mqtt_homeassistant"], "protocol": "5"},
+        "disabled_by": None,
+        "discovery_keys": {},
+        "domain": "mqtt",
+        "entry_id": secrets.token_hex(16),
+        "minor_version": 1,
+        "modified_at": now,
+        "options": {"discovery": True, "discovery_prefix": "homeassistant",
+                    "birth_message": {"topic": "homeassistant/status", "payload": "online", "qos": 0, "retain": False},
+                    "will_message": {"topic": "homeassistant/status", "payload": "offline", "qos": 0, "retain": False}},
+        "pref_disable_new_entities": False,
+        "pref_disable_polling": False,
+        "source": "user",
+        "subentries": [],
+        "title": "Solar monitor broker",
+        "unique_id": None,
+        "version": 2,
+    }
+    doc = {"version": 1, "minor_version": 5, "key": "core.config_entries", "data": {"entries": [mqtt_entry]}}
+    write_if_changed(entries, json.dumps(doc, indent=2) + "\n", 0o600)
+    log("Home Assistant seeded (MQTT integration pre-configured)")
+    return True
+
+
+# --------------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--stack", default="/opt/solar-monitor/stack")
+    ap.add_argument("--host", action="append", default=[], help="extra address to check (repeatable)")
+    ap.add_argument("--no-scan", action="store_true", help="skip the LAN sweep, only check known and --host addresses")
+    ap.add_argument("--apply", action="store_true", help="restart the bridge if its config changed")
+    args = ap.parse_args()
+
+    stack = args.stack
+    state_path = os.path.join(stack, "state", "inverters.json")
+    inverters = load_json(state_path, {})
+    sec = ensure_secrets(stack)
+    write_env(stack, sec)
+    seed_homeassistant(stack, sec)
+
+    known_hosts = [inv["host"] for inv in inverters.values()]
+    nets = [] if args.no_scan else local_networks()
+    found = scan(nets, args.host + known_hosts)
+    now = time.strftime("%Y-%m-%d %H:%M")
+    for inv in inverters.values():
+        inv["present"] = False
+    for r in found:
+        cur = inverters.setdefault(r["datalog"], {})
+        if cur.get("host") and cur["host"] != r["host"]:
+            log(f"dongle {r['datalog']} moved {cur['host']} -> {r['host']}")
+        cur.update(host=r["host"], last_seen=now, present=True)
+        if r["serial"]:
+            cur["serial"] = r["serial"]
+    inverters_meta = {"last_scan": now}
+    write_if_changed(state_path, json.dumps(inverters, indent=2) + "\n", 0o644)
+    write_if_changed(os.path.join(stack, "state", "scan.json"), json.dumps(inverters_meta) + "\n", 0o644)
+
+    changed = write_bridge_config(stack, inverters, sec)
+    log(f"{len(inverters)} dongle(s) configured; bridge config {'changed' if changed else 'unchanged'}")
+    if changed and args.apply:
+        r = subprocess.run(compose_cmd(stack) + ["restart", "bridge"], capture_output=True, text=True)
+        log("bridge restarted" if r.returncode == 0 else f"bridge restart failed: {r.stderr.strip()}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

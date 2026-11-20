@@ -1,0 +1,6 @@
+# generated per box by solar-setup
+.env
+bridge/config.yml
+mosquitto/passwd
+homeassistant/
+state/

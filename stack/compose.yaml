@@ -1,0 +1,75 @@
+# Solar monitor stack. Started by solar-stack.service after solar-setup has
+# written the generated files (.env, bridge/config.yml, mosquitto/passwd).
+# The setup page (setup/solar_web.py) runs on the host on port 80.
+name: solar
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd
+      - mosquitto-data:/mosquitto/data
+    ports:
+      # Home Assistant runs on the host network and connects here; not exposed to the LAN.
+      - "127.0.0.1:1883:1883"
+
+  bridge:
+    image: jgulick48/lxp-bridge-go:2026.11.15-0734
+    restart: unless-stopped
+    command: ["-configFile", "/config/config.yml"]
+    volumes:
+      - ./bridge/config.yml:/config/config.yml:ro
+    depends_on: [mosquitto]
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.156.0
+    restart: unless-stopped
+    command:
+      - -retentionPeriod=5y
+      - -storageDataPath=/storage
+      - -promscrape.config=/etc/vm/scrape.yml
+      - -httpListenAddr=:8428
+    volumes:
+      - ./victoriametrics/scrape.yml:/etc/vm/scrape.yml:ro
+      - vm-data:/storage
+    ports:
+      - "127.0.0.1:8428:8428"
+
+  grafana:
+    image: grafana/grafana:13.3.1
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/solar-overview.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on: [victoriametrics]
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2026.11.2
+    restart: unless-stopped
+    network_mode: host
+    # Bluetooth adapter management (BLE sensors such as tank gauges)
+    cap_add: [NET_ADMIN, NET_RAW]
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./homeassistant:/config
+      - /etc/localtime:/etc/localtime:ro
+    depends_on: [mosquitto]
+
+volumes:
+  mosquitto-data:
+  vm-data:
+  grafana-data:
