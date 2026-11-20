@@ -1,0 +1,49 @@
+# Builds the Raspberry Pi image for every published release and attaches it
+# to the release. Runs on GitHub's native arm64 runner (no emulation needed).
+# Can also be run by hand (Actions -> Build image -> Run workflow); a manual
+# run uploads the image as a workflow artifact instead.
+name: Build image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q curl xz-utils parted e2fsprogs util-linux skopeo rsync fdisk
+
+      - name: Build
+        env:
+          SOLAR_VERSION: ${{ github.event.release.tag_name || '' }}
+        run: |
+          [ -n "$SOLAR_VERSION" ] || unset SOLAR_VERSION
+          sudo --preserve-env=SOLAR_VERSION image/build.sh "$PWD/out"
+          ls -lh out
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" out/*.img.xz out/*.img.xz.sha256 --clobber
+
+      - name: Upload artifact (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: solar-monitor-pi-image
+          path: out/*
+          retention-days: 14
