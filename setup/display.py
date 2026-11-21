@@ -607,10 +607,11 @@ background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot
 #wx{display:none;background:var(--panel);border-radius:14px;padding:calc(var(--u)*.8) calc(var(--u)*1.1);gap:calc(var(--u)*.6);flex-direction:column}
 #wx.on{display:flex}
 #wxtop{display:flex;gap:calc(var(--u)*1.4);align-items:center;min-width:0}
-#wxnow{display:flex;align-items:center;gap:calc(var(--u)*.8);flex:none}
+#wxnow{display:flex;align-items:center;gap:calc(var(--u)*.8);flex:0 1 auto;min-width:0;max-width:64%}
 #wxnow .t{font-size:calc(var(--u)*3.6);font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
-#wxnow .d{font-size:calc(var(--u)*1.05);color:var(--muted);line-height:1.35;white-space:nowrap}
-#wxnow .d b{color:var(--fg);font-weight:600}
+#wxnow .d{font-size:calc(var(--u)*1.05);color:var(--muted);line-height:1.35;min-width:0}
+#wxnow .d b{color:var(--fg);font-weight:600}#wxnow .d i{font-style:normal;white-space:nowrap}
+#wrap:not(.nocam) #wxnow .t{font-size:calc(var(--u)*3)}#wrap:not(.nocam) #wxnow .wi{width:calc(var(--u)*3.2);height:calc(var(--u)*3.2)}
 .wi{width:calc(var(--u)*4.2);height:calc(var(--u)*4.2);flex:none}.wi.s{width:calc(var(--u)*2.2);height:calc(var(--u)*2.2)}
 .wa{width:calc(var(--u)*1.1);height:calc(var(--u)*1.1);vertical-align:-.15em;fill:var(--fg)}
 #wxdays,#wxhours{display:grid;gap:calc(var(--u)*.4);flex:1;min-width:0}
@@ -619,7 +620,7 @@ background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot
 #wrap:not(.nocam) #wxhours,#wx.tight #wxhours{display:none !important}
 .wxon .tile{padding:calc(var(--u)*.7) calc(var(--u)*1)}.wxon .tile .v{font-size:calc(var(--u)*2.7)}.wxon #soc .v{font-size:calc(var(--u)*3.8)}
 .wxon.nocam .tile .v{font-size:calc(var(--u)*2.3)}
-.wc{display:flex;flex-direction:column;align-items:center;font-size:calc(var(--u)*.95);color:var(--muted);line-height:1.3;min-width:0;white-space:nowrap}
+.wc{display:flex;flex-direction:column;align-items:center;font-size:calc(var(--u)*.95);color:var(--muted);line-height:1.3;min-width:0;white-space:nowrap;overflow:hidden}
 .wc .h{color:var(--fg);font-weight:600;font-size:calc(var(--u)*1.1)}.wc .r{color:var(--load)}
 #chart{flex:1;background:var(--panel);border-radius:14px;padding:calc(var(--u)*.8) calc(var(--u)*1);min-height:calc(var(--u)*7);display:flex;flex-direction:column}
 #chart .k{color:var(--muted);font-size:calc(var(--u)*1);display:flex;gap:calc(var(--u)*1.4)}
@@ -830,26 +831,36 @@ function weather(w){
   // as many day and hour columns as fit (about 5.5 and 5 layout units each)
   const lu=parseFloat(getComputedStyle($("upd")).fontSize)/.9||12;
   const n=w.now,u=w.units,t=v=>v==null?"--":v+"°";
-  const extra=[n.feels!=null&&n.feels!==n.temp?`Feels <b>${t(n.feels)}</b>`:"",n.humidity!=null?`Humidity <b>${Math.round(n.humidity)}%</b>`:""].filter(Boolean).join(" &middot; ");
-  const rain=n.rain_day!=null?`Rain today <b>${n.rain_day} ${u.rain}</b>${n.rain_rate?` (${n.rain_rate} ${u.rain}/h)`:""}`:"";
-  $("wxnow").innerHTML=wicon(n.icon,n.day)+`<div class="t">${t(n.temp)}</div><div class="d"><b>${n.text||""}</b>${n.source==="station"?" &middot; station":""}<br>`+
-    `Wind <b>${n.wind==null?"--":(n.wind_dir!=null?warrow(n.wind_dir)+" ":"")+(n.compass||"")+" "+n.wind+" "+u.wind}</b>`+
-    (n.gust!=null?` &middot; Gust <b>${n.gust} ${u.wind}</b>`:"")+"<br>"+
-    (n.gust_max!=null?`${n.gust_max_src==="forecast"?"Today's gusts up to":"Max gust today"} <b>${n.gust_max} ${u.wind}</b>`+
-      (n.gust_max_time?` at ${n.gust_max_time}`:n.gust_max_src==="forecast"?" (forecast)":"")+"<br>":"")+
-    `${[extra,rain].filter(Boolean).join("<br>")}</div>`;
-  const dn=Math.max(3,Math.min(7,Math.floor(($("wxtop").clientWidth-$("wxnow").offsetWidth)/(lu*6))));
-  box.style.setProperty("--days",dn);
-  const days=w.days.slice(0,dn);
+  // each phrase kept together (<i>); lines break only between them
+  const ph=x=>x?`<i>${x}</i>`:"", sep=" &middot; ";
+  const lines=[
+    ph(`<b>${n.text||""}</b>${n.source==="station"?" &middot; station":""}`),
+    n.wind!=null?ph(`Wind <b>${n.wind_dir!=null?warrow(n.wind_dir)+" ":""}${n.compass||""} ${n.wind}</b>`+
+      (n.gust!=null?`, gusts <b>${n.gust}</b>`:"")+` ${u.wind}`):"",
+    n.gust_max!=null?ph(n.gust_max_src==="forecast"?`Gusts to <b>${n.gust_max} ${u.wind}</b> today (forecast)`:
+      `Max gust <b>${n.gust_max} ${u.wind}</b>${n.gust_max_time?" at "+n.gust_max_time:" today"}`):"",
+    [n.feels!=null&&n.feels!==n.temp?ph(`Feels <b>${t(n.feels)}</b>`):"",n.humidity!=null?ph(`Humidity <b>${Math.round(n.humidity)}%</b>`):""].filter(Boolean).join(sep),
+    n.rain_day!=null?ph(`Rain today <b>${n.rain_day} ${u.rain}</b>${n.rain_rate?` (${n.rain_rate} ${u.rain}/h)`:""}`):""];
+  $("wxnow").innerHTML=wicon(n.icon,n.day)+`<div class="t">${t(n.temp)}</div><div class="d">${lines.filter(Boolean).join("<br>")}</div>`;
   // a rain-chance line only when one of the columns has a chance worth showing
   const pop=(list,x)=>list.some(v=>v.pop!=null&&v.pop>=10)?`<span class="r">${x.pop!=null&&x.pop>=10?x.pop+"%":"&nbsp;"}</span>`:"";
+  const fits=el=>[...el.children].every(c=>c.scrollWidth<=c.clientWidth+1);
+  let dn=Math.max(2,Math.min(7,Math.floor(($("wxtop").clientWidth-$("wxnow").offsetWidth)/(lu*6))));
+  for(;;){ box.style.setProperty("--days",dn); drawDays(dn); if(dn<=2||fits($("wxdays")))break; dn--; }
+  let hn=Math.max(4,Math.min(12,Math.floor(box.clientWidth/(lu*5.5))));
+  for(;;){ drawHours(hn); if(hn<=4||fits($("wxhours"))||getComputedStyle($("wxhours")).display==="none")break; hn--; }
+  function drawDays(dn){
+  const days=w.days.slice(0,dn);
   $("wxdays").innerHTML=days.map(d=>`<div class="wc"><span>${d.name}</span>${wicon(d.icon,true,"s")}<span class="h">${t(d.hi)} <span style="color:var(--muted);font-weight:400">${t(d.lo)}</span></span>`+
     pop(days,d)+`<span>${d.wind!=null?warrow(d.deg)+" "+d.wind+(d.gust>d.wind?"&ndash;"+d.gust:""):""}</span></div>`).join("");
-  const hn=Math.max(4,Math.min(12,Math.floor(box.clientWidth/(lu*5.5)))), step=hn>=12?1:2;
+  }
+  function drawHours(hn){
+  const step=hn>=12?1:2;
   box.style.setProperty("--hours",Math.min(hn,Math.floor(12/step)));
   const hrs=w.hours.filter((h,i)=>i%step===step-1).slice(0,Math.min(hn,Math.floor(12/step)));
   $("wxhours").innerHTML=hrs.map(h=>`<div class="wc"><span>${h.label}</span>${wicon(h.icon,h.day,"s")}<span class="h">${t(h.temp)}</span>`+
     pop(hrs,h)+`<span>${h.wind!=null?warrow(h.deg)+" "+h.wind+(h.gust>h.wind?"&ndash;"+h.gust:""):""}</span></div>`).join("");
+  }
 }
 async function tick(){
   let d;try{const r=await fetch("/display/data",{cache:"no-store"});d=await r.json()}catch(e){$("upd").textContent="Waiting for the monitor...";return}
