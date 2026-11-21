@@ -137,6 +137,22 @@ class Support(unittest.TestCase):
         support.save(self.stack, {**support.DEFAULTS, "token": TOKEN, "ssh_key": KEY})
         self.assertEqual(support.clean({"support_token": "", "support_keys": ""}, support.settings(self.stack))["token"], TOKEN)
 
+    def test_support_code(self):
+        code = support.make_code(TOKEN, KEY)
+        self.assertTrue(code.startswith("SOLAR-SUPPORT-1:"))
+        # pasted from an email: wrapped over lines, nothing in the keys box
+        wrapped = "\n".join(code[i:i + 40] for i in range(0, len(code), 40))
+        d = support.clean({"support_token": "  " + wrapped + " ", "support_keys": "", "support_days": "3"}, support.DEFAULTS)
+        self.assertEqual((d["token"], d["tunnel_id"], d["ssh_key"], d["days"]), (TOKEN, "1234-tunnel", KEY, 3))
+        # keys typed in the box are added once
+        d = support.clean({"support_token": code, "support_keys": OWNER_KEY + "\n" + KEY}, support.DEFAULTS)
+        self.assertEqual(d["ssh_key"], KEY + "\n" + OWNER_KEY)
+        with self.assertRaisesRegex(ValueError, "support code is damaged"):
+            support.clean({"support_token": code[:-10]}, support.DEFAULTS)
+        bad = support.CODE_PREFIX + base64.urlsafe_b64encode(json.dumps({"t": "nope", "k": [KEY]}).encode()).decode()
+        with self.assertRaisesRegex(ValueError, "isn't a Cloudflare tunnel token"):
+            support.clean({"support_token": bad}, support.DEFAULTS)
+
     def test_profiles_combine_with_remote_access(self):
         ss.write_if_changed(os.path.join(self.stack, "state", "tunnel.json"), json.dumps({"enabled": True}), 0o600)
         support.enable(self.stack, self.form())

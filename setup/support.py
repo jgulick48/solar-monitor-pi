@@ -114,12 +114,46 @@ def clean_keys(text):
     return "\n".join(keys)
 
 
+CODE_PREFIX = "SOLAR-SUPPORT-1:"
+
+
+def make_code(token, keys):
+    """The one-paste support code tools/support-helper.py hands out: the tunnel token plus the helper's SSH keys."""
+    body = json.dumps({"t": token.strip(), "k": [k for k in clean_keys(keys).split("\n")]}, separators=(",", ":"))
+    return CODE_PREFIX + base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
+
+
+def read_code(text):
+    """(token, keys) from a support code; None if text isn't one. Raises ValueError for a damaged code."""
+    t = "".join((text or "").split())             # pasted from a chat or email: line breaks and spaces crept in
+    if not t.upper().startswith(CODE_PREFIX):
+        return None
+    b = t[len(CODE_PREFIX):]
+    try:
+        d = json.loads(base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)))
+        token, keys = str(d["t"]), "\n".join(d["k"])
+    except (ValueError, TypeError, KeyError):
+        raise ValueError("that support code is damaged (check it was copied whole)")
+    tunnel_id(token)
+    return token, clean_keys(keys)
+
+
 def clean(form, cur):
-    token = form.get("support_token", "").strip() or cur.get("token", "")
-    if not token:
-        raise ValueError("the tunnel token is needed")
+    code = read_code(form.get("support_token", ""))
+    if code:                                      # the support code carries both; keys typed below are added
+        token, keys = code
+        extra = form.get("support_keys", "").strip()
+        if extra:
+            keys = clean_keys(keys + "\n" + extra)
+        keys = "\n".join(dict.fromkeys(keys.split("\n")))
+    else:
+        token = form.get("support_token", "").strip() or cur.get("token", "")
+        if not token:
+            raise ValueError("the support code (or a tunnel token) is needed")
+        keys = None
     tid = tunnel_id(token)
-    keys = clean_keys(form.get("support_keys", "") or cur.get("ssh_key", ""))
+    if keys is None:
+        keys = clean_keys(form.get("support_keys", "") or cur.get("ssh_key", ""))
     try:
         days = int(form.get("support_days", "7"))
     except ValueError:

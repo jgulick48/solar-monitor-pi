@@ -258,7 +258,20 @@ Home Assistant is stopped: since 2026.11 Home Assistant ignores `http:` in YAML)
 For troubleshooting a box from elsewhere. The **helper** sets up the access in their own Cloudflare account; the **owner**
 turns it on (and off) on the box's setup page (`http://<pi>/setup#support`). It is off by default.
 
-Helper, once:
+Helper, the quick way (`tools/support-helper.py`, plain Python, from a clone of this repo):
+
+1. Once: create a Cloudflare API token (My Profile &rarr; API Tokens &rarr; Custom token) with *Account: Cloudflare Tunnel
+   Edit*, *Account: Access: Apps and Policies Edit*, *Account: Access: Service Tokens Edit*, *Zone: DNS Edit* and
+   *Zone: Zone Read* for your domain; save it in `~/.cache/cf-solar-support-api` (mode 600). Then
+   `tools/support-helper.py init --account <account id> --domain example.com --email you@example.com --key ~/.ssh/id_ed25519.pub`.
+2. Per box: `tools/support-helper.py new neighbor` makes the tunnel, the hostnames `neighbor-ssh`, `neighbor-setup`,
+   `neighbor-grafana` and `neighbor-ha` on your domain, their DNS records and a Cloudflare Access app (your emails, plus
+   a service token for scripts), and prints a **support code**. Send it to the owner privately.
+3. The owner pastes the code on the setup page (Remote support) and presses *Turn remote support on*.
+4. `tools/support-helper.py ssh neighbor` logs you in (needs `cloudflared`); the setup page is at
+   `https://neighbor-setup.example.com`. `list` shows your boxes and whether they're connected; `remove neighbor` deletes it all.
+
+Helper, by hand in the Cloudflare dashboard:
 
 1. Cloudflare Zero Trust &rarr; Networks &rarr; Tunnels &rarr; **Create a tunnel** (cloudflared), name it after the site.
    Copy the token (the long string after `cloudflared service install`).

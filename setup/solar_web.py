@@ -1080,12 +1080,12 @@ def support_section(msg=""):
     note = notice("err" if is_error(msg) else "ok", msg) if msg else ""
     return f"""<h2 id="support">Remote support (optional)</h2>{note}{state}
 <form method="post" action="/support"><fieldset><legend>Let a helper connect to this box</legend>
-<p><small>For troubleshooting: someone you trust sets up a Cloudflare Tunnel in <b>their</b> Cloudflare account and gives you its
-token and their SSH key. While remote support is on they can reach this box through that tunnel (what exactly, such as SSH, this
+<p><small>For troubleshooting: someone you trust sets up a Cloudflare Tunnel in <b>their</b> Cloudflare account and gives you a
+<b>support code</b> (or its tunnel token and their SSH key). While remote support is on they can reach this box through that tunnel (what exactly, such as SSH, this
 setup page or Grafana, is set up in their account, behind their Cloudflare Access login), log in and change anything on it.
 Nothing is opened on your router. It switches itself off when the time you choose is up, and you can turn it off here at any time.</small></p>
-<label>Tunnel token <input name="support_token" type="password" autocomplete="off" style="max-width:100%"></label>{saved}
-<label>Their SSH public key(s), one per line
+<label>Support code (starts with SOLAR-SUPPORT-1:) or tunnel token <input name="support_token" type="password" autocomplete="off" style="max-width:100%"></label>{saved}
+<label>Their SSH public key(s), one per line <small>(not needed with a support code)</small>
 <textarea name="support_keys" rows="3" style="width:100%;font:inherit;box-sizing:border-box;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px">{html.escape(st['keys'])}</textarea></label>
 <label>Switch off <select name="support_days">{days}</select></label>
 <p><button>{'Save and keep on' if st['enabled'] else 'Turn remote support on'}</button></p></fieldset></form>{off}"""
