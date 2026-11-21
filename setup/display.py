@@ -41,7 +41,10 @@ import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
-DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": []}
+SOUND_KINDS = [("doorbell", "Doorbell", True), ("person", "Person", True), ("vehicle", "Vehicle", False),
+               ("animal", "Animal", False), ("package", "Package", False)]
+DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
+            "sounds": {k: on for k, _, on in SOUND_KINDS}, "volume": 70, "sound_quiet": True}
 MAX_CAMERAS = 16   # all of them rotate through the two places on screen
 KIOSK_USER = "solar-display"
 
@@ -107,7 +110,10 @@ def events(stack):
     for i, c in enumerate(d["cameras"], 1):
         if c.get("protect_id") in active:
             out[f"cam{i}"] = active[c["protect_id"]]
-    return {"active": out, "connected": protect.EVENTS.connected}
+    return {"active": out, "connected": protect.EVENTS.connected, "test_sound": TEST_SOUND["at"]}
+
+
+TEST_SOUND = {"at": 0}   # the setup page's "Play a test sound": the screen plays the doorbell chime when this changes
 
 
 def screen_off_now(d, now=None):
@@ -241,8 +247,19 @@ def forecast_summary(fc, now, tz):
     return {k: round(v, 1) for k, v in out.items()}
 
 
-def _hhmm(t, now):
-    return f"{t:%H:%M}" + (" tomorrow" if t.date() > now.date() else "")
+def clock12(site):
+    """12-hour clock? The setup page's choice; by default 12-hour with US units, 24-hour with metric."""
+    c = (site or {}).get("clock") or ""
+    return c == "12" or (c != "24" and (site or {}).get("units", "us_customary") == "us_customary")
+
+
+def hm(t, site=None):
+    """A time of day the way this site writes it: 4:41 PM or 16:41."""
+    return t.strftime("%-I:%M %p") if clock12(site) else t.strftime("%H:%M")
+
+
+def _hhmm(t, now, site=None):
+    return hm(t, site) + (" tomorrow" if t.date() > now.date() else "")
 
 
 def generator_advice(site, now_vals, now, tz, fc=None):
@@ -268,7 +285,7 @@ def generator_advice(site, now_vals, now, tz, fc=None):
     if now < rise:                                  # before dawn: tonight is today's sunrise
         next_rise, next_set = rise, sset
     elif now < sset - dt.timedelta(hours=4):        # daytime: judge the coming night from mid-afternoon on
-        return {"level": "info", "text": f"Sunset {sset:%H:%M}.{tomorrow_txt}", "sunset": sset.strftime("%H:%M"),
+        return {"level": "info", "text": f"Sunset {hm(sset, site)}.{tomorrow_txt}", "sunset": sset.strftime("%H:%M"),
                 "forecast_tomorrow_kwh": fsum and fsum["tomorrow"]}
     else:
         next_rise, next_set = sun_times(lat, lon, today + dt.timedelta(days=1), tz)
@@ -295,20 +312,20 @@ def generator_advice(site, now_vals, now, tz, fc=None):
         if now + dt.timedelta(hours=hours_left) < relief:
             empty_at = now + dt.timedelta(hours=hours_left)
         need = max(0.0, (relief - now).total_seconds() / 3600 * load_kw - max(usable, 0))
-    base = {"sunset": sset.strftime("%H:%M"), "empty_at": empty_at and _hhmm(empty_at, now),
+    base = {"sunset": sset.strftime("%H:%M"), "empty_at": empty_at and _hhmm(empty_at, now, site),
             "need_kwh": round(need, 1), "forecast_tomorrow_kwh": fsum and fsum["tomorrow"]}
-    when = "now" if now >= sset - dt.timedelta(minutes=30) or now < rise else f"before dark ({sset:%H:%M})"
+    when = "now" if now >= sset - dt.timedelta(minutes=30) or now < rise else f"before dark ({hm(sset, site)})"
     if empty_at is not None and empty_at < next_rise + dt.timedelta(hours=2):
         return dict(base, level="warn", text=(f"Start the generator {when}: at the usual use the battery reaches "
-                                              f"{floor:.0f}% about {_hhmm(empty_at, now)}, before the sun is back. "
+                                              f"{floor:.0f}% about {_hhmm(empty_at, now, site)}, before the sun is back. "
                                               f"About {need:.1f} kWh more is needed.{tomorrow_txt}"))
     if empty_at is not None:                          # lasts the night, but the next day is too dull to recover
         return dict(base, level="warn", text=(f"Start the generator {when}: tomorrow looks dull (about "
                                               f"{fsum['tomorrow']:.0f} kWh of solar expected), so at the usual use the "
-                                              f"battery reaches {floor:.0f}% about {_hhmm(empty_at, now)}. "
+                                              f"battery reaches {floor:.0f}% about {_hhmm(empty_at, now, site)}. "
                                               f"About {need:.1f} kWh more is needed."))
     return dict(base, level="ok", text=f"No generator needed tonight: the battery should stay above {floor:.0f}% "
-                                         f"until the sun is back (sunset {sset:%H:%M}).{tomorrow_txt}")
+                                         f"until the sun is back (sunset {hm(sset, site)}).{tomorrow_txt}")
 
 
 def data(stack, site):
@@ -352,7 +369,8 @@ def data(stack, site):
         "cameras": [{"id": f"cam{i}", "name": c.get("name") or f"Camera {i}"} for i, c in enumerate(d["cameras"], 1)],
         "screen_off": screen_off_now(d, now.replace(tzinfo=None)),
         "rev": int(os.path.getmtime(settings_path(stack))) if os.path.exists(settings_path(stack)) else 0,
-        "time": now.strftime("%H:%M"), "date": now.strftime("%a %b %-d"),
+        "time": hm(now, site), "date": now.strftime("%a %b %-d"),
+        "sounds": d.get("sounds") or {}, "volume": d.get("volume", 70), "sound_quiet": d.get("sound_quiet", True),
         "expected": expected, "forecast": forecast_summary(fc, now, tz),
     }
 
@@ -656,9 +674,44 @@ async function showCams(){
     catch(e){ m.textContent="Camera service not running"; }
   }
 }
+// Sounds through the screen's speakers (HDMI): short chimes made with Web Audio, so there are no sound files.
+// A camera's event plays once, when it starts; doorbell rings and people by default (setup page).
+const CHIMES={doorbell:[[659,0,1.3],[523,.5,1.6]],person:[[784,0,.5],[1047,.17,.7]],vehicle:"horn",
+  animal:[[880,0,.6]],package:[[988,0,.35],[1175,.14,.35],[1319,.28,.6]]};
+let actx=null, played={}, lastTest=null, soundCfg={sounds:{},volume:70,quiet:true,off:false};
+// A car horn: two square waves a major third apart (about 400 and 500 Hz, slightly detuned, like a real
+// two-trumpet horn) through a low-pass filter, "beep-beep".
+function horn(vol,t){
+  const f=actx.createBiquadFilter(); f.type="lowpass"; f.frequency.value=1800; f.Q.value=.7; f.connect(actx.destination);
+  for(const [at,dur] of [[0,.22],[.32,.45]]){
+    const g=actx.createGain(); g.connect(f);
+    g.gain.setValueAtTime(0,t+at); g.gain.linearRampToValueAtTime(vol*.5,t+at+.015);
+    g.gain.setValueAtTime(vol*.5,t+at+dur-.03); g.gain.linearRampToValueAtTime(0,t+at+dur);
+    for(const hz of [404,508]){ const o=actx.createOscillator(); o.type="square"; o.frequency.value=hz; o.connect(g); o.start(t+at); o.stop(t+at+dur+.02); }
+  }
+}
+function chime(kind){
+  const notes=CHIMES[kind]; if(!notes)return;
+  try{ actx=actx||new AudioContext(); if(actx.state==="suspended")actx.resume(); }catch(e){return}
+  const vol=Math.max(0,Math.min(1,(soundCfg.volume||0)/100))*.6, t=actx.currentTime+.05;
+  if(notes==="horn")return horn(vol,t);
+  for(const [f,at,dur] of notes){
+    const o=actx.createOscillator(), g=actx.createGain(); o.type="sine"; o.frequency.value=f;
+    g.gain.setValueAtTime(0,t+at); g.gain.linearRampToValueAtTime(vol,t+at+.02); g.gain.exponentialRampToValueAtTime(.0001,t+at+dur);
+    o.connect(g).connect(actx.destination); o.start(t+at); o.stop(t+at+dur+.05);
+  }
+}
+function soundFor(ev){
+  const kind={Doorbell:"doorbell",Person:"person",Vehicle:"vehicle",Animal:"animal",Package:"package"}[ev.label];
+  if(!kind||!soundCfg.sounds[kind]||(soundCfg.quiet&&soundCfg.off))return null; return kind;
+}
 async function pollEvents(){
-  if(!camList.length)return;
   try{ const r=await fetch("/display/events",{cache:"no-store"}); const d=await r.json();
+    if(lastTest===null)lastTest=d.test_sound; else if(d.test_sound!==lastTest){lastTest=d.test_sound; chime("doorbell");}
+    for(const [cam,ev] of Object.entries(d.active||{})){
+      const key=cam+"@"+ev.since; if(played[key])continue; played[key]=1;
+      const kind=soundFor(ev); if(kind)chime(kind);
+    }
     const before=JSON.stringify(events); events=d.active||{};
     if(JSON.stringify(events)!==before)showCams();
   }catch(e){}
@@ -679,6 +732,7 @@ async function tick(){
   let d;try{const r=await fetch("/display/data",{cache:"no-store"});d=await r.json()}catch(e){$("upd").textContent="Waiting for the monitor...";return}
   if(rev!==null&&d.rev!==rev){location.reload();return} rev=d.rev;
   $("blank").style.display=d.screen_off?"block":"none";
+  soundCfg={sounds:d.sounds||{},volume:d.volume,quiet:d.sound_quiet,off:!!d.screen_off};
   $("name").textContent=d.name;$("clock").textContent=d.time;$("date").textContent=d.date;
   buildCams(d.cameras);
   const n=d.now||{};
@@ -825,6 +879,36 @@ def screen_mode():
               + ("" if r.returncode == 0 else f" failed: {r.stderr.strip()[-200:]}"))
 
 
+def asoundrc(outputs, cards):
+    """~/.asoundrc for the kiosk user: ALSA's default device = the HDMI port a screen is on (Pi 4: HDMI-A-1 is
+    the vc4hdmi0 card, HDMI-A-2 vc4hdmi1). None if there is no such card (then ALSA's own default stays)."""
+    for out in outputs:
+        if not out.startswith("HDMI-A-"):
+            continue
+        card = f"vc4hdmi{int(out.rsplit('-', 1)[1]) - 1}"
+        if card in cards:
+            return (f"# Written by the solar monitor kiosk: sound to the screen on {out}.\n"
+                    f'pcm.!default {{ type plug slave.pcm "hdmi:CARD={card},DEV=0" }}\n'
+                    f"ctl.!default {{ type hw card {card} }}\n")
+    return None
+
+
+def screen_audio(home=None, proc="/proc/asound/cards"):
+    """Inside the kiosk session: point the kiosk user's sound at the connected HDMI screen."""
+    try:
+        cards = [ln.split("[", 1)[1].split("]", 1)[0].strip() for ln in open(proc) if "[" in ln]
+    except OSError:
+        cards = []
+    conf = asoundrc([s["output"] for s in screens()], cards)
+    target = os.path.join(home or os.path.expanduser("~"), ".asoundrc")
+    if conf:
+        with open(target, "w") as f:
+            f.write(conf)
+        print(f"sound: {conf.splitlines()[1]}")
+    else:
+        print(f"sound: no HDMI sound card for the connected screen (cards: {', '.join(cards) or 'none'})")
+
+
 def screen_line():
     """For the setup page."""
     sc = screens()
@@ -888,7 +972,7 @@ def power(stack):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["should-run", "wait-web", "power", "screen-mode"])
+    ap.add_argument("command", choices=["should-run", "wait-web", "power", "screen-mode", "screen-audio"])
     ap.add_argument("--stack", default="/opt/solar-monitor/stack")
     a = ap.parse_args()
     if a.command == "should-run":
@@ -899,6 +983,8 @@ def main():
         power(a.stack)
     elif a.command == "screen-mode":
         screen_mode()
+    elif a.command == "screen-audio":
+        screen_audio()
 
 
 if __name__ == "__main__":

@@ -64,6 +64,12 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
   1920x1200 (4K TVs) run at 1920x1080, which the Pi handles much better with cameras and the TV scales up. The layout
   scales with the tighter of width and height, so 4:3, 16:10, 21:9 and 720p/768p screens fit, and a screen on its
   side gets the cameras on top and the figures below. The setup page shows the screen found and the mode used.
+- **Clock**: 12-hour (4:41 PM) or 24-hour, set on the setup page (by default 12-hour with US units); the same format is
+  used in the generator advice and the daily summary.
+- **Sounds**: short chimes through the screen's speakers (HDMI) when a UniFi Protect camera sees something (a car horn for vehicles): doorbell
+  ring and person by default, vehicle, animal and package optional, with a volume and *not during the screen-off
+  hours*. *Play a test sound* on the setup page checks it. The kiosk points its sound at the HDMI port the screen is
+  on (`~solar-display/.asoundrc`, Pi 4: HDMI-A-1 = vc4hdmi0); the screen or TV needs speakers.
 - **Burn-in protection**: every 20 minutes the layout changes (cameras on the left or the right, or without cameras
   the tiles in order or reversed; the figures top-down or flipped, clock at the bottom), with a short fade, and every
   minute the whole page drifts a few pixels along a small circle, so no label, border or grid line stays on the same

@@ -66,6 +66,7 @@ DEFAULT_SITE = {
     "inverter_model": "6000xp",
     "summary_enabled": True,
     "summary_time": "00:00",
+    "clock": "",
     "costs": {"battery_each": "", "panel_per_w": "", "inverter_each": "", "generator": "", "fuel_per_gal": ""},
 }
 COST_FIELDS = [("battery_each", "Price per battery ($)"), ("panel_per_w", "Panels, $ per watt (installed)"),
@@ -244,6 +245,7 @@ def validate(form):
         "arrays": [],
         "summary_enabled": bool(form.get("summary_enabled")),
         "summary_time": display.parse_hhmm(form.get("summary_time", "")) or "00:00",
+        "clock": form.get("clock") if form.get("clock") in ("12", "24") else "",
     }
     if site["time_zone"] not in zoneinfo.available_timezones():
         raise FieldError("time_zone", f"unknown time zone '{site['time_zone']}'")
@@ -315,7 +317,10 @@ def apply_display(form):
     cur = display.load(STACK)
     d = {"enabled": form.get("display_enabled") == "1",
          "off_from": display.parse_hhmm(form.get("display_off_from")),
-         "off_to": display.parse_hhmm(form.get("display_off_to")), "cameras": []}
+         "off_to": display.parse_hhmm(form.get("display_off_to")), "cameras": [],
+         "sounds": {k: form.get(f"sound_{k}") == "1" for k, _, _ in display.SOUND_KINDS},
+         "volume": max(0, min(100, int(form.get("volume") or 70) if str(form.get("volume") or "70").isdigit() else 70)),
+         "sound_quiet": form.get("sound_quiet") == "1"}
     # UniFi Protect's cameras are set in their own section (protect.py); the fields here are the manual ones
     keep = [c for c in cur["cameras"] if c.get("protect_id")]
     manual = [c for c in cur["cameras"] if not c.get("protect_id")]
@@ -592,6 +597,12 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect
 <div class="row"><label>Screen off from (optional) {inp('display_off_from', dsp['off_from'], 'time')}</label>
 <label>Screen on again at {inp('display_off_to', dsp['off_to'], 'time')}</label></div>
 <small>For example 22:00 until 06:00, to save power and the screen.</small>
+<p style="margin-top:16px"><b>Sounds</b> <small style="display:inline">through the screen's speakers (HDMI), when a UniFi Protect camera sees:</small></p>
+<div class="row">{''.join(f"<label><input type='checkbox' name='sound_{k}' value='1'{' checked' if (dsp.get('sounds') or {}).get(k, on) else ''}> {t}</label>" for k, t, on in display.SOUND_KINDS)}</div>
+<div class="row"><label>Volume <input type="range" name="volume" min="0" max="100" step="5" value="{dsp.get('volume', 70)}"></label>
+<label><input type="checkbox" name="sound_quiet" value="1"{' checked' if dsp.get('sound_quiet', True) else ''}> Not during the screen-off hours</label></div>
+<p><button formaction="/display/test-sound" formmethod="post" formnovalidate>Play a test sound</button>
+<small style="display:inline">on the screen (save first if you changed the volume). The TV's own volume applies too.</small></p>
 <p><small>Two cameras at a time are shown next to the power figures, taking turns every 15 seconds. To add one by its stream link instead, in UniFi Protect: open the camera &rarr; Settings &rarr; Advanced &rarr;
 RTSPS, turn on <b>Medium</b> quality and copy its link (<code>rtsps://...:7441/...</code>). The camera pictures are only shown on the
 box's own screen, not to other computers on the network.</small></p>{cams}
@@ -623,7 +634,10 @@ Devices &amp; services; it's usually found automatically) with a local Protect u
 <small>Tip: right-click the house in Google Maps; the first line is latitude, longitude. Used for sunrise/sunset and the solar forecast.</small>
 <div class="row"><label>Time zone <select name="time_zone">{tzs}</select></label>
 <label>Units <select name="units"><option value="us_customary"{' selected' if site['units'] == 'us_customary' else ''}>US (°F, miles)</option>
-<option value="metric"{' selected' if site['units'] == 'metric' else ''}>Metric (°C, km)</option></select></label></div></fieldset>
+<option value="metric"{' selected' if site['units'] == 'metric' else ''}>Metric (°C, km)</option></select></label>
+<label>Clock <select name="clock"><option value=""{' selected' if not site.get('clock') else ''}>As the units (12-hour for US)</option>
+<option value="12"{' selected' if site.get('clock') == '12' else ''}>12-hour (4:41 PM)</option>
+<option value="24"{' selected' if site.get('clock') == '24' else ''}>24-hour (16:41)</option></select></label></div></fieldset>
 <fieldset><legend>Batteries</legend><div class="row">
 <label>Number of batteries {inp('battery_count', site['battery_count'], 'number', 'min=1')}</label>
 <label>kWh per battery {inp('battery_kwh_each', site['battery_kwh_each'], 'text', "inputmode='decimal'")}</label></div>
@@ -1205,6 +1219,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, setup_page(load_site(), remote_msg="; ".join(msgs) + "."))
         elif self.path in ("/protect/connect", "/protect/cameras", "/protect/forget"):
             self.send(200, setup_page(load_site(), protect_msg=self.protect_post(self.path, self.form())))
+        elif self.path == "/display/test-sound":
+            display.TEST_SOUND["at"] = time.time()
+            ok = display.screen_connected() and run_quietly(["systemctl", "is-active", "--quiet", "solar-display.service"]).returncode == 0
+            self.send(200, setup_page(load_site(), done=["test sound sent to the screen" if ok else
+                                                         "test sound sent, but the screen's dashboard isn't running"]))
         elif self.path == "/display/restart":
             run_quietly(["systemctl", "reset-failed", "solar-display.service"])
             run_quietly(["systemctl", "restart", "--no-block", "solar-display.service"])
