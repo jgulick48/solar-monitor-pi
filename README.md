@@ -98,6 +98,9 @@ Home Assistant comes with a **Solar** dashboard in the sidebar and alerts, from 
   generator, *start the generator* (mid-afternoon, again 30 minutes before sunset if it hasn't been started; cleared
   when it runs). Each one shows in Home Assistant's notifications and on every phone signed in with the **Home
   Assistant app** (the alert is withdrawn from the phone once it clears). They can be switched off on the dashboard.
+- **Daily summary** (setup page, *Daily summary*: on/off and time, default midnight): "24 kWh solar, 21 kWh used,
+  battery down to 38%, generator 1.5 h (6.0 kWh). Today: about 13 kWh of solar expected." Sent before 06:00 it covers
+  the day before, later the day so far; on Sundays it adds the week's totals and the advisor's latest finding.
 - **Energy dashboard**: solar and battery are filled in on the first start; changes made in Home Assistant are kept.
   The generator isn't in it (Home Assistant has no off-grid generator source).
 
