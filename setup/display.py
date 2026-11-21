@@ -789,7 +789,12 @@ def screen_line():
 
 
 def should_run(stack):
-    if not load(stack).get("enabled", True):
+    try:
+        settings = load(stack)
+    except OSError as e:   # say so in the journal (the start page shows it) instead of a bare traceback
+        print(f"can't read the display settings: {e}")
+        return False
+    if not settings.get("enabled", True):
         print("display turned off on the setup page")
         return False
     if not os.path.exists("/usr/bin/cage") or not (os.path.exists("/usr/bin/chromium") or os.path.exists("/usr/bin/chromium-browser")):

@@ -13,7 +13,9 @@ StartLimitBurst=10
 
 [Service]
 Type=simple
-ExecCondition=/usr/bin/python3 /opt/solar-monitor/setup/display.py should-run
+# "+": the check runs as root. It reads state/display.json, which is root's and mode 600 (camera links);
+# as solar-display it couldn't, and every start was skipped (v0.2.0-v0.2.7).
+ExecCondition=+/usr/bin/python3 /opt/solar-monitor/setup/display.py should-run
 ExecStartPre=/usr/bin/python3 /opt/solar-monitor/setup/display.py wait-web
 ExecStart=/usr/bin/cage -s -- /opt/solar-monitor/setup/kiosk.sh
 Restart=always
