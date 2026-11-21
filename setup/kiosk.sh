@@ -2,6 +2,8 @@
 # Chromium in kiosk mode on the wall display page, run inside cage by solar-display.service.
 # Profile and cache live in the user's runtime directory (RAM), so nothing is written to the SSD
 # and there is no "restore pages" prompt after a power cut.
+# Screen mode from the TV's EDID (its preferred mode; 1080p on 4K TVs). Never stops the kiosk.
+/usr/bin/python3 /opt/solar-monitor/setup/display.py screen-mode 2>&1 || true
 B=/usr/bin/chromium; [ -x "$B" ] || B=/usr/bin/chromium-browser
 exec "$B" --kiosk --ozone-platform=wayland --noerrdialogs --disable-infobars --no-first-run \
   --disable-session-crashed-bubble --disable-features=Translate,TranslateUI --disable-pinch \

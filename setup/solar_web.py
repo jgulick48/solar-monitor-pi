@@ -459,6 +459,8 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg=""):
         cams += (f"<div class='row'><label>Camera {i} name {inp(f'cam{i}_name', c.get('name', ''), 'text', 'placeholder=' + chr(39) + ('Driveway' if i == 1 else 'Front door') + chr(39))}</label>"
                  f"<label style='flex:2 1 300px'>Stream link {inp(f'cam{i}_url', '', 'text', 'placeholder=' + chr(39) + 'rtsps://192.168.1.1:7441/...' + chr(39) + ' style=' + chr(39) + 'max-width:100%' + chr(39) + ' autocomplete=off')}</label></div>{saved}")
     screen_fields = f"""<fieldset id="screen"><legend>Screen and cameras</legend>
+<p><small>Screen: {html.escape(display.screen_line())}. The picture size comes from the screen itself (its EDID);
+4K TVs are run at 1920x1080, which they scale up.</small></p>
 <label><input type="checkbox" name="display_enabled" value="1" style="width:auto"{' checked' if dsp['enabled'] else ''}> Show the dashboard on a screen plugged into the HDMI port</label>
 <div class="row"><label>Screen off from (optional) {inp('display_off_from', dsp['off_from'], 'time')}</label>
 <label>Screen on again at {inp('display_off_to', dsp['off_to'], 'time')}</label></div>
