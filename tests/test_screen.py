@@ -114,8 +114,12 @@ class Screen(unittest.TestCase):
             self.assertIn("CARD=vc4hdmi0", open(os.path.join(home, ".asoundrc")).read())
 
     def test_page_has_chimes(self):
-        for needle in ("CHIMES={doorbell", "vehicle:\"horn\"", "function horn(", "new AudioContext()", "d.test_sound", "soundCfg.quiet&&soundCfg.off"):
+        for needle in ("CHIMES={doorbell", "vehicle:\"horn\"", "function horn(", "new AudioContext()", "d.test_sound", "soundCfg.quiet&&soundCfg.off",
+                       "actx.decodeAudioData", "createBufferSource"):
             self.assertIn(needle, display.PAGE)
+
+    def test_speech_uses_web_audio_not_an_audio_element(self):
+        self.assertNotIn("new Audio(", display.PAGE)        # one output stream: the HDMI device doesn't mix
 
     def test_page_uses_the_scale_unit(self):
         css = display.PAGE.split("<script>")[0]
