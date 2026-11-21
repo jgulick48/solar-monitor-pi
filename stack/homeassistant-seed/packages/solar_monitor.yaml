@@ -195,13 +195,11 @@ automation:
         event: start
         id: start
     actions:
-      # after a restart the sensor starts out "on" without a change to trigger on: check again
-      - if: "{{ trigger.id == 'start' }}"
-        then:
-          - delay: "00:05:00"
-          - condition: state
-            entity_id: binary_sensor.site_battery_low
-            state: "on"
+      # After a restart the sensor starts out "on" without a change to trigger on: wait, then check
+      # it. (Top level on purpose: a condition inside if/then only ends that block, not the automation.)
+      - delay: "{{ '00:05:00' if trigger.id == 'start' else '00:00:00' }}"
+      - condition: template
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_battery_low', 'on') }}"
       - action: script.solar_notify
         data:
           tag: battery_low
@@ -229,13 +227,11 @@ automation:
         event: start
         id: start
     actions:
-      # after a restart the sensor starts out "on" without a change to trigger on: check again
-      - if: "{{ trigger.id == 'start' }}"
-        then:
-          - delay: "00:05:00"
-          - condition: state
-            entity_id: binary_sensor.site_inverter_fault
-            state: "on"
+      # After a restart the sensor starts out "on" without a change to trigger on: wait, then check
+      # it. (Top level on purpose: a condition inside if/then only ends that block, not the automation.)
+      - delay: "{{ '00:05:00' if trigger.id == 'start' else '00:00:00' }}"
+      - condition: template
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_inverter_fault', 'on') }}"
       - action: script.solar_notify
         data:
           tag: inverter_fault
@@ -262,13 +258,11 @@ automation:
         event: start
         id: start
     actions:
-      # after a restart the sensor starts out "on" without a change to trigger on: check again
-      - if: "{{ trigger.id == 'start' }}"
-        then:
-          - delay: "00:05:00"
-          - condition: state
-            entity_id: binary_sensor.site_dongle_offline
-            state: "on"
+      # After a restart the sensor starts out "on" without a change to trigger on: wait, then check
+      # it. (Top level on purpose: a condition inside if/then only ends that block, not the automation.)
+      - delay: "{{ '00:05:00' if trigger.id == 'start' else '00:00:00' }}"
+      - condition: template
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_dongle_offline', 'on') }}"
       - action: script.solar_notify
         data:
           tag: dongle_offline
@@ -303,13 +297,11 @@ automation:
     conditions:
       - "{{ trigger.id != 'off' or states('sensor.site_battery_level') not in ['unknown', 'unavailable'] }}"
     actions:
-      # after a restart the sensor starts out "on" without a change to trigger on: check again
-      - if: "{{ trigger.id == 'start' }}"
-        then:
-          - delay: "00:05:00"
-          - condition: state
-            entity_id: binary_sensor.site_data_stale
-            state: "on"
+      # After a restart the sensor starts out "on" without a change to trigger on: wait, then check
+      # it. (Top level on purpose: a condition inside if/then only ends that block, not the automation.)
+      - delay: "{{ '00:05:00' if trigger.id == 'start' else '00:00:00' }}"
+      - condition: template
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_data_stale', 'on') }}"
       - action: script.solar_notify
         data:
           tag: no_data
