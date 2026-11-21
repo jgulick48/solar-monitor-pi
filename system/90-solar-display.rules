@@ -1,0 +1,2 @@
+# Start the wall display when a screen is plugged in (solar-display.service checks it's wanted).
+ACTION=="change", SUBSYSTEM=="drm", RUN+="/usr/bin/systemctl --no-block start solar-display.service"

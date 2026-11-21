@@ -358,6 +358,9 @@ def main():
     sec = ensure_secrets(stack)
     write_env(stack, sec)
     seed_homeassistant(stack, sec)
+    if not os.path.exists(os.path.join(stack, "go2rtc", "go2rtc.yaml")):
+        import display  # the camera service's config (no cameras until the setup page adds them)
+        display.save(stack, display.load(stack))
 
     known_hosts = [inv["host"] for inv in inverters.values()]
     nets = [] if args.no_scan else local_networks()

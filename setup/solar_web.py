@@ -5,6 +5,7 @@
   /setup   form for the site details (location, time zone, batteries, panels,
            generator); saving writes state/site.json and applies it
   /rescan  runs solar-setup again (POST)
+  /display the wall display shown on an HDMI screen (setup/display.py)
 
 Applying the site details writes Home Assistant's core settings
 (homeassistant/core.yaml: name, location, time zone, units) and a package with
@@ -26,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import advisor  # noqa: E402
+import display  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import weather  # noqa: E402
 
@@ -294,6 +296,46 @@ def apply_site(site):
     return msgs
 
 
+def mask_url(url):
+    """rtsps://host:7441/TOKEN?x -> rtsps://host:7441/••••ab (the token is a password)."""
+    u = urllib.parse.urlsplit(url)
+    tail = u.path.rsplit("/", 1)[-1]
+    return f"{u.scheme}://{u.netloc}/" + ("\u2022" * 4 + tail[-2:] if tail else "")
+
+
+def apply_display(form):
+    """Screen and camera settings from the setup form. Returns messages; raises ValueError."""
+    cur = display.load(STACK)
+    d = {"enabled": form.get("display_enabled") == "1",
+         "off_from": display.parse_hhmm(form.get("display_off_from")),
+         "off_to": display.parse_hhmm(form.get("display_off_to")), "cameras": []}
+    for i in range(1, display.MAX_CAMERAS + 1):
+        name = form.get(f"cam{i}_name", "").strip()[:30]
+        url = form.get(f"cam{i}_url", "").strip()
+        old = cur["cameras"][i - 1] if len(cur["cameras"]) >= i else None
+        if form.get(f"cam{i}_remove") == "1":
+            continue
+        if not url and old:
+            url = old["url"]  # the saved link isn't shown again; empty keeps it
+        if url:
+            display.go2rtc_source(url)  # validates
+            d["cameras"].append({"name": name or f"Camera {i}", "url": url})
+    def run(cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True)
+        except OSError as e:
+            return subprocess.CompletedProcess(cmd, 1, "", str(e))
+    msgs = []
+    if display.save(STACK, d):
+        r = run(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", "go2rtc"])
+        msgs.append("cameras updated" if r.returncode == 0 else f"camera service restart failed: {r.stderr.strip()[-200:]}")
+    if d["enabled"] != cur.get("enabled", True):
+        run(["systemctl", "start" if d["enabled"] else "stop", "solar-display.service"])
+        msgs.append("screen " + ("on" if d["enabled"] else "off"))
+    run(["systemctl", "start", "--no-block", "solar-display-power.service"])
+    return msgs
+
+
 # --------------------------------------------------------------------------
 # Pages
 # --------------------------------------------------------------------------
@@ -359,6 +401,9 @@ def status_page(handler):
             f"<button>Use this station</button></p></form>" for r in sc.get("found", [])
         ) or (f"<p><small>No station found ({html.escape(sc.get('when', ''))}). It may not have a local network interface; "
               "enter its IP on the setup page, or set it to send its data here.</small></p>")
+    dsp = display.load(STACK)
+    display_line = (("shown on a screen plugged into the HDMI port" if dsp["enabled"] else "turned off")
+                    + (f", {len(dsp['cameras'])} camera(s)" if dsp["cameras"] else ", no cameras") + ".")
     adv = ss.load_json(path("state", "advisor.json"), {})
     adv_note = (f"last run {adv.get('generated')}: " + (adv.get("message") or (adv.get("recommendation") or [""])[0])) if adv else "not run yet (runs weekly)"
     body = f"""<h1>Solar monitor</h1>{banner}
@@ -373,6 +418,7 @@ def status_page(handler):
 <form method="post" action="/update" style="margin-top:8px"><button>Check for updates now</button></form></div>
 <div class="card"><b>Advisor</b>: <a href="/advisor">what would help most &mdash; batteries, panels, an inverter or an automatic generator</a>
 <br><small>{html.escape(adv_note)}</small></div>
+<div class="card"><b>Screen</b>: {display_line} <a href="/display">preview</a> &nbsp;<a href="/setup#screen">change</a></div>
 <div class="card" id="weather"><b>Sunlight data</b>: {weather_line}
 <form method="post" action="/weather/scan" style="margin-top:8px"><button>Scan for weather stations</button>
 <small>Looks for Ecowitt gateways and WeatherFlow Tempest hubs (about a minute).</small></form>{scan_rows}</div>
@@ -417,6 +463,24 @@ def setup_page(site, error="", done=None):
         station_note = ("Set the station's custom server to this box: Ecowitt (WS View &rarr; Customized) protocol Ecowitt, "
                         "path <code>/weather/ecowitt</code>, port 80; Ambient Weather path <code>/weather/ambient?</code>. "
                         + (f"Last data received {html.escape(wth['last_push'])}." if wth.get("last_push") else "Nothing received yet."))
+    dsp = display.load(STACK)
+    cams = ""
+    for i in range(1, display.MAX_CAMERAS + 1):
+        c = dsp["cameras"][i - 1] if len(dsp["cameras"]) >= i else {}
+        saved = (f"<small>Saved: <code>{html.escape(mask_url(c['url']))}</code>. Leave the link empty to keep it. "
+                 f"<label style='display:inline'><input type='checkbox' name='cam{i}_remove' value='1' style='width:auto'> remove</label></small>") if c else ""
+        cams += (f"<div class='row'><label>Camera {i} name {inp(f'cam{i}_name', c.get('name', ''), 'text', 'placeholder=' + chr(39) + ('Driveway' if i == 1 else 'Front door') + chr(39))}</label>"
+                 f"<label style='flex:2 1 300px'>Stream link {inp(f'cam{i}_url', '', 'text', 'placeholder=' + chr(39) + 'rtsps://192.168.1.1:7441/...' + chr(39) + ' style=' + chr(39) + 'max-width:100%' + chr(39) + ' autocomplete=off')}</label></div>{saved}")
+    screen_fields = f"""<fieldset id="screen"><legend>Screen and cameras</legend>
+<label><input type="checkbox" name="display_enabled" value="1" style="width:auto"{' checked' if dsp['enabled'] else ''}> Show the dashboard on a screen plugged into the HDMI port</label>
+<div class="row"><label>Screen off from (optional) {inp('display_off_from', dsp['off_from'], 'time')}</label>
+<label>Screen on again at {inp('display_off_to', dsp['off_to'], 'time')}</label></div>
+<small>For example 22:00 until 06:00, to save power and the screen.</small>
+<p><small>Up to two cameras are shown next to the power figures. UniFi Protect: open the camera &rarr; Settings &rarr; Advanced &rarr;
+RTSPS, turn on <b>Medium</b> quality and copy its link (<code>rtsps://...:7441/...</code>). The camera pictures are only shown on the
+box's own screen, not to other computers on the network.</small></p>{cams}
+<p><small>Camera entities, motion and doorbell events in Home Assistant: add the UniFi Protect integration there (Settings &rarr;
+Devices &amp; services; it's usually found automatically) with a local Protect user.</small></p></fieldset>"""
     msg = f"<p class='err'>{html.escape(error)}</p>" if error else ""
     if done:
         msg = "<div class='card'>Saved: " + html.escape("; ".join(done)) + ". <a href='/'>Back to the start page</a></div>"
@@ -451,6 +515,7 @@ def setup_page(site, error="", done=None):
 <label><input type="radio" name="weather_source" value="push" style="width:auto"{' checked' if wth['source'] == 'push' else ''}>
  The station sends its data here (Ecowitt "customized" upload or Ambient Weather custom server)</label>
 <small>{station_note}</small></fieldset>
+{screen_fields}
 <fieldset><legend>Prices (optional, for the advisor's cost comparison)</legend><div class="row">{cost_inputs}</div></fieldset>
 <fieldset><legend>Updates</legend>
 <label><input type="checkbox" name="auto_update" value="1" style="width:auto"{' checked' if upd['enabled'] else ''}> Install new versions automatically (checked daily, early morning)</label>
@@ -533,6 +598,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, status_page(self))
         elif self.path == "/advisor":
             self.send(200, advisor_page())
+        elif self.path == "/display":
+            self.send(200, display.PAGE)
+        elif self.path == "/display/data":
+            self.send(200, json.dumps(display.data(STACK, load_site())), "application/json")
         elif self.path == "/setup":
             self.send(200, setup_page(load_site()))
         elif self.path == "/api/status":
@@ -546,6 +615,11 @@ class Handler(BaseHTTPRequestHandler):
             f = self.form()
             try:
                 site = validate(f)
+                for i in range(1, display.MAX_CAMERAS + 1):  # check the screen settings before saving anything
+                    if f.get(f"cam{i}_url", "").strip():
+                        display.go2rtc_source(f[f"cam{i}_url"])
+                for k in ("display_off_from", "display_off_to"):
+                    display.parse_hhmm(f.get(k))
             except ValueError as e:
                 cur = load_site()
                 cur.update({k: v for k, v in f.items() if k in DEFAULT_SITE and k != "arrays"})
@@ -555,6 +629,7 @@ class Handler(BaseHTTPRequestHandler):
             ss.write_if_changed(path("state", "update.json"), json.dumps(
                 {"enabled": f.get("auto_update") == "1", "channel": "main" if f.get("update_channel") == "main" else "release"}, indent=2) + "\n", 0o644)
             msgs = apply_site(site)
+            msgs += apply_display(f)
             src = f.get("weather_source") if f.get("weather_source") in ("openmeteo", "station", "push") else "openmeteo"
             ip = f.get("station_ip", "").strip()
             w = weather_settings()
