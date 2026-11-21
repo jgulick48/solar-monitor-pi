@@ -16,6 +16,7 @@ import argparse
 import html
 import ipaddress
 import json
+import re
 import os
 import subprocess
 import sys
@@ -187,18 +188,39 @@ def load_site():
 # --------------------------------------------------------------------------
 # Validation and apply
 # --------------------------------------------------------------------------
+class FieldError(ValueError):
+    """A setup form value that isn't right; .field is the input's name, so the page can point at it."""
+    def __init__(self, field, msg):
+        super().__init__(msg)
+        self.field = field
+
+
+FIELD_NAMES = {"latitude": "Latitude", "longitude": "Longitude", "elevation": "Elevation", "battery_count": "Number of batteries",
+               "battery_kwh_each": "kWh per battery", "generator_kw": "Generator size", "future_generator_kw": "Automatic generator size",
+               "low_soc_alert": "Low battery alert", "time_zone": "Time zone"}
+
+
+def field_name(key):
+    m = re.match(r"a(\d)_(\w+)", key)
+    if m:
+        return f"Array {m.group(1)}: " + {"panels": "number of panels", "panel_watts": "watts per panel", "tilt": "tilt"}.get(m.group(2), m.group(2))
+    if key.startswith("cost_"):
+        return dict(COST_FIELDS).get(key[5:], key)
+    return FIELD_NAMES.get(key, key.replace("_", " ").capitalize())
+
+
 def num(form, key, lo, hi, required=True, integer=False):
     v = form.get(key, "").strip()
     if not v:
         if required:
-            raise ValueError(f"{key.replace('_', ' ')} is required")
+            raise FieldError(key, f"{field_name(key)} is needed")
         return ""
     try:
         x = int(v) if integer else float(v)
     except ValueError:
-        raise ValueError(f"{key.replace('_', ' ')}: '{v}' is not a number")
+        raise FieldError(key, f"{field_name(key)}: '{v}' is not a number")
     if not lo <= x <= hi:
-        raise ValueError(f"{key.replace('_', ' ')} must be between {lo} and {hi}")
+        raise FieldError(key, f"{field_name(key)} must be between {lo:g} and {hi:g}")
     return str(x)
 
 
@@ -224,7 +246,7 @@ def validate(form):
         "summary_time": display.parse_hhmm(form.get("summary_time", "")) or "00:00",
     }
     if site["time_zone"] not in zoneinfo.available_timezones():
-        raise ValueError(f"unknown time zone '{site['time_zone']}'")
+        raise FieldError("time_zone", f"unknown time zone '{site['time_zone']}'")
     for i in (1, 2):
         p = form.get(f"a{i}_panels", "").strip()
         if i == 2 and not p:
@@ -336,11 +358,28 @@ td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;white-
 .card{border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin:12px 0}
 .warn{border-color:var(--warn)} small{color:var(--muted)} code{font-size:.95em}
 fieldset{border:1px solid var(--line);border-radius:8px;margin:12px 0;padding:8px 16px 16px}
-label{display:block;margin-top:10px} input,select{font:inherit;padding:6px;width:100%;max-width:320px;box-sizing:border-box;
+label{display:block;margin-top:14px} input,select,textarea{font:inherit;padding:7px 8px;width:100%;max-width:340px;box-sizing:border-box;
 background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px}
-.row{display:flex;flex-wrap:wrap;gap:0 16px} .row label{flex:1 1 140px}
+/* every label above its box, all boxes the same width; checkboxes and radio buttons stay beside their text */
+label>input:not([type=checkbox]):not([type=radio]),label>select,label>textarea{display:block;margin-top:5px}
+label:has(>input[type=checkbox]),label:has(>input[type=radio]){display:flex;gap:8px;align-items:baseline}
+input[type=checkbox],input[type=radio]{width:auto;flex:none}
+.row{display:flex;flex-wrap:wrap;gap:0 20px;align-items:flex-end} .row label{flex:1 1 150px} .row label>input,.row label>select{max-width:none}
+select{max-width:560px}
+fieldset small{display:block;margin-top:6px;line-height:1.45} fieldset>p{margin:12px 0 0}
+legend{font-weight:600;padding:0 6px}
+h2{margin:48px 0 8px;padding-top:20px;border-top:2px solid var(--line)}
 button{font:inherit;padding:8px 18px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
-.err{color:#c33;font-weight:600}"""
+.err{color:#c33;font-weight:600}
+.notice{border-width:1px 1px 1px 6px}.notice.ok{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--bg))}
+.notice.err{border-color:#c33;background:color-mix(in srgb,#c33 9%,var(--bg));font-weight:600}
+.toast{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:20;width:min(860px,calc(100% - 32px));box-sizing:border-box;
+padding:12px 44px 12px 16px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.25);color:#fff;font-weight:600}
+.toast.ok{background:#0a6}.toast.err{background:#c33}
+.toast .x{position:absolute;right:8px;top:6px;background:none;border:0;color:#fff;font-size:22px;padding:2px 8px}
+.bad{border:2px solid #c33!important;box-shadow:0 0 0 3px color-mix(in srgb,#c33 25%,transparent)}
+.fielderr{display:block;color:#c33;font-weight:600;font-size:.9em;margin-top:4px}
+@media (max-width:600px){body{padding:12px} fieldset{padding:6px 12px 14px} .row label{flex-basis:100%}}"""
 
 
 def page(title, body):
@@ -444,7 +483,44 @@ Scanning takes up to two minutes. Give each dongle a fixed IP (DHCP reservation)
     return page("Solar monitor", body)
 
 
-def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect_msg=""):
+ERROR_WORDS = re.compile(r"^(not saved|not turned on)|failed|couldn't|can't|didn't|isn't running|wasn't", re.I)
+
+
+def is_error(text):
+    return bool(ERROR_WORDS.search(text or ""))
+
+
+def notice(kind, text, toast=False, link=None, anchor=True):
+    """A message box: kind "ok" or "err". toast=True: pinned to the top of the window with a close button."""
+    extra = f" <a href='{link[0]}'>{html.escape(link[1])}</a>" if link else ""
+    if toast:
+        return (f"<div class='toast {kind}' role='{'alert' if kind == 'err' else 'status'}'>{html.escape(text)}"
+                "<button type='button' class='x' aria-label='Close' onclick='this.parentNode.remove()'>&times;</button></div>")
+    return f"<div {'id=notice ' if anchor else ''}class='card notice {kind}'>{html.escape(text)}{extra}</div>"
+
+
+def scroll_to(target):
+    if not target:
+        return ""
+    return ("<script>addEventListener('load',()=>{const t=document.getElementById(" + json.dumps(target) + ");"
+            "if(t){t.scrollIntoView({block:'center'});if(t.focus)t.focus({preventScroll:true});}})</script>")
+
+
+def mark_field(body, name, error):
+    """Outline the input named `name` in red, with the message under it."""
+    m = re.search(r"<(input|select|textarea)\b[^>]*\bname=['\"]" + re.escape(name) + r"['\"][^>]*>", body)
+    if not m:
+        return body
+    tag = m.group(0)
+    bad = tag.replace("<" + m.group(1), "<" + m.group(1) + " id='err-field' class='bad' aria-invalid='true'", 1)
+    end = m.end()
+    if m.group(1) in ("select", "textarea"):
+        close = body.find("</" + m.group(1) + ">", end)
+        end = close + len(m.group(1)) + 3 if close >= 0 else end
+    return body[:m.start()] + bad + body[m.end():end] + f"<span class='fielderr'>{html.escape(error)}</span>" + body[end:]
+
+
+def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect_msg="", error_field="", form=None):
     upd = update_settings()
     def inp(name, value, typ="text", extra=""):
         return f"<input name='{name}' type='{typ}' value='{html.escape(str(value))}' {extra}>"
@@ -499,16 +575,22 @@ box's own screen, not to other computers on the network.</small></p>{cams}
 <p><small>UniFi Protect cameras can be picked from a list instead (and come to the front when they see someone):
 <a href="#protect">UniFi Protect cameras</a> below. Camera entities, motion and doorbell events in Home Assistant: add the UniFi Protect integration there (Settings &rarr;
 Devices &amp; services; it's usually found automatically) with a local Protect user.</small></p></fieldset>"""
-    msg = f"<p class='err'>{html.escape(error)}</p>" if error else ""
-    if done:
-        msg = "<div class='card'>Saved: " + html.escape("; ".join(done)) + ". <a href='/'>Back to the start page</a></div>"
-    if remote_msg:
-        msg = f"<div class='card'>Remote access: {html.escape(remote_msg)} <a href='#remote'>details</a></div>"
-    if protect_msg:
-        msg = f"<div class='card'>UniFi Protect: {html.escape(protect_msg)} <a href='#protect'>details</a></div>"
-    if support_msg:
-        msg = f"<div class='card'>Remote support: {html.escape(support_msg)} <a href='#support'>details</a></div>"
-    body = f"""<h1>Site setup</h1>{msg}
+    # One message per response: a banner pinned to the top of the window, the same message where it belongs
+    # (next to the field, or in the section whose form was sent) and the page scrolled there.
+    msg, toast, target = "", "", ""
+    if error:
+        toast, target = notice("err", "Not saved: " + error, toast=True), ("err-field" if error_field else "notice")
+        if not error_field:
+            msg = notice("err", "Not saved: " + error)
+    elif done:
+        text = "Saved: " + "; ".join(done) + "."
+        toast, msg = notice("ok", text, toast=True), notice("ok", text, link=("/", "Back to the start page"))
+    for sec_msg, title, sec in ((remote_msg, "Remote access", "remote"), (protect_msg, "UniFi Protect", "protect"),
+                                (support_msg, "Remote support", "support")):
+        if sec_msg:
+            kind = "err" if is_error(sec_msg) else "ok"
+            toast, target = notice(kind, f"{title}: {sec_msg}", toast=True), "notice"
+    body = f"""<h1>Site setup</h1>{toast}{msg}
 <form method="post" action="/setup">
 <fieldset><legend>Location</legend>
 <label>Site name {inp('name', site['name'])}</label>
@@ -554,14 +636,16 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
 <p><small>Saving restarts Home Assistant (about a minute) when the location, time zone or sizes changed.</small></p>
 {protect_section(protect_msg)}
 {remote_section(remote_msg)}
-{support_section(support_msg)}"""
+{support_section(support_msg)}{scroll_to(target)}"""
+    if error_field:
+        body = mark_field(body, error_field, error)
     return page("Site setup", body)
 
 
 def protect_section(msg=""):
     """UniFi Protect cameras (protect.py): console address and API key, then which cameras the screen shows."""
     d = protect.settings(STACK)
-    note = f"<div class='card'>{html.escape(msg)}</div>" if msg else ""
+    note = notice("err" if is_error(msg) else "ok", msg) if msg else ""
     saved = "<small>An API key is saved; leave the field empty to keep it.</small>" if d["api_key"] else ""
     cams_html = ""
     if d["host"] and d["api_key"]:
@@ -819,9 +903,9 @@ def remote_section(msg=""):
     d = tunnel.settings(STACK)
     def inp(name, value, extra=""):
         return f"<input name='{name}' value='{html.escape(value)}' autocomplete='off' {extra}>"
-    note = ""
+    note = notice("err" if is_error(msg) else "ok", msg) if msg else ""
     if d["message"]:
-        note += f"<p class='err'>{html.escape(d['message'])}</p>"
+        note += notice("err", d["message"], anchor=False)
     state = "<p>Off.</p>"
     if d["enabled"]:
         url = tunnel.public_url(STACK)
@@ -871,7 +955,8 @@ def support_section(msg=""):
         state += f"<p><small>{html.escape(st['message'])}</small></p>"
     saved = "<small>A tunnel token is saved; leave the field empty to keep it.</small>" if st["has_token"] else ""
     off = "" if not st["enabled"] else """<form method="post" action="/support/off"><p><button>Turn remote support off now</button></p></form>"""
-    return f"""<h2 id="support">Remote support (optional)</h2>{state}
+    note = notice("err" if is_error(msg) else "ok", msg) if msg else ""
+    return f"""<h2 id="support">Remote support (optional)</h2>{note}{state}
 <form method="post" action="/support"><fieldset><legend>Let a helper connect to this box</legend>
 <p><small>For troubleshooting: someone you trust sets up a Cloudflare Tunnel in <b>their</b> Cloudflare account and gives you its
 token and their SSH key. While remote support is on they can reach this box through that tunnel (what exactly, such as SSH, this
@@ -1012,13 +1097,19 @@ class Handler(BaseHTTPRequestHandler):
                 site = validate(f)
                 for i in range(1, display.MAX_CAMERAS + 1):  # check the screen settings before saving anything
                     if f.get(f"cam{i}_url", "").strip():
-                        display.go2rtc_source(f[f"cam{i}_url"])
+                        try:
+                            display.go2rtc_source(f[f"cam{i}_url"])
+                        except ValueError as e:
+                            raise FieldError(f"cam{i}_url", f"Camera {i}: {e}")
                 for k in ("display_off_from", "display_off_to"):
-                    display.parse_hhmm(f.get(k))
+                    try:
+                        display.parse_hhmm(f.get(k))
+                    except ValueError as e:
+                        raise FieldError(k, f"Screen off hours: {e}")
             except ValueError as e:
                 cur = load_site()
                 cur.update({k: v for k, v in f.items() if k in DEFAULT_SITE and k != "arrays"})
-                self.send(400, setup_page(cur, str(e)))
+                self.send(400, setup_page(cur, str(e), error_field=getattr(e, "field", ""), form=f))
                 return
             ss.write_if_changed(path("state", "site.json"), json.dumps(site, indent=2) + "\n", 0o644)
             ss.write_if_changed(path("state", "update.json"), json.dumps(
