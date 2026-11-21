@@ -1,0 +1,7 @@
+# PAM session for the kiosk user (solar-display.service): a logind seat session on tty1 so the
+# compositor can use the screen and input devices. systemd opens the session without
+# authenticating; nothing else can log in with this service (auth is always denied).
+auth     required pam_deny.so
+account  required pam_unix.so
+session  required pam_unix.so
+session  required pam_systemd.so
