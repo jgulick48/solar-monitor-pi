@@ -40,6 +40,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import genlog  # noqa: E402
 import screenpower as sp  # noqa: E402
+import wx  # noqa: E402
 import solar_setup as ss  # noqa: E402
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
@@ -54,6 +55,7 @@ DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
             # how often sounds may play: the same alert (camera + kind) is repeated at most every sound_cooldown s,
             # and two sounds are at least sound_gap s apart; doorbell rings always (the highlight isn't limited)
             "sound_cooldown": 60, "sound_gap": 5, "doorbell_always": True,
+            "weather": True,                 # weather (wx.py) in the panel with the solar figures
             "speak": False, "speak_mode": "after", "speak_template": "{object} at the {camera}",
             "speak_doorbell": "Someone's at the {camera}", "voice": "en_US-lessac-medium"}
 MAX_CAMERAS = 16   # all of them rotate through the two places on screen
@@ -399,6 +401,7 @@ def data(stack, site):
         "sound_cooldown": d.get("sound_cooldown", 60), "sound_gap": d.get("sound_gap", 5),
         "doorbell_always": d.get("doorbell_always", True),
         "expected": expected, "forecast": forecast_summary(fc, now, tz),
+        "weather": wx.view(stack, site, now) if d.get("weather", True) else None,
     }
 
 
@@ -601,13 +604,30 @@ background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot
 #soc .v{font-size:calc(var(--u)*4.6)}#socbar{height:calc(var(--u)*.8);border-radius:calc(var(--u)*.4);background:var(--line);margin-top:calc(var(--u)*.5);overflow:hidden}
 #socfill{height:100%;background:var(--batt);width:0}
 #soc{grid-row:span 2}.nocam #soc{grid-row:auto}
-#chart{flex:1;background:var(--panel);border-radius:14px;padding:calc(var(--u)*.8) calc(var(--u)*1);min-height:0;display:flex;flex-direction:column}
+#wx{display:none;background:var(--panel);border-radius:14px;padding:calc(var(--u)*.8) calc(var(--u)*1.1);gap:calc(var(--u)*.6);flex-direction:column}
+#wx.on{display:flex}
+#wxtop{display:flex;gap:calc(var(--u)*1.4);align-items:center;min-width:0}
+#wxnow{display:flex;align-items:center;gap:calc(var(--u)*.8);flex:none}
+#wxnow .t{font-size:calc(var(--u)*3.6);font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+#wxnow .d{font-size:calc(var(--u)*1.05);color:var(--muted);line-height:1.35;white-space:nowrap}
+#wxnow .d b{color:var(--fg);font-weight:600}
+.wi{width:calc(var(--u)*4.2);height:calc(var(--u)*4.2);flex:none}.wi.s{width:calc(var(--u)*2.2);height:calc(var(--u)*2.2)}
+.wa{width:calc(var(--u)*1.1);height:calc(var(--u)*1.1);vertical-align:-.15em;fill:var(--fg)}
+#wxdays,#wxhours{display:grid;gap:calc(var(--u)*.4);flex:1;min-width:0}
+#wxdays{grid-template-columns:repeat(var(--days,5),1fr)}#wxhours{grid-template-columns:repeat(var(--hours,6),1fr);border-top:1px solid var(--line);padding-top:calc(var(--u)*.5)}
+/* beside the cameras (half the width) there's room for now + the days; the hours show without cameras or on a portrait screen */
+#wrap:not(.nocam) #wxhours,#wx.tight #wxhours{display:none !important}
+.wxon .tile{padding:calc(var(--u)*.7) calc(var(--u)*1)}.wxon .tile .v{font-size:calc(var(--u)*2.7)}.wxon #soc .v{font-size:calc(var(--u)*3.8)}
+.wxon.nocam .tile .v{font-size:calc(var(--u)*2.3)}
+.wc{display:flex;flex-direction:column;align-items:center;font-size:calc(var(--u)*.95);color:var(--muted);line-height:1.3;min-width:0;white-space:nowrap}
+.wc .h{color:var(--fg);font-weight:600;font-size:calc(var(--u)*1.1)}.wc .r{color:var(--load)}
+#chart{flex:1;background:var(--panel);border-radius:14px;padding:calc(var(--u)*.8) calc(var(--u)*1);min-height:calc(var(--u)*7);display:flex;flex-direction:column}
 #chart .k{color:var(--muted);font-size:calc(var(--u)*1);display:flex;gap:calc(var(--u)*1.4)}
 #chart svg{flex:1;width:100%;min-height:0}
 .dot{display:inline-block;width:calc(var(--u)*.8);height:calc(var(--u)*.8);border-radius:50%;margin-right:calc(var(--u)*.35);vertical-align:middle}
 #notes{display:flex;flex-direction:column;gap:calc(var(--u)*.6)}
 .note{border-radius:12px;padding:calc(var(--u)*.8) calc(var(--u)*1.1);font-size:calc(var(--u)*1.25);background:var(--panel);border-left:calc(var(--u)*.5) solid var(--muted)}
-.note.warn{border-left-color:var(--warn);background:#2a1d12}.note.ok{border-left-color:var(--batt)}
+.note.warn{border-left-color:var(--warn);background:#2a1d12}.note.bad{border-left-color:var(--bad);background:#2e1414}.note.ok{border-left-color:var(--batt)}
 #foot{color:var(--muted);font-size:calc(var(--u)*.9);display:flex;justify-content:space-between}
 #blank{position:fixed;inset:0;background:#000;display:none;z-index:9}
 /* Burn-in protection (see the script): layouts rotate every 20 minutes and the page drifts a few pixels */
@@ -621,7 +641,7 @@ background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot
 #wrap.nocam{grid-template-rows:0 100vh}#wrap.swap{grid-template-rows:66vh 34vh}#wrap.swap.nocam{grid-template-rows:100vh 0}
 #wrap.nocam #tiles{grid-template-columns:repeat(3,1fr)}#wrap.nocam #soc{grid-row:span 2}
 #cams{grid-template-rows:100% !important;grid-auto-flow:column;grid-auto-columns:1fr;height:100%;min-height:0}
-#info{height:100%}}
+#info{height:100%}#wrap:not(.nocam) #wxhours{display:grid}}
 </style></head><body>
 <div id="wrap" class="nocam"><div id="cams"></div>
 <div id="info">
@@ -633,6 +653,7 @@ background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot
   <div class="tile" id="bat"><div class="k">Battery power</div><div class="v">--</div><div class="s"></div></div>
   <div class="tile" id="gen"><div class="k">Generator</div><div class="v" style="color:var(--gen)">--</div><div class="s"></div></div>
  </div>
+ <div id="wx"><div id="wxtop"><div id="wxnow"></div><div id="wxdays"></div></div><div id="wxhours"></div></div>
  <div id="chart"><div class="k"><span><span class="dot" style="background:var(--solar)"></span>Solar</span>
   <span><span class="dot" style="background:var(--load)"></span>House</span>
   <span><span class="dot" style="background:var(--batt)"></span>Battery %</span><span style="margin-left:auto">last 24 hours</span></div>
@@ -787,6 +808,46 @@ function chart(s){
   let g="";for(let i=1;i<4;i++)g+=`<line x1="0" x2="1000" y1="${290-i*67.5}" y2="${290-i*67.5}" stroke="#252b33" vector-effect="non-scaling-stroke"/>`;
   $("svg").innerHTML=g+line(s.pv||[],t0,t1,max,"#f5b301",3)+line(s.load||[],t0,t1,max,"#4aa3ff",3)+line((s.soc||[]).map(p=>[p[0],Math.min(100,p[1])]),t0,t1,100,"#2ecc71",2);
 }
+// Weather (wx.py): simple drawn icons (the kiosk has no colour emoji font) and wind arrows
+const SUN='<circle cx="12" cy="12" r="4.5" fill="#f5b301"/><g stroke="#f5b301" stroke-width="1.8" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g>';
+const MOON='<path d="M15.5 3.5a8.5 8.5 0 1 0 5 13.5A7 7 0 0 1 15.5 3.5z" fill="#cdd6e0"/>';
+const CLOUD=(c,dy=0)=>`<path transform="translate(0 ${dy})" d="M7 19h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 11.5 3.75 3.75 0 0 0 7 19z" fill="${c}"/>`;
+const DROPS='<g stroke="#4aa3ff" stroke-width="1.8" stroke-linecap="round"><path d="M8 20.5l-1 2.3M12 20.5l-1 2.3M16 20.5l-1 2.3"/></g>';
+const FLAKES='<g fill="#e8f1ff"><circle cx="8" cy="21.5" r="1.2"/><circle cx="12" cy="22.5" r="1.2"/><circle cx="16" cy="21.5" r="1.2"/></g>';
+const ICONS={clear:d=>d?SUN:MOON,
+  partly:d=>`<g transform="translate(-3 -3) scale(.75)">${d?SUN:MOON}</g>`+CLOUD("#aab4bf",1),
+  cloud:()=>CLOUD("#aab4bf"),fog:()=>'<g stroke="#aab4bf" stroke-width="2" stroke-linecap="round"><path d="M4 9h16M2 13h18M5 17h15"/></g>',
+  rain:()=>CLOUD("#8a96a3",-3)+DROPS,snow:()=>CLOUD("#aab4bf",-3)+FLAKES,sleet:()=>CLOUD("#8a96a3",-3)+'<g stroke="#4aa3ff" stroke-width="1.8" stroke-linecap="round"><path d="M8 20.5l-1 2.3M16 20.5l-1 2.3"/></g><circle cx="12" cy="22" r="1.2" fill="#e8f1ff"/>',
+  thunder:()=>CLOUD("#6d7884",-3)+'<path d="M12.5 15l-3 5h2.5l-1.5 4 4.5-6h-2.6l1.6-3z" fill="#f5b301"/>'};
+function wicon(k,day,cls){return `<svg class="wi ${cls||""}" viewBox="0 0 24 24">${(ICONS[k]||ICONS.cloud)(day!==false)}</svg>`}
+// arrow pointing the way the wind blows (it comes FROM the direction given)
+function warrow(deg){return deg==null?"":`<svg class="wa" viewBox="0 0 10 10"><path transform="rotate(${(+deg+180)%360} 5 5)" d="M5 0.5L8.5 9 5 7 1.5 9z"/></svg>`}
+function wind(w,g,c,deg,u){if(w==null)return"";return `${deg!=null?warrow(deg)+" ":""}${c||""} ${w}${g!=null&&g>w?"&ndash;"+g:""} ${u}`}
+function weather(w){
+  const box=$("wx");
+  $("wrap").classList.toggle("wxon",!!w);
+  if(!w){box.classList.remove("on");return}
+  box.classList.add("on");
+  // as many day and hour columns as fit (about 5.5 and 5 layout units each)
+  const lu=parseFloat(getComputedStyle($("upd")).fontSize)/.9||12;
+  const n=w.now,u=w.units,t=v=>v==null?"--":v+"°";
+  const extra=[n.feels!=null&&n.feels!==n.temp?`Feels <b>${t(n.feels)}</b>`:"",n.humidity!=null?`Humidity <b>${Math.round(n.humidity)}%</b>`:""].filter(Boolean).join(" &middot; ");
+  const rain=n.rain_day!=null?`Rain today <b>${n.rain_day} ${u.rain}</b>${n.rain_rate?` (${n.rain_rate} ${u.rain}/h)`:""}`:"";
+  $("wxnow").innerHTML=wicon(n.icon,n.day)+`<div class="t">${t(n.temp)}</div><div class="d"><b>${n.text||""}</b>${n.source==="station"?" &middot; station":""}<br>`+
+    `Wind <b>${n.wind==null?"--":wind(n.wind,n.gust,n.compass,n.wind_dir,u.wind)}</b><br>${[extra,rain].filter(Boolean).join("<br>")}</div>`;
+  const dn=Math.max(3,Math.min(7,Math.floor(($("wxtop").clientWidth-$("wxnow").offsetWidth)/(lu*6))));
+  box.style.setProperty("--days",dn);
+  const days=w.days.slice(0,dn);
+  // a rain-chance line only when one of the columns has a chance worth showing
+  const pop=(list,x)=>list.some(v=>v.pop!=null&&v.pop>=10)?`<span class="r">${x.pop!=null&&x.pop>=10?x.pop+"%":"&nbsp;"}</span>`:"";
+  $("wxdays").innerHTML=days.map(d=>`<div class="wc"><span>${d.name}</span>${wicon(d.icon,true,"s")}<span class="h">${t(d.hi)} <span style="color:var(--muted);font-weight:400">${t(d.lo)}</span></span>`+
+    pop(days,d)+`<span>${d.wind!=null?warrow(d.deg)+" "+d.wind+(d.gust>d.wind?"&ndash;"+d.gust:""):""}</span></div>`).join("");
+  const hn=Math.max(4,Math.min(12,Math.floor(box.clientWidth/(lu*5.5)))), step=hn>=12?1:2;
+  box.style.setProperty("--hours",Math.min(hn,Math.floor(12/step)));
+  const hrs=w.hours.filter((h,i)=>i%step===step-1).slice(0,Math.min(hn,Math.floor(12/step)));
+  $("wxhours").innerHTML=hrs.map(h=>`<div class="wc"><span>${h.label}</span>${wicon(h.icon,h.day,"s")}<span class="h">${t(h.temp)}</span>`+
+    pop(hrs,h)+`<span>${h.wind!=null?warrow(h.deg)+" "+h.wind+(h.gust>h.wind?"&ndash;"+h.gust:""):""}</span></div>`).join("");
+}
 async function tick(){
   let d;try{const r=await fetch("/display/data",{cache:"no-store"});d=await r.json()}catch(e){$("upd").textContent="Waiting for the monitor...";return}
   if(rev!==null&&d.rev!==rev){location.reload();return} rev=d.rev;
@@ -814,9 +875,18 @@ async function tick(){
   $("gen").style.display=(d.generator==="none"&&!(n.gen>0))?"none":"";
   setTile("gen",(n.gen||0)>50?kw(n.gen):"Off",(n.gen||0)>50?"charging the battery":(d.generator==="manual"?"started by hand":""));
   chart(d.series||{});
+  weather(d.weather);
   const notes=[...(d.alerts||[])]; if(d.advice)notes.push(d.advice);
+  for(const a of (d.weather&&d.weather.alerts)||[]){         // National Weather Service alerts
+    const until=a.ends?new Date(a.ends):null;
+    notes.unshift({level:/Extreme|Severe/.test(a.severity)?"bad":"warn",
+      text:a.event+(until&&!isNaN(until)?" until "+until.toLocaleString([], {weekday:"short",hour:"numeric",minute:"2-digit"}):"")});
+  }
   $("notes").innerHTML="";for(const a of notes){const e=document.createElement("div");e.className="note "+(a.level||"");e.textContent=a.text;$("notes").appendChild(e)}
   const age=n.age; $("upd").textContent=age==null?"No inverter data":"Inverter data "+(age<90?"live":Math.round(age/60)+" min old");
+  // too much for the screen (long notes, a small screen): the hourly weather row goes first
+  $("wx").classList.remove("tight");
+  if($("info").scrollHeight>$("info").clientHeight+2)$("wx").classList.add("tight");
 }
 // Burn-in protection. Every 20 minutes one of four layouts, picked from the clock (so a reload keeps it):
 // cameras left or right (without cameras: tiles in order or reversed) x info panel top-down or flipped.
