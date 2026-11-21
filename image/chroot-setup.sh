@@ -27,7 +27,7 @@ systemctl enable docker.service containerd.service avahi-daemon.service
 
 # HDMI wall display: cage (single-app Wayland compositor) + Chromium in kiosk mode, wlr-randr for the
 # screen's off hours. No desktop. Started only when a screen is connected (solar-display.service).
-apt-get install -y -q --no-install-recommends cage wlr-randr fonts-dejavu-core libgl1-mesa-dri libegl1 libgles2
+apt-get install -y -q --no-install-recommends cage wlr-randr v4l-utils fonts-dejavu-core libgl1-mesa-dri libegl1 libgles2
 apt-get install -y -q --no-install-recommends chromium || apt-get install -y -q --no-install-recommends chromium-browser
 
 # Hostname -> http://solar-monitor.local/ (mDNS via avahi)

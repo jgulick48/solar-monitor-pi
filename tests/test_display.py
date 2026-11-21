@@ -147,14 +147,43 @@ class Display(unittest.TestCase):
         form = dict(SITE, a1_name="A", a1_panels="24", a1_panel_watts="285", a1_tilt="30", a1_azimuth="180",
                     elevation="", inverter_model="6000xp", generator_kw="", future_generator_kw="28",
                     generator_fuel="gasoline", weather_source="openmeteo", display_enabled="1",
-                    display_off_from="22:00", display_off_to="6:00", cam1_name="Drive", cam1_url="",
+                    power_mode="hours", hours1_days="weekdays", hours1_on="6:00", hours1_off="22:00",
+                    hours2_days="weekends", hours2_on="08:00", hours2_off="01:00", wake_doorbell="1", cec="1",
+                    cam1_name="Drive", cam1_url="",
                     cam2_name="Door", cam2_url="rtsps://10.1.1.1:7441/SECRET2?enableSrtp")
         post = lambda f: urllib.request.urlopen(urllib.request.Request(  # noqa: E731
             base + "/setup", data=urllib.parse.urlencode(f).encode(), method="POST"))
         post(form).read()
         saved = display.load(stack)
         self.assertEqual([c["url"] for c in saved["cameras"]], ["rtsps://h:7441/TOK", "rtsps://10.1.1.1:7441/SECRET2?enableSrtp"])
-        self.assertEqual((saved["off_from"], saved["off_to"]), ("22:00", "06:00"))
+        self.assertEqual((saved["power_mode"], saved["hours"]), ("hours", [{"days": "weekdays", "on": "06:00", "off": "22:00"},
+                                                                           {"days": "weekends", "on": "08:00", "off": "01:00"}]))
+        self.assertEqual((saved["wake"]["doorbell"], saved["wake"]["person"], saved["cec"]), (True, False, True))
+        # occupancy: needs sensors; with them, Home Assistant gets an automation that reports to /display/presence
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            post(dict(form, power_mode="occupied")).read()
+        self.assertEqual(e.exception.code, 400)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            post(dict(form, power_mode="occupied", occupancy="light.kitchen; rm -rf")).read()
+        self.assertEqual(e.exception.code, 400)
+        post(dict(form, power_mode="occupied", occupancy="binary_sensor.den_motion, person.ann", occupancy_hold="5")).read()
+        with open(os.path.join(stack, "homeassistant", "packages", "solar_display.yaml")) as f:
+            pkg = f.read()
+        self.assertIn("http://127.0.0.1/display/presence", pkg)
+        self.assertIn('entity_id: ["binary_sensor.den_motion", "person.ann"]', pkg)
+        power = lambda: json.load(urllib.request.urlopen(base + "/display/power"))  # noqa: E731
+        self.assertEqual(power()["why"], "no word from Home Assistant's sensors")   # unknown: stays on
+        presence = lambda occ: urllib.request.urlopen(urllib.request.Request(  # noqa: E731
+            base + "/display/presence", data=json.dumps({"occupied": occ}).encode(), method="POST")).read()
+        presence(True)
+        self.assertEqual(power()["on"], True)
+        sp = display.sp
+        sp.PRESENCE["last_on"] -= 600                                   # the room emptied 10 minutes ago
+        presence(False)
+        self.assertEqual((power()["on"], power()["why"]), (False, "nobody in the room"))
+        post(form).read()                                               # back to on-hours: package emptied
+        with open(os.path.join(stack, "homeassistant", "packages", "solar_display.yaml")) as f:
+            self.assertNotIn("rest_command", f.read())
         with open(os.path.join(stack, "go2rtc", "go2rtc.yaml")) as f:
             self.assertIn('cam2: "rtspx://10.1.1.1:7441/SECRET2"', f.read())
         with self.assertRaises(urllib.error.HTTPError) as e:
