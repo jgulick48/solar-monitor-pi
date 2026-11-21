@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import advisor  # noqa: E402
 import backup  # noqa: E402
 import display  # noqa: E402
+import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import weather  # noqa: E402
 
@@ -391,6 +392,7 @@ def status_page(handler):
 <div class="card"><b>Advisor</b>: <a href="/advisor">what would help most &mdash; batteries, panels, an inverter or an automatic generator</a>
 <br><small>{html.escape(adv_note)}</small></div>
 <div class="card"><b>Backups</b>: {backup_line()} &nbsp;<a href="/backup">change</a></div>
+{generator_card(site)}
 <div class="card"><b>Screen</b>: {display_line} <a href="/display">preview</a> &nbsp;<a href="/setup#screen">change</a></div>
 <div class="card" id="weather"><b>Sunlight data</b>: {weather_line}
 <form method="post" action="/weather/scan" style="margin-top:8px"><button>Scan for weather stations</button>
@@ -513,6 +515,58 @@ def run_quietly(cmd):
 
 def _when(ts):
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts else "never"
+
+
+def _hm(ts):
+    return time.strftime("%a %b %-d %H:%M", time.localtime(ts))
+
+
+def generator_card(site):
+    """Start page: hours since the generator's last service."""
+    s = genlog.status(STACK, site)
+    if not s["kinds"]:
+        return ""
+    parts = []
+    for k in s["kinds"]:
+        line = f"{k['since_service']:g} of {k['interval']} hours since the last service"
+        if k["due"]:
+            line = f"<b>service due</b>: {line}"
+        if k["running"]:
+            line += " (running now)"
+        parts.append(line)
+    return f"<div class='card{' warn' if any(k['due'] for k in s['kinds']) else ''}'><b>Generator</b>: {'; '.join(parts)} &nbsp;<a href='/generator'>log</a></div>"
+
+
+def generator_page(site, msg=""):
+    s = genlog.status(STACK, site)
+    st = genlog.load(STACK)
+    cards = ""
+    for k in s["kinds"]:
+        last = k["last_run"]
+        last_txt = (f"{_hm(last['start'])}, {last['hours']:.1f} h, {last['kwh']:g} kWh") if last else "none yet"
+        cards += f"""<div class="card{' warn' if k['due'] else ''}"><b>{html.escape(k['name'])}</b><br>
+{'<b>Service due.</b> ' if k['due'] else ''}{k['since_service']:g} hours since the last service
+({'serviced ' + html.escape(k['serviced_on']) if k['serviced_on'] else 'no service recorded yet: counted from the start of the history'});
+service every {k['interval']} hours, {max(k['left'], 0):g} to go.{' <b>Running now.</b>' if k['running'] else ''}<br>
+<small>Last run: {last_txt}. Last 30 days: {k['runs_30d']} run(s), {k['hours_30d']:g} h, {k['kwh_30d']:g} kWh.
+{k['total_hours']:g} hours in all.</small>
+<form method="post" action="/generator/serviced" style="margin-top:8px"><input type="hidden" name="kind" value="{k['kind']}">
+<label>Hours it has run since that service (0 if just now) <input name="hours_since" value="0" inputmode="decimal" style="max-width:120px"></label>
+<p><button>Serviced (oil changed)</button></p></form></div>"""
+    if not cards:
+        cards = "<p>No generator runs found in the history yet.</p>"
+    rows = "".join(f"<tr><td>{_hm(r['start'])}</td><td>{r['hours']:.1f} h</td><td>{r['kwh']:g} kWh</td><td>{r['peak_kw']:g} kW</td>"
+                   f"<td>{'GEN input' if r['kind'] == 'inverter' else 'DC charger'}</td></tr>" for r in reversed(st["runs"][-50:]))
+    note = ""
+    if s["backfilling"]:
+        note = f"<p><small>Still reading the older history (up to {_hm(s['processed_until'])}); this takes a few minutes.</small></p>"
+    body = f"""<h1>Generator</h1>{('<div class="card">' + html.escape(msg) + '</div>') if msg else ''}{note}{cards}
+<p><small>Runs are found in the inverter history: power on the inverters' generator input, or charging the inverters didn't do
+themselves (a generator on a Chargeverter or other DC charger). Service intervals: 200 hours for a generator on the GEN input,
+100 hours for one charging through a DC charger. Home Assistant reminds you when a service is due.</small></p>
+<h2>Runs</h2><table><tr><th>Started</th><th>Ran</th><th>Energy</th><th>Peak</th><th>Connected to</th></tr>{rows or '<tr><td colspan=5>none</td></tr>'}</table>
+<p><a href="/">Back</a></p>"""
+    return page("Generator", body)
 
 
 def backup_line():
@@ -647,6 +701,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(display.ha_status(STACK, load_site())), "application/json")
         elif self.path == "/backup":
             self.send(200, backup_page())
+        elif self.path == "/generator":
+            self.send(200, generator_page(load_site()))
         elif self.path == "/setup":
             self.send(200, setup_page(load_site()))
         elif self.path == "/api/status":
@@ -697,6 +753,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             backup.save_settings(STACK, {**backup.settings(STACK), "uuid": uuid, "history": f.get("history") == "1"})
             self.send(200, backup_page("Saved." + (" The first backup runs tonight; or use Back up now." if uuid else "")))
+        elif self.path == "/generator/serviced":
+            f = self.form()
+            kind = f.get("kind")
+            try:
+                hours = float(f.get("hours_since") or 0)
+                if kind not in genlog.QUERIES or not 0 <= hours <= 10000:
+                    raise ValueError
+            except ValueError:
+                self.send(400, generator_page(load_site(), "Hours since the service must be a number of hours."))
+                return
+            genlog.mark_serviced(STACK, kind, hours)
+            self.send(200, generator_page(load_site(), "Service recorded."))
         elif self.path == "/backup/run":
             run_quietly(["systemctl", "start", "--no-block", "solar-backup.service"])
             self.send(303, "", extra={"Location": "/backup"})

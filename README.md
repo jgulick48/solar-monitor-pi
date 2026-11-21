@@ -17,6 +17,7 @@ read, never changed.
 | Home Assistant | Inverter entities (MQTT discovery), the Solar dashboard, alerts to phones | `http://<pi>:8123` |
 | Advisor | Weekly analysis: batteries, panels, inverter or generator? | `http://<pi>/advisor` |
 | Backups | Nightly backup to a USB stick, and restore | `http://<pi>/backup` |
+| Generator log | Every generator run, hours since the last service, service reminder | `http://<pi>/generator` |
 | Wall display | Dashboard and up to two cameras on a screen plugged into the Pi's HDMI port | `http://<pi>/display` |
 | go2rtc | Turns the cameras' RTSP(S) streams into video the display's browser can play | localhost only |
 
@@ -128,6 +129,24 @@ days.
 
 restic runs in a container (`backup` service in `stack/compose.yaml`, profile `backup`), so boxes updated from older
 versions download it on the first backup.
+
+## Generator log and service reminder
+
+The box finds every generator run in the inverter history, a minute at a time, two ways:
+
+- **On the inverters' GEN input** (usually auto-started by the dry contact): generator input power above 200 W.
+  Service every **200 hours**.
+- **Through a DC charger** such as a Chargeverter: the battery BMS's charging power more than 500 W above what the
+  inverters put into the battery. Service every **100 hours**.
+
+Dips under 5 minutes don't end a run; runs under 3 minutes (10 for the charger estimate) are ignored. The first time,
+it works through the existing history (up to 400 days). The **Generator** page (`http://<pi>/generator`) lists the runs
+(start, hours, energy, peak) and the hours since the last service, with a **Serviced** button (enter the hours it has
+already run if the oil was changed earlier). Home Assistant gets *Site generator hours since service*, *last run*,
+*running* and *service due* sensors and sends a reminder when a service is due. The generator power everywhere (wall
+display, Home Assistant, daily summary) now includes a generator charging through a DC charger.
+
+State: `state/generator.json`; `setup/genlog.py` (run by the collector every 5 minutes; `genlog.py update` by hand).
 
 ## Advisor
 
