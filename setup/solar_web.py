@@ -863,7 +863,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, status_page(self))
         elif self.path == "/advisor":
             self.send(200, advisor_page())
-        elif self.path == "/display":
+        elif url.path == "/display":  # ?layout=N pins a layout (burn-in protection, see display.py)
             self.send(200, display.PAGE)
         elif self.path == "/display/data":
             self.send(200, json.dumps(display.data(STACK, load_site())), "application/json")
