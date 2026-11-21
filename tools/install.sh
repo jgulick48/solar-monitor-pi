@@ -14,9 +14,11 @@ cp -a --no-preserve=ownership "$SRC/stack/." "$DEST/stack/"
 install -m 0644 "$SRC"/systemd/solar-*.service "$SRC"/systemd/solar-*.timer /etc/systemd/system/
 # HDMI wall display: kiosk account (no password, no shell), its PAM session, hotplug rule
 if ! id solar-display >/dev/null 2>&1; then
-  groups=$(for g in video render input; do getent group "$g" >/dev/null && printf '%s,' "$g"; done)
+  groups=$(for g in video render input audio; do getent group "$g" >/dev/null && printf '%s,' "$g"; done)
   useradd -r -m -d /var/lib/solar-display -s /usr/sbin/nologin ${groups:+-G "${groups%,}"} solar-display
 fi
+# sound through HDMI (camera chimes): older installs made the account without the audio group
+getent group audio >/dev/null && usermod -aG audio solar-display 2>/dev/null || true
 install -m 0644 "$SRC/system/pam-solar-display" /etc/pam.d/solar-display
 install -m 0644 "$SRC/system/90-solar-display.rules" /etc/udev/rules.d/90-solar-display.rules
 systemctl daemon-reload || true   # no-op in a chroot

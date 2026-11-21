@@ -4,6 +4,8 @@
 # and there is no "restore pages" prompt after a power cut.
 # Screen mode from the TV's EDID (its preferred mode; 1080p on 4K TVs). Never stops the kiosk.
 /usr/bin/python3 /opt/solar-monitor/setup/display.py screen-mode 2>&1 || true
+# Sound (camera chimes) to the HDMI port the screen is on.
+/usr/bin/python3 /opt/solar-monitor/setup/display.py screen-audio 2>&1 || true
 B=/usr/bin/chromium; [ -x "$B" ] || B=/usr/bin/chromium-browser
 exec "$B" --kiosk --ozone-platform=wayland --noerrdialogs --disable-infobars --no-first-run \
   --disable-session-crashed-bubble --disable-features=Translate,TranslateUI --disable-pinch \

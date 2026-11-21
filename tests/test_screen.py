@@ -79,6 +79,44 @@ class Screen(unittest.TestCase):
         finally:
             display.load = orig
 
+    def test_clock_format(self):
+        import datetime as dt
+        t = dt.datetime(2026, 11, 21, 16, 41)
+        self.assertEqual(display.hm(t, {"units": "us_customary"}), "4:41 PM")
+        self.assertEqual(display.hm(t, {"units": "metric"}), "16:41")
+        self.assertEqual(display.hm(t, {"units": "us_customary", "clock": "24"}), "16:41")
+        self.assertEqual(display.hm(t.replace(hour=9, minute=5), {"units": "metric", "clock": "12"}), "9:05 AM")
+
+    def test_advice_uses_the_clock(self):
+        import datetime as dt
+        from test_display import DENVER, SITE
+        eve = dt.datetime(2026, 11, 21, 15, 30, tzinfo=DENVER)
+        a12 = display.generator_advice({**SITE, "units": "us_customary"}, {"soc": 50, "load_avg_3d": 800}, eve, DENVER)
+        a24 = display.generator_advice({**SITE, "units": "us_customary", "clock": "24"}, {"soc": 50, "load_avg_3d": 800}, eve, DENVER)
+        self.assertRegex(a12["text"], r"\d:\d\d PM")
+        self.assertNotRegex(a24["text"], r"[AP]M")
+        self.assertEqual(a12["sunset"], a24["sunset"])                        # machine value for HA stays 24-hour
+
+    def test_hdmi_sound_card(self):
+        cards = ["vc4hdmi0", "vc4hdmi1", "Headphones"]
+        self.assertIn('"hdmi:CARD=vc4hdmi1,DEV=0"', display.asoundrc(["HDMI-A-2"], cards))
+        self.assertIn("card vc4hdmi0", display.asoundrc(["HDMI-A-1"], cards))
+        self.assertIsNone(display.asoundrc(["HDMI-A-1"], ["Headphones"]))
+        with tempfile.TemporaryDirectory() as home:
+            proc = os.path.join(home, "cards")
+            open(proc, "w").write(" 0 [vc4hdmi0       ]: vc4-hdmi - vc4-hdmi-0\n 1 [vc4hdmi1       ]: vc4-hdmi - vc4-hdmi-1\n")
+            old = display.screens
+            display.screens = lambda: [{"output": "HDMI-A-1"}]
+            try:
+                display.screen_audio(home=home, proc=proc)
+            finally:
+                display.screens = old
+            self.assertIn("CARD=vc4hdmi0", open(os.path.join(home, ".asoundrc")).read())
+
+    def test_page_has_chimes(self):
+        for needle in ("CHIMES={doorbell", "new AudioContext()", "d.test_sound", "soundCfg.quiet&&soundCfg.off"):
+            self.assertIn(needle, display.PAGE)
+
     def test_page_uses_the_scale_unit(self):
         css = display.PAGE.split("<script>")[0]
         self.assertIn("--u:min(1vw,1.7778vh)", css)
