@@ -2,7 +2,8 @@
 """Simulated Ecowitt gateway (GW1100/GW2000 style), for testing the solar monitor's weather station support.
 
   UDP 46000   answers the CMD_BROADCAST discovery packet with its MAC, IP, port and name
-  HTTP 80     /get_livedata_info with outdoor temperature (0x02, °F) and solar radiation (0x15, W/m2)
+  HTTP 80     /get_livedata_info with outdoor temperature (0x02, °F), solar radiation (0x15, W/m2), wind
+              (0x0B/0x0C mph, 0x0A degrees), rain (0x0E/0x10, in) and pressure (wh25 rel, inHg)
 
 Sunlight follows a clear-sky curve for the latitude with drifting clouds; temperature follows the day.
 ?clouds=0.3 (0..1) on the HTTP port sets the cloud cover, / shows the current values.
@@ -70,11 +71,23 @@ def http(a):
                 state["clouds"] = max(0.0, min(1.0, float(q["clouds"])))
             ghi, tf = reading(a)
             if u.path == "/get_livedata_info":
+                # wind drifts around a westerly breeze, gusting; a little rain on cloudy days
+                t = time.time()
+                wind = round(6 + 4 * math.sin(t / 600) + 2 * math.sin(t / 47), 1)
+                gust = round(wind * 1.6 + 2 * abs(math.sin(t / 13)), 1)
+                wdir = int(260 + 30 * math.sin(t / 900)) % 360
+                rain = round(0.25 * state["clouds"], 2)
                 body = json.dumps({"common_list": [{"id": "0x02", "val": f"{tf}", "unit": "F"},
                                                    {"id": "0x07", "val": "45%"},
+                                                   {"id": "3", "val": f"{round(tf - wind / 3, 1)}", "unit": "F"},
+                                                   {"id": "0x0B", "val": f"{max(wind, 0)} mph"},
+                                                   {"id": "0x0C", "val": f"{max(gust, 0)} mph"},
+                                                   {"id": "0x0A", "val": f"{wdir}"},
                                                    {"id": "0x15", "val": f"{ghi} W/m2"},
                                                    {"id": "0x17", "val": "2"}],
-                                   "wh25": [{"intemp": "70.1", "unit": "F", "inhumi": "38%"}]})
+                                   "rain": [{"id": "0x0E", "val": f"{0.1 if state['clouds'] > 0.8 else 0} in/Hr"},
+                                            {"id": "0x10", "val": f"{rain} in"}],
+                                   "wh25": [{"intemp": "70.1", "unit": "F", "inhumi": "38%", "abs": "24.85 inHg", "rel": "29.92 inHg"}]})
                 ctype = "application/json"
             else:
                 body = (f"<!doctype html><title>ecowittsim</title><body style='font:16px system-ui;padding:12px'>"

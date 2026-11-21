@@ -99,6 +99,14 @@ It runs Chromium in kiosk mode inside `cage` (a one-app Wayland compositor; no d
 the kiosk software is installed and a screen is connected; plugging a screen in starts it (udev rule). The browser's
 profile lives in RAM. The same page is at `http://<pi>/display` from other computers, without the cameras.
 
+**Weather** shows in the same panel as the solar figures (setup page: *Show the weather with the solar figures*, on
+by default): now (temperature, conditions, feels-like, wind speed, gusts and direction, humidity, rain today), the next
+days (high/low, rain chance, wind) and, where there's room, the next 12 hours. The forecast comes from Open-Meteo (free,
+no key; every 30 minutes); a weather station set up on the setup page (Ecowitt, Tempest, WeatherLink, or pushing to
+the box) supplies "now" with its own readings, wind included. In the US, National Weather Service alerts for the site
+(every 10 minutes) appear with the other notes, red for severe ones. If the panel doesn't fit the screen (long notes, a
+small screen), the hourly row is left out first.
+
 **When the screen is on** (setup page, Screen and cameras): always; during **on-hours** (up to four lines such as
 Mon-Fri 06:30-22:00 and Sat-Sun 08:00-01:00, past midnight allowed); **when someone's in the room**, from Home
 Assistant occupancy, motion or presence sensors (`binary_sensor.*`, `person.*`, `input_boolean.*`; stays on for a set

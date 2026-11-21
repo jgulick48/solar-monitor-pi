@@ -40,6 +40,7 @@ import support  # noqa: E402
 import tts  # noqa: E402
 import tunnel  # noqa: E402
 import weather  # noqa: E402
+import wx  # noqa: E402
 
 STACK = "/opt/solar-monitor/stack"
 SETUP_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "solar_setup.py")
@@ -374,7 +375,8 @@ def screen_power_form(form):
 def apply_display(form):
     """Screen and camera settings from the setup form. Returns messages; raises ValueError."""
     cur = display.load(STACK)
-    d = {"enabled": form.get("display_enabled") == "1", **screen_power_form(form), "cameras": [],
+    d = {"enabled": form.get("display_enabled") == "1", "weather": form.get("display_weather") == "1",
+         **screen_power_form(form), "cameras": [],
          "sounds": {k: form.get(f"sound_{k}") == "1" for k, _, _ in display.SOUND_KINDS},
          "volume": max(0, min(100, int(form.get("volume") or 70) if str(form.get("volume") or "70").isdigit() else 70)),
          "sound_quiet": form.get("sound_quiet") == "1",
@@ -674,6 +676,7 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect
 <p><small>Screen: {html.escape(display.screen_line())}. The picture size comes from the screen itself (its EDID);
 4K TVs are run at 1920x1080, which they scale up.</small></p>
 <label><input type="checkbox" name="display_enabled" value="1" style="width:auto"{' checked' if dsp['enabled'] else ''}> Show the dashboard on a screen plugged into the HDMI port</label>
+<label><input type="checkbox" name="display_weather" value="1" style="width:auto"{' checked' if dsp.get('weather', True) else ''}> Show the weather with the solar figures (now, the next hours and days, wind; National Weather Service alerts in the US)</label>
 {power_fields(dsp)}
 <p style="margin-top:16px"><b>Sounds</b> <small style="display:inline">through the screen's speakers (HDMI), when a UniFi Protect camera sees:</small></p>
 <div class="row">{''.join(f"<label><input type='checkbox' name='sound_{k}' value='1'{' checked' if (dsp.get('sounds') or {}).get(k, on) else ''}> {t}</label>" for k, t, on in display.SOUND_KINDS)}</div>
@@ -1522,6 +1525,7 @@ class Handler(BaseHTTPRequestHandler):
             tf = float(q["tempf"]) if q.get("tempf") not in (None, "") else None
             if weather_settings().get("source") == "push":
                 vm_push(solar, weather.f_to_c(tf), kind)
+                wx.save_station(STACK, weather.push_fields(q), kind)
             self.send(200, "OK", "text/plain")
         except (ValueError, OSError) as e:
             self.send(400, f"bad data: {e}", "text/plain")

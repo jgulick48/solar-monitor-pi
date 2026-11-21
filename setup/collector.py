@@ -29,6 +29,7 @@ import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import support  # noqa: E402
 import weather  # noqa: E402
+import wx  # noqa: E402
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
 GAMMA = -0.0035          # PV power change per degree C of cell temperature (as in advisor.py)
@@ -53,6 +54,7 @@ def station_sample(stack):
     if cfg.get("source") != "station" or not cfg.get("station"):
         return
     r = weather.read(cfg["station"])
+    wx.save_station(stack, r, cfg["station"].get("type", "station"))     # all its readings, for the wall display
     ts = int(time.time() * 1000)
     lines = []
     if r.get("solar_wm2") is not None:
@@ -133,6 +135,7 @@ def main():
     marker = os.path.join(args.stack, "state", "openmeteo-backfilled")
     last_om = 0.0
     last_gen = 0.0
+    last_wx = last_alerts = 0.0
     while True:
         try:
             station_sample(args.stack)
@@ -150,6 +153,19 @@ def main():
             except Exception as e:  # noqa: BLE001
                 log("Open-Meteo fetch failed:", e)
                 last_om = time.time() - 3000  # retry in ~10 minutes
+        if time.time() - last_wx >= 1800:          # weather forecast for the wall display
+            try:
+                wx.fetch_forecast(args.stack)
+                last_wx = time.time()
+            except Exception as e:  # noqa: BLE001
+                log("weather forecast fetch failed:", e)
+                last_wx = time.time() - 1500          # retry in ~5 minutes
+        if time.time() - last_alerts >= 600:
+            try:
+                wx.fetch_alerts(args.stack)
+            except Exception as e:  # noqa: BLE001
+                log("weather alerts fetch failed:", e)
+            last_alerts = time.time()
         if time.time() - last_gen >= 300:
             try:
                 n = genlog.update(args.stack)
