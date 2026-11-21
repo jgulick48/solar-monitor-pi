@@ -36,6 +36,7 @@ import protect  # noqa: E402
 import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import support  # noqa: E402
+import tts  # noqa: E402
 import tunnel  # noqa: E402
 import weather  # noqa: E402
 
@@ -295,7 +296,7 @@ def apply_site(site):
         r = subprocess.run(["timedatectl", "set-timezone", site["time_zone"]], capture_output=True, text=True)
         msgs.append("time zone set" if r.returncode == 0 else f"could not set the system time zone: {r.stderr.strip()}")
     sec = ss.ensure_secrets(STACK)
-    env_changed = ss.write_if_changed(path(".env"), ss.load_env_text(sec, site["time_zone"], ss.env_profiles(STACK)), 0o600)
+    env_changed = ss.write_if_changed(path(".env"), ss.load_env_text(sec, site["time_zone"], ss.env_profiles(STACK), ss.env_extra(STACK)), 0o600)
     restart = (["homeassistant"] if ha_changed else []) + (["grafana"] if env_changed else [])
     if restart:
         r = subprocess.run(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", *restart], capture_output=True, text=True)
@@ -320,7 +321,17 @@ def apply_display(form):
          "off_to": display.parse_hhmm(form.get("display_off_to")), "cameras": [],
          "sounds": {k: form.get(f"sound_{k}") == "1" for k, _, _ in display.SOUND_KINDS},
          "volume": max(0, min(100, int(form.get("volume") or 70) if str(form.get("volume") or "70").isdigit() else 70)),
-         "sound_quiet": form.get("sound_quiet") == "1"}
+         "sound_quiet": form.get("sound_quiet") == "1",
+         "speak": form.get("speak") == "1",
+         "speak_mode": "only" if form.get("speak_mode") == "only" else "after",
+         "speak_template": (form.get("speak_template") or tts.DEFAULT_TEMPLATE).strip()[:120],
+         "speak_doorbell": (form.get("speak_doorbell") or tts.DEFAULT_DOORBELL).strip()[:120],
+         "voice": form.get("voice") if form.get("voice") in dict(tts.VOICES) else "en_US-lessac-medium"}
+    for k in ("speak_template", "speak_doorbell"):
+        try:
+            tts.check_template(d[k])
+        except ValueError as e:
+            raise FieldError(k, f"Announcement: {e}")
     # UniFi Protect's cameras are set in their own section (protect.py); the fields here are the manual ones
     keep = [c for c in cur["cameras"] if c.get("protect_id")]
     manual = [c for c in cur["cameras"] if not c.get("protect_id")]
@@ -342,6 +353,7 @@ def apply_display(form):
         except OSError as e:
             return subprocess.CompletedProcess(cmd, 1, "", str(e))
     msgs = []
+    speech_changed = (d["speak"], d["voice"]) != (cur.get("speak", False), cur.get("voice", "en_US-lessac-medium"))
     if display.save(STACK, d):
         r = run(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", "go2rtc"])
         msgs.append("cameras updated" if r.returncode == 0 else f"camera service restart failed: {r.stderr.strip()[-200:]}")
@@ -349,6 +361,10 @@ def apply_display(form):
         run(["systemctl", "start" if d["enabled"] else "stop", "solar-display.service"])
         msgs.append("screen " + ("on" if d["enabled"] else "off"))
     run(["systemctl", "start", "--no-block", "solar-display-power.service"])
+    if speech_changed or d["speak"]:
+        start_speech(speech_changed)
+        if speech_changed:
+            msgs.append("speech " + ("turning on (the first time it downloads the speech service, a few minutes)" if d["speak"] else "off"))
     return msgs
 
 
@@ -578,8 +594,17 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect
 <div class="row">{''.join(f"<label><input type='checkbox' name='sound_{k}' value='1'{' checked' if (dsp.get('sounds') or {}).get(k, on) else ''}> {t}</label>" for k, t, on in display.SOUND_KINDS)}</div>
 <div class="row"><label>Volume <input type="range" name="volume" min="0" max="100" step="5" value="{dsp.get('volume', 70)}"></label>
 <label><input type="checkbox" name="sound_quiet" value="1"{' checked' if dsp.get('sound_quiet', True) else ''}> Not during the screen-off hours</label></div>
+<p style="margin-top:16px"><b>Spoken announcements</b> <small style="display:inline">(like UniFi's Alarm Manager; Piper text-to-speech on this box)</small></p>
+<label><input type="checkbox" name="speak" value="1"{' checked' if dsp.get('speak') else ''}> Say what a camera saw, for the kinds ticked above</label>
+<div class="row"><label>How <select name="speak_mode"><option value="after"{' selected' if dsp.get('speak_mode', 'after') == 'after' else ''}>Chime, then the announcement</option>
+<option value="only"{' selected' if dsp.get('speak_mode') == 'only' else ''}>Only the announcement</option></select></label>
+<label>Voice <select name="voice">{''.join(f"<option value='{v}'{' selected' if dsp.get('voice', 'en_US-lessac-medium') == v else ''}>{html.escape(t)}</option>" for v, t in tts.VOICES)}</select></label></div>
+<div class="row"><label>Announcement {inp('speak_template', dsp.get('speak_template', tts.DEFAULT_TEMPLATE))}</label>
+<label>Doorbell {inp('speak_doorbell', dsp.get('speak_doorbell', tts.DEFAULT_DOORBELL))}</label></div>
+<small>{{object}} is Person, Vehicle, Animal or Package; {{camera}} the camera's name. {html.escape(speech_line(dsp))}</small>
 <p><button formaction="/display/test-sound" formmethod="post" formnovalidate>Play a test sound</button>
-<small style="display:inline">on the screen (save first if you changed the volume). The TV's own volume applies too.</small></p>
+<button formaction="/display/test-speak" formmethod="post" formnovalidate>Play a test announcement</button>
+<small style="display:inline">on the screen (save first if you changed something). The TV's own volume applies too.</small></p>
 <p><small>Two cameras at a time are shown next to the power figures, taking turns every 15 seconds. To add one by its stream link instead, in UniFi Protect: open the camera &rarr; Settings &rarr; Advanced &rarr;
 RTSPS, turn on <b>Medium</b> quality and copy its link (<code>rtsps://...:7441/...</code>). The camera pictures are only shown on the
 box's own screen, not to other computers on the network.</small></p>{cams}
@@ -689,6 +714,38 @@ UniFi OS &rarr; Settings &rarr; Control Plane &rarr; Integrations &rarr; Create 
 <div class="row"><label>Console address {f"<input name='protect_host' value='{html.escape(d['host'])}' placeholder='192.168.1.1'>"}</label>
 <label>API key <input name="protect_key" type="password" autocomplete="off"></label></div>{saved}
 <p><button>Save and connect</button></p></fieldset></form>{cams_html}"""
+
+
+speech_lock = threading.Lock()
+
+
+def speech_line(dsp):
+    if not dsp.get("speak"):
+        return "Speech is off. Turning it on downloads the speech service (about 200 MB) and the voice once; it then works offline."
+    st = tts.status()
+    if st["ok"]:
+        return "The speech service is running."
+    return "The speech service is starting (the first time it downloads; this takes a few minutes)."
+
+
+def start_speech(changed):
+    """After saving: start/stop the tts service if speech or the voice changed, then make the phrases ahead of time."""
+    def run():
+        with speech_lock:
+            d = display.load(STACK)
+            if changed:
+                ss.write_env(STACK, ss.ensure_secrets(STACK))
+                if d.get("speak"):
+                    run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "tts"])
+                else:
+                    run_quietly(ss.compose_cmd(STACK) + ["rm", "-s", "-f", "tts"])
+            if d.get("speak"):
+                for _ in range(60):          # wait for Piper (and its first voice download)
+                    if tts.status()["ok"]:
+                        break
+                    time.sleep(10)
+                tts.prewarm(STACK, d["cameras"], d)
+    threading.Thread(target=run, daemon=True).start()
 
 
 def run_quietly(cmd):
@@ -1084,6 +1141,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, advisor_page())
         elif url.path == "/display":  # ?layout=N pins a layout (burn-in protection, see display.py)
             self.send(200, display.PAGE)
+        elif url.path == "/display/say":
+            self.say(dict(urllib.parse.parse_qsl(url.query)))
         elif self.path == "/display/events":
             self.send(200, json.dumps(display.events(STACK)), "application/json")
         elif self.path == "/display/data":
@@ -1120,6 +1179,11 @@ class Handler(BaseHTTPRequestHandler):
                         display.parse_hhmm(f.get(k))
                     except ValueError as e:
                         raise FieldError(k, f"Screen off hours: {e}")
+                for k in ("speak_template", "speak_doorbell"):
+                    try:
+                        tts.check_template((f.get(k) or "{object}").strip())
+                    except ValueError as e:
+                        raise FieldError(k, f"Announcement: {e}")
             except ValueError as e:
                 cur = load_site()
                 cur.update({k: v for k, v in f.items() if k in DEFAULT_SITE and k != "arrays"})
@@ -1201,6 +1265,9 @@ class Handler(BaseHTTPRequestHandler):
             ok = display.screen_connected() and run_quietly(["systemctl", "is-active", "--quiet", "solar-display.service"]).returncode == 0
             self.send(200, setup_page(load_site(), done=["test sound sent to the screen" if ok else
                                                          "test sound sent, but the screen's dashboard isn't running"]))
+        elif self.path == "/display/test-speak":
+            display.TEST_SOUND["speak"] = time.time()
+            self.send(200, setup_page(load_site(), done=["test announcement sent to the screen"]))
         elif self.path == "/display/restart":
             run_quietly(["systemctl", "reset-failed", "solar-display.service"])
             run_quietly(["systemctl", "restart", "--no-block", "solar-display.service"])
@@ -1256,6 +1323,34 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send(404, "not found", "text/plain")
 
+    def say(self, q):
+        """The announcement for a camera event (or the test) as WAV, from Piper via the cache."""
+        d = display.load(STACK)
+        if q.get("test"):
+            text = "This is a test announcement from the solar monitor."
+        else:
+            try:
+                cam = d["cameras"][int(q.get("cam", "cam0")[3:]) - 1]
+            except (ValueError, IndexError):
+                self.send(404, "no such camera", "text/plain")
+                return
+            label = q.get("label", "")
+            if label not in ("Doorbell", "Person", "Vehicle", "Animal", "Package", "Motion"):
+                self.send(400, "bad label", "text/plain")
+                return
+            text = tts.phrase(label, cam["name"], d.get("speak_template"), d.get("speak_doorbell"))
+        try:
+            data = tts.wav(STACK, text, d.get("voice"))
+        except (OSError, ValueError) as e:
+            self.send(503, f"speech not available: {e}", "text/plain")
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/wav")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "max-age=3600")
+        self.end_headers()
+        self.wfile.write(data)
+
     def protect_post(self, action, f):
         d = protect.settings(STACK)
         try:
@@ -1277,6 +1372,9 @@ class Handler(BaseHTTPRequestHandler):
                 protect.save(STACK, {**protect.settings(STACK), "highlight_motion": f.get("highlight_motion") == "1"})
                 changed = protect.apply_cameras(STACK, picked, cams)
                 msgs = [f"{len(picked)} camera(s) on the screen"]
+                if protect.LAST_DUPES:
+                    msgs.append("removed the stream link for " + ", ".join(protect.LAST_DUPES)
+                                + ": the same camera as one picked from UniFi Protect")
         except (ValueError, protect.ProtectError) as e:
             return f"not saved: {e}"
         if changed:

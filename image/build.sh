@@ -76,7 +76,8 @@ chroot "$ROOT" /bin/bash /opt/solar-monitor/src/image/chroot-setup.sh
 echo "== container images (arm64) for an offline first boot"
 mkdir -p "$ROOT/opt/solar-monitor/images"
 # sort -u: several services can share an image (cloudflared and cloudflared-support)
-grep -E '^\s+image:' "$REPO/stack/compose.yaml" | awk '{print $2}' | sort -u | while read -r img; do
+# rhasspy/wyoming-piper (spoken announcements, about 200 MB) is left out: it's pulled when speech is turned on.
+grep -E '^\s+image:' "$REPO/stack/compose.yaml" | awk '{print $2}' | sort -u | grep -v '^rhasspy/wyoming-piper:' | while read -r img; do
   ref=$img; case "$img" in */*/*) ;; */*) ref=docker.io/$img ;; *) ref=docker.io/library/$img ;; esac
   file=$ROOT/opt/solar-monitor/images/$(echo "$img" | tr '/:' '__').tar
   echo "   $img"

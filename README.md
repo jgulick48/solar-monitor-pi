@@ -70,6 +70,12 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
   ring and person by default, vehicle, animal and package optional, with a volume and *not during the screen-off
   hours*. *Play a test sound* on the setup page checks it. The kiosk points its sound at the HDMI port the screen is
   on (`~solar-display/.asoundrc`, Pi 4: HDMI-A-1 = vc4hdmi0); the screen or TV needs speakers.
+- **Spoken announcements** (optional, like UniFi's Alarm Manager): after the chime, or instead of it, Piper says what a
+  camera saw, "Person at the Front door" / "Someone's at the Front door" (wording editable, `{object}` and `{camera}`),
+  in one of four English voices. Piper runs in the optional `tts` service (`rhasspy/wyoming-piper`, the voice Home
+  Assistant uses for local voice); it isn't in the image (about 200 MB): turning speech on downloads it and the voice
+  once, then it works offline. Phrases are made ahead of time and cached (`state/tts-cache`). *Play a test announcement*
+  on the setup page checks it.
 - **Burn-in protection**: every 20 minutes the layout changes (cameras on the left or the right, or without cameras
   the tiles in order or reversed; the figures top-down or flipped, clock at the bottom), with a short fade, and every
   minute the whole page drifts a few pixels along a small circle, so no label, border or grid line stays on the same
@@ -106,7 +112,8 @@ the event ends. Plain motion does the same only if *Also bring cameras to the fr
 key is kept in `state/protect.json` (mode 600); the console's self-signed certificate isn't checked.
 
 **By stream link** (any RTSP/RTSPS H.264 camera, no events): setup page, *Screen and cameras*: name each camera and
-paste its stream link. In UniFi Protect: open the camera
+paste its stream link. A camera added this way and later picked from UniFi Protect is dropped from the manual list
+(same stream token or name), and the screen never shows the same camera in both places. In UniFi Protect: open the camera
 -> Settings -> Advanced -> RTSPS, turn on **Medium** quality (720p: sharp enough for a 960x540 tile and light on
 the Pi; the Pi 4 decodes H.264 in hardware) and copy the `rtsps://<console>:7441/<token>?enableSrtp` link.
 `go2rtc` reads the streams (RTSPS without checking Protect's self-signed certificate) and serves them to the

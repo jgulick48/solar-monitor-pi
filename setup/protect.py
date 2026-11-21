@@ -108,6 +108,17 @@ def list_cameras(host, key):
     return out
 
 
+def _token(url):
+    """The stream token in an RTSPS link (rtsps://host:7441/<token>?enableSrtp), which identifies the camera stream."""
+    return urllib.parse.urlsplit(url or "").path.rsplit("/", 1)[-1]
+
+
+def stream_tokens(host, key, cam_id):
+    """Tokens of all the camera's existing RTSPS streams (any quality)."""
+    got = api(host, key, "GET", f"/cameras/{cam_id}/rtsps-stream") or {}
+    return {_token(u) for u in got.values() if u}
+
+
 def stream_url(host, key, cam_id, quality="medium"):
     """The camera's RTSPS link at this quality, creating the stream if Protect hasn't got one."""
     got = api(host, key, "GET", f"/cameras/{cam_id}/rtsps-stream") or {}
@@ -342,8 +353,23 @@ def apply_cameras(stack, picked_ids, cams, quality="medium"):
                     "doorbell": c.get("doorbell", False)})
     dsp = display.load(stack)
     manual = [c for c in dsp["cameras"] if not c.get("protect_id")]
+    # A camera added earlier by its stream link and now picked from Protect would be on the screen twice:
+    # drop the manual one (same stream token as any of the Protect camera's streams, or the same name).
+    tokens, names = set(), {c["name"].strip().lower() for c in out}
+    for c in out:
+        try:
+            tokens |= stream_tokens(d["host"], d["api_key"], c["protect_id"])
+        except ProtectError:
+            pass
+        tokens.add(_token(c["url"]))
+    dupes = [c for c in manual if _token(c["url"]) in tokens or c["name"].strip().lower() in names]
+    manual = [c for c in manual if c not in dupes]
     dsp["cameras"] = (out + manual)[:display.MAX_CAMERAS]
     changed = display.save(stack, dsp)
     d["cameras"] = [{"id": c["protect_id"], "name": c["name"]} for c in out]
     save(stack, d)
+    LAST_DUPES[:] = [c["name"] for c in dupes]
     return changed
+
+
+LAST_DUPES = []   # manual cameras the last apply_cameras dropped as duplicates (for the setup page's message)

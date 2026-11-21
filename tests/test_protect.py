@@ -106,14 +106,15 @@ class Display(unittest.TestCase):
     def test_apply_cameras_keeps_manual_ones_and_maps_events(self):
         display.save(self.stack, {**display.DEFAULTS, "cameras": [{"name": "Shed", "url": "rtsp://10.0.0.9/live"}]})
         protect.save(self.stack, {**protect.DEFAULTS, "host": "192.0.2.1", "api_key": "k"})
-        orig = protect.stream_url
+        orig, orig_t = protect.stream_url, protect.stream_tokens
         protect.stream_url = lambda host, key, cid, quality="medium": f"rtsps://192.0.2.1:7441/{cid}token?enableSrtp"
+        protect.stream_tokens = lambda host, key, cid: {f"{cid}token"}
         try:
             cams = [{"id": "aaa", "name": "Driveway", "doorbell": False}, {"id": "bbb", "name": "Front door", "doorbell": True},
                     {"id": "ccc", "name": "Back", "doorbell": False}]
             self.assertTrue(protect.apply_cameras(self.stack, ["bbb", "aaa"], cams))
         finally:
-            protect.stream_url = orig
+            protect.stream_url, protect.stream_tokens = orig, orig_t
         d = display.load(self.stack)
         self.assertEqual([c["name"] for c in d["cameras"]], ["Front door", "Driveway", "Shed"])  # as picked, then manual
         self.assertEqual(d["cameras"][0]["protect_id"], "bbb")
@@ -133,6 +134,25 @@ class Display(unittest.TestCase):
         self.assertEqual(list(got["active"]), ["cam1"])
         self.assertEqual(got["active"]["cam1"]["label"], "Doorbell")
         self.assertEqual(os.stat(protect.path(self.stack)).st_mode & 0o777, 0o600)
+
+    def test_apply_cameras_drops_manual_duplicates(self):
+        display.save(self.stack, {**display.DEFAULTS, "cameras": [
+            {"name": "Driveway", "url": "rtsps://192.0.2.1:7441/abcTOKEN?enableSrtp"},       # same camera, by name
+            {"name": "Old porch", "url": "rtsps://192.0.2.1:7441/bbbHIGH?enableSrtp"},       # same camera, by token
+            {"name": "Shed", "url": "rtsp://10.0.0.9/live"}]})
+        protect.save(self.stack, {**protect.DEFAULTS, "host": "192.0.2.1", "api_key": "k"})
+        o1, o2 = protect.stream_url, protect.stream_tokens
+        protect.stream_url = lambda host, key, cid, quality="medium": f"rtsps://192.0.2.1:7441/{cid}MED?enableSrtp"
+        protect.stream_tokens = lambda host, key, cid: {f"{cid}MED", f"{cid}HIGH"}
+        try:
+            protect.apply_cameras(self.stack, ["aaa", "bbb"], [{"id": "aaa", "name": "Driveway"}, {"id": "bbb", "name": "Porch"}])
+        finally:
+            protect.stream_url, protect.stream_tokens = o1, o2
+        self.assertEqual([c["name"] for c in display.load(self.stack)["cameras"]], ["Driveway", "Porch", "Shed"])
+        self.assertEqual(sorted(protect.LAST_DUPES), ["Driveway", "Old porch"])
+
+    def test_page_never_shows_a_camera_twice(self):
+        self.assertIn("a.name.trim().toLowerCase()===b.name.trim().toLowerCase()", display.PAGE)
 
     def test_page_rotates_and_highlights(self):
         page = display.PAGE

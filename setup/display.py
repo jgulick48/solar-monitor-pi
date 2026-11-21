@@ -44,7 +44,10 @@ VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
 SOUND_KINDS = [("doorbell", "Doorbell", True), ("person", "Person", True), ("vehicle", "Vehicle", False),
                ("animal", "Animal", False), ("package", "Package", False)]
 DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
-            "sounds": {k: on for k, _, on in SOUND_KINDS}, "volume": 70, "sound_quiet": True}
+            "sounds": {k: on for k, _, on in SOUND_KINDS}, "volume": 70, "sound_quiet": True,
+            # spoken announcements (tts.py): off by default; "after" the chime, or "only" speech
+            "speak": False, "speak_mode": "after", "speak_template": "{object} at the {camera}",
+            "speak_doorbell": "Someone's at the {camera}", "voice": "en_US-lessac-medium"}
 MAX_CAMERAS = 16   # all of them rotate through the two places on screen
 KIOSK_USER = "solar-display"
 
@@ -110,10 +113,11 @@ def events(stack):
     for i, c in enumerate(d["cameras"], 1):
         if c.get("protect_id") in active:
             out[f"cam{i}"] = active[c["protect_id"]]
-    return {"active": out, "connected": protect.EVENTS.connected, "test_sound": TEST_SOUND["at"]}
+    return {"active": out, "connected": protect.EVENTS.connected, "test_sound": TEST_SOUND["at"],
+            "test_speak": TEST_SOUND.get("speak", 0)}
 
 
-TEST_SOUND = {"at": 0}   # the setup page's "Play a test sound": the screen plays the doorbell chime when this changes
+TEST_SOUND = {"at": 0, "speak": 0}   # the setup page's test buttons: the screen plays a chime / an announcement when these change
 
 
 def screen_off_now(d, now=None):
@@ -371,6 +375,7 @@ def data(stack, site):
         "rev": int(os.path.getmtime(settings_path(stack))) if os.path.exists(settings_path(stack)) else 0,
         "time": hm(now, site), "date": now.strftime("%a %b %-d"),
         "sounds": d.get("sounds") or {}, "volume": d.get("volume", 70), "sound_quiet": d.get("sound_quiet", True),
+        "speak": d.get("speak", False), "speak_mode": d.get("speak_mode", "after"),
         "expected": expected, "forecast": forecast_summary(fc, now, tz),
     }
 
@@ -654,9 +659,13 @@ function dropPlayer(s){ if(s.player){ try{s.player.ondisconnect()}catch(e){} s.p
 function pickCams(){
   const n=slots.length; if(!n)return[];
   const hot=camList.filter(c=>events[c.id]).sort((a,b)=>(events[b.id].level-events[a.id].level)||(events[b.id].since-events[a.id].since));
-  const chosen=hot.slice(0,n);
-  const rest=camList.filter(c=>!chosen.includes(c));
-  for(let i=0;chosen.length<n&&i<rest.length;i++)chosen.push(rest[(rot+i)%rest.length]);
+  // never the same camera twice on screen: not the same entry, and not two entries with the same name
+  // (a camera added by its stream link and again from UniFi Protect)
+  const same=(a,b)=>a===b||a.name.trim().toLowerCase()===b.name.trim().toLowerCase();
+  const chosen=[];
+  for(const c of hot){ if(chosen.length<n&&!chosen.some(x=>same(x,c)))chosen.push(c); }
+  const rest=camList.filter(c=>!chosen.some(x=>same(x,c)));
+  for(let i=0;chosen.length<n&&i<rest.length;i++){ const c=rest[(rot+i)%rest.length]; if(!chosen.some(x=>same(x,c)))chosen.push(c); }
   return chosen;
 }
 async function showCams(){
@@ -678,7 +687,12 @@ async function showCams(){
 // A camera's event plays once, when it starts; doorbell rings and people by default (setup page).
 const CHIMES={doorbell:[[659,0,1.3],[523,.5,1.6]],person:[[784,0,.5],[1047,.17,.7]],vehicle:"horn",
   animal:[[880,0,.6]],package:[[988,0,.35],[1175,.14,.35],[1319,.28,.6]]};
-let actx=null, played={}, lastTest=null, soundCfg={sounds:{},volume:70,quiet:true,off:false};
+let actx=null, played={}, lastTest=null, lastSpeak=null, soundCfg={sounds:{},volume:70,quiet:true,off:false,speak:false,mode:"after"};
+// Spoken announcement (Piper on the box, /display/say): after the chime has rung out, or instead of it.
+function say(url, afterKind){
+  const wait=soundCfg.mode==="only"||!afterKind?0:(afterKind==="doorbell"?2100:900);
+  setTimeout(()=>{ const a=new Audio(url); a.volume=Math.max(0,Math.min(1,(soundCfg.volume||0)/100)); a.play().catch(()=>{}); },wait);
+}
 // A car horn: two square waves a major third apart (about 400 and 500 Hz, slightly detuned, like a real
 // two-trumpet horn) through a low-pass filter, "beep-beep".
 function horn(vol,t){
@@ -708,9 +722,12 @@ function soundFor(ev){
 async function pollEvents(){
   try{ const r=await fetch("/display/events",{cache:"no-store"}); const d=await r.json();
     if(lastTest===null)lastTest=d.test_sound; else if(d.test_sound!==lastTest){lastTest=d.test_sound; chime("doorbell");}
+    if(lastSpeak===null)lastSpeak=d.test_speak; else if(d.test_speak!==lastSpeak){lastSpeak=d.test_speak; say("/display/say?test=1",null);}
     for(const [cam,ev] of Object.entries(d.active||{})){
       const key=cam+"@"+ev.since; if(played[key])continue; played[key]=1;
-      const kind=soundFor(ev); if(kind)chime(kind);
+      const kind=soundFor(ev); if(!kind)continue;
+      if(!(soundCfg.speak&&soundCfg.mode==="only"))chime(kind);
+      if(soundCfg.speak)say("/display/say?cam="+encodeURIComponent(cam)+"&label="+encodeURIComponent(ev.label),kind);
     }
     const before=JSON.stringify(events); events=d.active||{};
     if(JSON.stringify(events)!==before)showCams();
@@ -732,7 +749,7 @@ async function tick(){
   let d;try{const r=await fetch("/display/data",{cache:"no-store"});d=await r.json()}catch(e){$("upd").textContent="Waiting for the monitor...";return}
   if(rev!==null&&d.rev!==rev){location.reload();return} rev=d.rev;
   $("blank").style.display=d.screen_off?"block":"none";
-  soundCfg={sounds:d.sounds||{},volume:d.volume,quiet:d.sound_quiet,off:!!d.screen_off};
+  soundCfg={sounds:d.sounds||{},volume:d.volume,quiet:d.sound_quiet,off:!!d.screen_off,speak:!!d.speak,mode:d.speak_mode||"after"};
   $("name").textContent=d.name;$("clock").textContent=d.time;$("date").textContent=d.date;
   buildCams(d.cameras);
   const n=d.now||{};

@@ -105,6 +105,20 @@ services:
       - path: ./state/support.env
         required: false
 
+  # Spoken camera announcements on the wall display (setup page -> Screen and cameras -> Speak; setup/tts.py):
+  # Piper text-to-speech. Off unless COMPOSE_PROFILES has "tts"; not in the image (about 200 MB), pulled when
+  # turned on; it downloads the voice into its volume on first start. Localhost only.
+  tts:
+    image: rhasspy/wyoming-piper:2.5.4
+    profiles: [tts]
+    restart: unless-stopped
+    command: ["--voice", "${TTS_VOICE:-en_US-lessac-medium}", "--uri", "tcp://0.0.0.0:10200",
+              "--data-dir", "/data", "--download-dir", "/data"]
+    ports:
+      - "127.0.0.1:10200:10200"
+    volumes:
+      - tts-data:/data
+
   # Backups to a USB stick (setup/backup.py runs it; not a long-running service).
   backup:
     image: restic/restic:0.20.0
@@ -125,3 +139,4 @@ volumes:
   vm-data:
   grafana-data:
   restic-cache:
+  tts-data:
