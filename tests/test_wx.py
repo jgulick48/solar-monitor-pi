@@ -82,6 +82,40 @@ class View(unittest.TestCase):
         v = wx.view(self.stack, {"units": "metric"})
         self.assertEqual((v["now"]["temp"], v["now"]["wind"], v["hours"], v["days"]), (20, 7, [], []))
 
+    def test_max_gust_today(self):
+        self.put("wx-forecast.json", forecast())
+        os.environ["TZ"] = "America/Denver"
+        time.tzset()
+        try:
+            day = dt.datetime(2026, 11, 21, 9, 0).timestamp()
+            for minutes, gust in ((0, 4.0), (60, 9.8), (120, 3.0)):             # m/s; the 9.8 is the day's high
+                wx.save_station(self.stack, {"temp_c": 5, "wind_ms": 2.0, "gust_ms": gust}, "tempest", now=day + minutes * 60)
+            st = json.load(open(os.path.join(self.stack, "state", "wx-station.json")))
+            self.assertEqual((st["max_gust_ms"], st["max_gust_at"]), (9.8, int(day + 3600)))
+            orig = time.time
+            time.time = lambda: day + 7200
+            try:
+                n = wx.view(self.stack, {**self.site, "time_zone": "America/Denver"})["now"]
+                n_utc = wx.view(self.stack, {**self.site, "time_zone": "UTC"})["now"]
+            finally:
+                time.time = orig
+            self.assertEqual(n_utc["gust_max_time"], "5:00 PM")                    # the site's zone, not the system's
+            self.assertEqual((n["gust"], n["gust_max"], n["gust_max_src"], n["gust_max_time"]), (7, 22, "station", "10:00 AM"))
+            # after midnight it starts again
+            wx.save_station(self.stack, {"temp_c": 5, "wind_ms": 1.0, "gust_ms": 2.0}, "tempest", now=day + 16 * 3600)
+            st = json.load(open(os.path.join(self.stack, "state", "wx-station.json")))
+            self.assertEqual((st["max_day"], st["max_gust_ms"]), ("2026-11-22", 2.0))
+            # an Ecowitt station's own day maximum wins
+            wx.save_station(self.stack, {"temp_c": 5, "gust_ms": 2.0, "gust_day_ms": 12.0}, "ecowitt")
+            self.assertEqual(wx.view(self.stack, self.site)["now"]["gust_max"], 27)
+        finally:
+            os.environ.pop("TZ", None)
+            time.tzset()
+        # no station: the forecast's maximum for today
+        os.remove(os.path.join(self.stack, "state", "wx-station.json"))
+        n = wx.view(self.stack, self.site)["now"]
+        self.assertEqual((n["gust"], n["gust_max"], n["gust_max_src"]), (6, 14, "forecast"))
+
     def test_alerts(self):
         self.put("wx-forecast.json", forecast())
         self.put("wx-alerts.json", {"fetched": int(time.time()), "alerts": [{"event": "High Wind Warning", "severity": "Severe"}]})

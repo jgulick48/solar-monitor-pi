@@ -12,7 +12,7 @@ Supported (all read-only):
     formats at /weather/ecowitt and /weather/ambient (see solar_web.py).
 
 Readings are {"solar_wm2": float|None, "temp_c": float|None} plus, where the station has them (all metric):
-humidity (%), dew_c, feels_c, wind_ms, gust_ms, wind_dir (degrees), rain_day_mm, rain_rate_mmh, pressure_hpa
+humidity (%), dew_c, feels_c, wind_ms, gust_ms, gust_day_ms (Ecowitt: the day's highest), wind_dir (degrees), rain_day_mm, rain_rate_mmh, pressure_hpa
 (sea level / relative), uv. The wall display's weather view uses them (wx.py).
 """
 import ipaddress
@@ -79,7 +79,7 @@ def ecowitt_fields(d):
             out[key] = _temp(common[i].get("val"), common[i].get("unit", "C"))
     if "0x07" in common:
         out["humidity"] = _num(common["0x07"].get("val"))
-    for key, i in (("wind_ms", "0x0B"), ("gust_ms", "0x0C")):
+    for key, i in (("wind_ms", "0x0B"), ("gust_ms", "0x0C"), ("gust_day_ms", "0x19")):   # 0x19: the day's highest gust
         if i in common:
             out[key] = _convert(common[i].get("val"), SPEED, "mph", common[i].get("unit", ""))
     if "0x0A" in common:
