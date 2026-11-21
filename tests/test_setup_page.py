@@ -61,6 +61,17 @@ class SetupPage(unittest.TestCase):
         self.assertIn("Saved: nothing changed.", page)
         self.assertNotIn("getElementById", page)                        # a save stays where it is (the banner is pinned)
 
+    def test_navigation_header(self):
+        page = solar_web.page("Battery health", "<p>x</p>")
+        self.assertIn("<header class='nav'>", page)
+        self.assertIn("<a href='/battery' class=on aria-current=page>Battery</a>", page)
+        self.assertEqual(page.count("class=on"), 1)
+        for href in ("/", "/setup", "/generator", "/backup", "/advisor", "/display"):
+            self.assertIn(f"<a href='{href}'", page)
+        self.assertIn("data-port='8123'", page)
+        self.assertIn("data-port='3000'", page)
+        self.assertNotIn("class=on", solar_web.page("Not found", ""))
+
     def test_mark_select(self):
         body = "<label>Time zone <select name='time_zone'><option>A</option></select></label>"
         out = solar_web.mark_field(body, "time_zone", "unknown time zone")

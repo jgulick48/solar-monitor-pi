@@ -373,7 +373,15 @@ button{font:inherit;padding:8px 18px;border-radius:6px;border:1px solid var(--ac
 .err{color:#c33;font-weight:600}
 .notice{border-width:1px 1px 1px 6px}.notice.ok{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--bg))}
 .notice.err{border-color:#c33;background:color-mix(in srgb,#c33 9%,var(--bg));font-weight:600}
-.toast{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:20;width:min(860px,calc(100% - 32px));box-sizing:border-box;
+header.nav{position:sticky;top:0;z-index:15;display:flex;align-items:center;gap:12px;margin:-16px -16px 12px;padding:10px 16px;
+background:var(--bg);border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+header.nav nav,header.nav .apps{display:flex;gap:4px}header.nav .apps{margin-left:auto}
+header.nav a{text-decoration:none;color:var(--fg);padding:6px 10px;border-radius:6px;font-size:15px}
+header.nav a:hover{background:color-mix(in srgb,var(--accent) 12%,var(--bg))}
+header.nav a.on{background:var(--accent);color:#fff}header.nav a.app{color:var(--accent)}
+[id]{scroll-margin-top:72px}
+@media (max-width:600px){header.nav{margin:-12px -12px 10px;padding:8px 12px}}
+.toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:20;width:min(860px,calc(100% - 32px));box-sizing:border-box;
 padding:12px 44px 12px 16px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.25);color:#fff;font-weight:600}
 .toast.ok{background:#0a6}.toast.err{background:#c33}
 .toast .x{position:absolute;right:8px;top:6px;background:none;border:0;color:#fff;font-size:22px;padding:2px 8px}
@@ -382,9 +390,24 @@ padding:12px 44px 12px 16px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.
 @media (max-width:600px){body{padding:12px} fieldset{padding:6px 12px 14px} .row label{flex-basis:100%}}"""
 
 
+NAV = [("/", "Home", "Solar monitor"), ("/setup", "Setup", "Site setup"), ("/generator", "Generator", "Generator"),
+       ("/battery", "Battery", "Battery health"), ("/backup", "Backups", "Backups"), ("/advisor", "Advisor", "Advisor"),
+       ("/display", "Screen", None)]
+APPS = [("8123", "Home Assistant"), ("3000", "Grafana")]
+
+
+def nav(title):
+    """The header on every page: this box's pages, then Home Assistant and Grafana on the same host (set in the
+    browser from the address used, so it works by IP and by solar-monitor.local alike)."""
+    links = "".join(f"<a href='{href}'{' class=on aria-current=page' if t == title else ''}>{name}</a>" for href, name, t in NAV)
+    apps = "".join(f"<a class='app' data-port='{port}' href='#' target='_blank' rel='noopener'>{name} &#8599;</a>" for port, name in APPS)
+    return (f"<header class='nav'><nav aria-label='Pages'>{links}</nav><span class='apps'>{apps}</span></header>"
+            "<script>document.querySelectorAll('a[data-port]').forEach(a=>{a.href=location.protocol+'//'+location.hostname+':'+a.dataset.port+'/'})</script>")
+
+
 def page(title, body):
     return (f"<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-            f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body>{body}</body></html>")
+            f"<title>{html.escape(title)}</title><style>{CSS}</style></head><body>{nav(title)}{body}</body></html>")
 
 
 def host_of(handler):
