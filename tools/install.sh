@@ -13,5 +13,11 @@ cp -a "$SRC/setup/." "$DEST/setup/"
 cp -a --no-preserve=ownership "$SRC/stack/." "$DEST/stack/"
 install -m 0644 "$SRC"/systemd/solar-*.service "$SRC"/systemd/solar-*.timer /etc/systemd/system/
 systemctl daemon-reload || true   # no-op in a chroot
-systemctl enable solar-images.service solar-setup.service solar-setup.timer solar-stack.service solar-web.service solar-update.timer
+systemctl enable solar-images.service solar-setup.service solar-setup.timer solar-stack.service solar-web.service solar-update.timer solar-collector.service solar-advisor.timer
+# On a running system (not the image build's chroot): start new timers/services and restart the
+# long-running ones so they use the new code. solar-web is restarted by the updater itself.
+if [ -d /run/systemd/system ]; then
+  systemctl start solar-setup.timer solar-update.timer solar-advisor.timer || true
+  systemctl restart solar-collector.service || true
+fi
 echo "installed to $DEST; reboot or: systemctl start solar-setup solar-stack solar-web"
