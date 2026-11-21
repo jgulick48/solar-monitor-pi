@@ -37,6 +37,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
@@ -135,6 +136,8 @@ INSTANT = {
     "load": "sum(lxp_p_load) or sum(lxp_p_eps)",
     "battery": "sum(lxp_p_charge) - sum(lxp_p_discharge)",
     "gen": "sum(lxp_p_gen)",
+    # charging the inverters didn't do: a generator on a DC charger (Chargeverter); see genlog.py
+    "ext_charge": "max(lxp_batt_current_bms) * max(lxp_v_bat) - (sum(lxp_p_charge) - sum(lxp_p_discharge))",
     "pv_today": "sum(lxp_e_pv_day)",
     "used_today": "sum(lxp_e_load_day) or sum(lxp_e_eps_day)",
     "charged_today": "sum(lxp_e_chg_day)",
@@ -296,7 +299,9 @@ def generator_advice(site, now_vals, now, tz, fc=None):
 
 
 def data(stack, site):
-    vals = _cached("instant", 5, lambda: {k: vm_instant(q) for k, q in INSTANT.items()})
+    vals = dict(_cached("instant", 5, lambda: {k: vm_instant(q) for k, q in INSTANT.items()}))
+    if (vals.get("ext_charge") or 0) > 500:  # same threshold as genlog: a generator on a DC charger is running
+        vals["gen"] = (vals.get("gen") or 0) + vals["ext_charge"]
     series = _cached("range", 300, lambda: {k: vm_series(q) for k, q in RANGE.items()})
     tzname = site.get("time_zone") or ss.host_timezone()
     try:
@@ -347,6 +352,9 @@ def vm_at(q, ts):
         return None
 
 
+EXT = "(" + INSTANT["ext_charge"] + ")"
+
+
 def day_stats(start, end):
     """Totals for [start, end): the inverters' daily counters at their highest, lowest battery, generator time."""
     secs = max(int(end - start), 60)
@@ -354,11 +362,19 @@ def day_stats(start, end):
     return {
         "solar": vm_at(f"max_over_time((sum(lxp_e_pv_day)){w})", end),
         "used": vm_at(f"max_over_time((sum(lxp_e_load_day) or sum(lxp_e_eps_day)){w})", end),
-        "gen_kwh": vm_at(f"max_over_time((sum(lxp_e_gen_day)){w})", end),
+        "gen_kwh": _add(vm_at(f"max_over_time((sum(lxp_e_gen_day)){w})", end),
+                        (lambda f: None if f is None else f * secs / 3600 / 1000)(
+                            vm_at(f"avg_over_time((clamp_min({EXT}, 0) * ({EXT} > bool 500)){w})", end))),
         "low_soc": vm_at(f"min_over_time((max(lxp_soc)){w})", end),
         "gen_hours": (lambda f: None if f is None else f * secs / 3600)(
-            vm_at(f"avg_over_time((sum(lxp_p_gen) > bool 200){w})", end)),
+            vm_at(f"avg_over_time(clamp_max((sum(lxp_p_gen) > bool 200) + ({EXT} > bool 500), 1){w})", end)
+            if vm_at(f"count_over_time((max(lxp_batt_current_bms)){w})", end)
+            else vm_at(f"avg_over_time((sum(lxp_p_gen) > bool 200){w})", end)),
     }
+
+
+def _add(a, b):
+    return a if b is None else b if a is None else a + b
 
 
 def _kwh(v):
@@ -447,6 +463,7 @@ def ha_status(stack, site):
         **_summary_fields(stack, site),
         **backup_fields(stack),
         **_battery_fields(stack, site),
+        **genlog.ha_fields(stack, site),
     }
 
 

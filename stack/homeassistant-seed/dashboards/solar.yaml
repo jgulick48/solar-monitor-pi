@@ -98,6 +98,22 @@ views:
             entity: sensor.site_dongles_connected
             name: Dongles
           - type: tile
+            entity: sensor.site_generator_hours_since_service
+            name: Generator since service
+            color: purple
+            visibility:
+              - condition: state
+                entity: sensor.site_generator_hours_since_service
+                state_not: unknown
+          - type: tile
+            entity: sensor.site_generator_last_run
+            name: Generator last ran
+            color: purple
+            visibility:
+              - condition: state
+                entity: sensor.site_generator_last_run
+                state_not: unknown
+          - type: tile
             entity: sensor.site_solar_forecast_today
             name: Forecast today
             color: amber
@@ -191,6 +207,8 @@ views:
                 name: Backup overdue
               - entity: automation.solar_battery_needs_attention
                 name: Battery needs attention
+              - entity: automation.solar_generator_service_due
+                name: Generator service due
               - entity: sensor.site_last_backup
                 name: Last backup
           - type: markdown

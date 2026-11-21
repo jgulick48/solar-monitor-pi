@@ -18,8 +18,11 @@ read, never changed.
 | Advisor | Weekly analysis: batteries, panels, inverter or generator? | `http://<pi>/advisor` |
 | Backups | Nightly backup to a USB stick, and restore | `http://<pi>/backup` |
 | Battery health | Cell spread near full, temperatures, SOH, cycles, capacity check, BMS faults | `http://<pi>/battery` |
+
+| Generator log | Every generator run, hours since the last service, service reminder | `http://<pi>/generator` |
 | Wall display | Dashboard and up to two cameras on a screen plugged into the Pi's HDMI port | `http://<pi>/display` |
 | go2rtc | Turns the cameras' RTSP(S) streams into video the display's browser can play | localhost only |
+| cloudflared | Optional remote access to Home Assistant through your own Cloudflare account | `https://<name>.<your domain>` |
 
 ## Hardware
 
@@ -151,6 +154,50 @@ themselves. Home Assistant gets the figures as sensors (*Site battery health*, *
 *cycles*, *cell temperature low/high*, *capacity estimate*), a *Battery needs attention* alert, and a Battery health
 section on the Solar dashboard. A BMS fault also shows on the wall display.
 
+## Generator log and service reminder
+
+The box finds every generator run in the inverter history, a minute at a time, two ways:
+
+- **On the inverters' GEN input** (usually auto-started by the dry contact): generator input power above 200 W.
+  Service every **200 hours**.
+- **Through a DC charger** such as a Chargeverter: the battery BMS's charging power more than 500 W above what the
+  inverters put into the battery. Service every **100 hours**.
+
+Dips under 5 minutes don't end a run; runs under 3 minutes (10 for the charger estimate) are ignored. The first time,
+it works through the existing history (up to 400 days). The **Generator** page (`http://<pi>/generator`) lists the runs
+(start, hours, energy, peak) and the hours since the last service, with a **Serviced** button (enter the hours it has
+already run if the oil was changed earlier). Home Assistant gets *Site generator hours since service*, *last run*,
+*running* and *service due* sensors and sends a reminder when a service is due. The generator power everywhere (wall
+display, Home Assistant, daily summary) now includes a generator charging through a DC charger.
+
+State: `state/generator.json`; `setup/genlog.py` (run by the collector every 5 minutes; `genlog.py update` by hand).
+
+## Remote access (Cloudflare Tunnel, optional)
+
+To reach Home Assistant (and the Home Assistant phone app) away from home without opening anything on the router, fill in
+**Remote access** at the bottom of the setup page (`http://<pi>/setup#remote`):
+
+- **Cloudflare account ID**: on the Cloudflare dashboard, a domain's overview page, right-hand column.
+- **Name** and **Domain**: Home Assistant will be at `https://<name>.<domain>`, e.g. `solar.example.com`. The domain must
+  already be on that Cloudflare account.
+- **API token**: Cloudflare &rarr; My Profile &rarr; API Tokens &rarr; Create Custom Token with *Account &middot; Cloudflare
+  Tunnel &middot; Edit*, *Zone &middot; DNS &middot; Edit* and *Zone &middot; Zone &middot; Read*, limited to that account and domain.
+
+The box then creates a remotely managed tunnel, points it at Home Assistant only (`http://localhost:8123`; any other
+hostname gets a 404), adds a proxied CNAME `<name>.<domain>` &rarr; `<tunnel id>.cfargotunnel.com` and starts the
+`cloudflared` container (compose profile `tunnel`, switched on by `COMPOSE_PROFILES=tunnel` in the generated `.env`).
+Home Assistant's `external_url` is set to the new address, so the phone app uses it away from home, and it trusts the
+forwarded client address from localhost only (`use_x_forwarded_for` and `trusted_proxies` in `.storage/http`, edited while
+Home Assistant is stopped: since 2026.11 Home Assistant ignores `http:` in YAML).
+
+- Only Home Assistant is published. The setup page, Grafana and the cameras stay on the local network.
+- It refuses to turn on before the Home Assistant owner account exists, since anyone who found the address could
+  otherwise claim it. Turn on two-factor authentication in your Home Assistant profile.
+- It never overwrites a DNS record it didn't make; pick another name if `<name>.<domain>` is taken.
+- **Turn remote access off** stops `cloudflared` and, unless unticked, deletes the tunnel and its DNS record at Cloudflare.
+- The API token and the tunnel's run token are kept in `state/tunnel.json` and `state/tunnel.env` (mode 600) and are
+  included in the USB backups.
+
 ## Advisor
 
 The start page's **Advisor** answers "what would help this system most?" from the site's own history. It
@@ -244,6 +291,8 @@ Home Assistant, Grafana and the rest.
   dashboard once.
 - `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it.
 - `setup/battery.py` is the battery health check (computed on request from VictoriaMetrics, cached).
+
+- `setup/tunnel.py` sets up remote access through a Cloudflare Tunnel (Cloudflare API calls, `cloudflared` service).
 - `setup/display.py` is the wall display (page, data, settings, go2rtc config, screen schedule);
   `setup/kiosk.sh` starts Chromium; `system/` has the kiosk PAM session and the HDMI hotplug rule.
 - `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the
