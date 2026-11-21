@@ -97,8 +97,19 @@ fresh forecast (no internet) the advice falls back to that rule.
 It runs Chromium in kiosk mode inside `cage` (a one-app Wayland compositor; no desktop) as the locked
 `solar-display` account (`solar-display.service`). It only starts when the display is turned on on the setup page,
 the kiosk software is installed and a screen is connected; plugging a screen in starts it (udev rule). The browser's
-profile lives in RAM. The setup page can turn the screen off for set hours (`solar-display-power.timer`,
-via `wlr-randr`). The same page is at `http://<pi>/display` from other computers, without the cameras.
+profile lives in RAM. The same page is at `http://<pi>/display` from other computers, without the cameras.
+
+**When the screen is on** (setup page, Screen and cameras): always; during **on-hours** (up to four lines such as
+Mon-Fri 06:30-22:00 and Sat-Sun 08:00-01:00, past midnight allowed); **when someone's in the room**, from Home
+Assistant occupancy, motion or presence sensors (`binary_sensor.*`, `person.*`, `input_boolean.*`; stays on for a set
+time after the room empties); or during the on-hours *and* when someone's there. Camera events (doorbell, person, ...)
+can turn it on for a few minutes outside those times. When it's off, the HDMI picture is switched off (`wlr-randr`;
+most monitors and many TVs go to standby by themselves) and, if ticked, the **TV is put in standby and woken over
+HDMI-CEC** (`cec-ctl`; SimpLink, Anynet+, Bravia Sync...), switched to the box's input when it wakes. The setup page
+shows whether the TV answers CEC, and *Test: screen off for 15 seconds* tries it. Occupancy reaches the box through an
+automation the box writes into Home Assistant (`packages/solar_display.yaml`); if Home Assistant goes quiet for 20
+minutes the screen stays on. `solar-display-power.service` does the switching; CEC is sent only when the screen's state
+changes, so a TV turned off with its remote stays off until the next change.
 
 ### Cameras (UniFi Protect)
 

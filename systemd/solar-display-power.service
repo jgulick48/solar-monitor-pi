@@ -1,6 +1,16 @@
 [Unit]
-Description=Solar monitor: screen off during the off hours set on the setup page
+Description=Solar monitor: screen on/off (schedule, occupancy, camera events; HDMI signal and HDMI-CEC)
+After=solar-web.service
+# an older version (after a rolled-back update) has no power-daemon command: stop retrying instead of looping
+StartLimitIntervalSec=300
+StartLimitBurst=5
+Wants=solar-web.service
 
 [Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 /opt/solar-monitor/setup/display.py power
+Type=simple
+ExecStart=/usr/bin/python3 /opt/solar-monitor/setup/display.py power-daemon
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

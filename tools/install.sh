@@ -21,12 +21,16 @@ fi
 getent group audio >/dev/null && usermod -aG audio solar-display 2>/dev/null || true
 install -m 0644 "$SRC/system/pam-solar-display" /etc/pam.d/solar-display
 install -m 0644 "$SRC/system/90-solar-display.rules" /etc/udev/rules.d/90-solar-display.rules
+# the screen power check was a one-minute timer before v0.2.16; now a service that follows occupancy and camera events
+systemctl disable --now solar-display-power.timer 2>/dev/null || true
+rm -f /etc/systemd/system/solar-display-power.timer
 systemctl daemon-reload || true   # no-op in a chroot
-systemctl enable solar-images.service solar-setup.service solar-setup.timer solar-stack.service solar-web.service solar-update.timer solar-collector.service solar-advisor.timer solar-display.service solar-display-power.timer solar-backup.timer
+systemctl enable solar-images.service solar-setup.service solar-setup.timer solar-stack.service solar-web.service solar-update.timer solar-collector.service solar-advisor.timer solar-display.service solar-display-power.service solar-backup.timer
 # On a running system (not the image build's chroot): start new timers/services and restart the
 # long-running ones so they use the new code. solar-web is restarted by the updater itself.
 if [ -d /run/systemd/system ]; then
-  systemctl start solar-setup.timer solar-update.timer solar-advisor.timer solar-display-power.timer solar-backup.timer || true
+  systemctl start solar-setup.timer solar-update.timer solar-advisor.timer solar-backup.timer || true
+  systemctl restart solar-display-power.service || true
   udevadm control --reload 2>/dev/null || true
   # The display needs cage + chromium (in the image since v0.2; on older installs:
   # sudo apt-get install cage chromium wlr-randr). It starts only if a screen is connected.
@@ -37,6 +41,8 @@ if [ -d /run/systemd/system ]; then
   systemctl restart solar-collector.service || true
   # SSD health (boxhealth.py); in the image since v0.2.7, added once on boxes updated from older versions
   # (the image ships without apt's package lists, so refresh them first)
+  # HDMI-CEC (turning the TV on and off): cec-ctl from v4l-utils, in Raspberry Pi OS; added if missing
+  command -v cec-ctl >/dev/null || { timeout 300 apt-get update -q >/dev/null 2>&1; timeout 300 apt-get install -y -q --no-install-recommends v4l-utils >/dev/null 2>&1; } || true
   command -v smartctl >/dev/null || { timeout 300 apt-get update -q >/dev/null 2>&1; timeout 300 apt-get install -y -q --no-install-recommends smartmontools >/dev/null 2>&1; } || true
 fi
 echo "installed to $DEST; reboot or: systemctl start solar-setup solar-stack solar-web"

@@ -33,6 +33,7 @@ import boxhealth  # noqa: E402
 import battery  # noqa: E402
 import display  # noqa: E402
 import protect  # noqa: E402
+import screenpower as sp  # noqa: E402
 import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import support  # noqa: E402
@@ -306,6 +307,35 @@ def apply_site(site):
     return msgs
 
 
+def power_fields(dsp):
+    """The setup form's "when is the screen on" part."""
+    def sel(name, opts, cur):
+        return f"<select name='{name}'>" + "".join(f"<option value='{v}'{' selected' if v == cur else ''}>{html.escape(t)}</option>" for v, t in opts) + "</select>"
+    rules = list(dsp.get("hours") or [])
+    rows = ""
+    for i in range(1, sp.MAX_RULES + 1):
+        r = rules[i - 1] if len(rules) >= i else {}
+        if i > max(2, len(rules) + 1):
+            break
+        rows += (f"<div class='row'><label>{'On-hours' if i == 1 else 'and'} {sel(f'hours{i}_days', sp.DAYS, r.get('days', 'daily'))}</label>"
+                 f"<label>on at <input type='time' name='hours{i}_on' value='{html.escape(r.get('on', ''))}'></label>"
+                 f"<label>off at <input type='time' name='hours{i}_off' value='{html.escape(r.get('off', ''))}'></label></div>")
+    wake = dsp.get("wake") or {}
+    return f"""<p style="margin-top:16px"><b>When the screen is on</b></p>
+<label>Screen on {sel('power_mode', sp.MODES, dsp.get('power_mode', 'always'))}</label>
+{rows}<small>An off time earlier than the on time runs past midnight (on 17:00, off 01:00). Save to get another line (up to {sp.MAX_RULES}).</small>
+<label>Occupancy sensors in Home Assistant (motion, occupancy or presence; comma separated)
+<input name="occupancy" value="{html.escape(', '.join(dsp.get('occupancy') or []))}" placeholder="binary_sensor.living_room_motion" style="max-width:100%"></label>
+<div class="row"><label>Stay on after the room is empty for <select name="occupancy_hold">{''.join(f"<option value='{v}'{' selected' if dsp.get('occupancy_hold', 10) == v else ''}>{v} minutes</option>" for v in (0, 2, 5, 10, 15, 30, 60))}</select></label></div>
+<small>Someone is in the room while any of them is on (or a person is home). Home Assistant tells this box when they change.</small>
+<p style="margin:14px 0 0">Also turn the screen on, for <select name="wake_minutes" style="width:auto;display:inline">{''.join(f"<option value='{v}'{' selected' if dsp.get('wake_minutes', 3) == v else ''}>{v} minutes</option>" for v in (1, 3, 5, 10))}</select>, when a camera sees:</p>
+<div class="row">{''.join(f"<label><input type='checkbox' name='wake_{k}' value='1'{' checked' if wake.get(k) else ''}> {t}</label>" for k, t in sp.WAKE_KINDS)}</div>
+<label><input type="checkbox" name="cec" value="1"{' checked' if dsp.get('cec', True) else ''}> Turn the TV itself off and on (HDMI-CEC; on the TV it may be called SimpLink, Anynet+, Bravia Sync or CEC)</label>
+<small>When the screen is off, the HDMI picture is switched off too; most monitors and many TVs then go to standby by themselves.
+{html.escape(sp.status_line(dsp))}</small>
+<p><button formaction="/display/test-power" formmethod="post" formnovalidate>Test: screen off for 15 seconds</button></p>"""
+
+
 def mask_url(url):
     """rtsps://host:7441/TOKEN?x -> rtsps://host:7441/••••ab (the token is a password)."""
     u = urllib.parse.urlsplit(url)
@@ -313,12 +343,38 @@ def mask_url(url):
     return f"{u.scheme}://{u.netloc}/" + ("\u2022" * 4 + tail[-2:] if tail else "")
 
 
+def screen_power_form(form):
+    """When the screen is on (screenpower.py) from the setup form. Raises FieldError."""
+    rows = []
+    for i in range(1, sp.MAX_RULES + 1):
+        try:
+            rows.append((form.get(f"hours{i}_days", "daily"), display.parse_hhmm(form.get(f"hours{i}_on")),
+                         display.parse_hhmm(form.get(f"hours{i}_off"))))
+        except ValueError as e:
+            raise FieldError(f"hours{i}_on", f"Screen on-hours, line {i}: {e}")
+    try:
+        hours = sp.clean_rules(rows)
+    except ValueError as e:
+        raise FieldError("hours1_on", f"Screen on-hours: {e}")
+    try:
+        occ = sp.clean_entities(form.get("occupancy", ""))
+    except ValueError as e:
+        raise FieldError("occupancy", f"Occupancy sensors: {e}")
+    mode = form.get("power_mode") if form.get("power_mode") in dict(sp.MODES) else "always"
+    if mode in ("hours", "hours_occupied") and not hours:
+        raise FieldError("hours1_on", "Screen: add at least one line of on-hours, or choose another way to turn it on")
+    if mode in ("occupied", "hours_occupied") and not occ:
+        raise FieldError("occupancy", "Screen: add the Home Assistant occupancy sensors, or choose another way to turn it on")
+    num = lambda k, lo, hi, dflt: max(lo, min(hi, int(form[k]))) if str(form.get(k, "")).isdigit() else dflt  # noqa: E731
+    return {"power_mode": mode, "hours": hours, "occupancy": occ, "occupancy_hold": num("occupancy_hold", 0, 240, 10),
+            "wake": {k: form.get(f"wake_{k}") == "1" for k, _ in sp.WAKE_KINDS}, "wake_minutes": num("wake_minutes", 1, 60, 3),
+            "cec": form.get("cec") == "1", "off_from": "", "off_to": ""}
+
+
 def apply_display(form):
     """Screen and camera settings from the setup form. Returns messages; raises ValueError."""
     cur = display.load(STACK)
-    d = {"enabled": form.get("display_enabled") == "1",
-         "off_from": display.parse_hhmm(form.get("display_off_from")),
-         "off_to": display.parse_hhmm(form.get("display_off_to")), "cameras": [],
+    d = {"enabled": form.get("display_enabled") == "1", **screen_power_form(form), "cameras": [],
          "sounds": {k: form.get(f"sound_{k}") == "1" for k, _, _ in display.SOUND_KINDS},
          "volume": max(0, min(100, int(form.get("volume") or 70) if str(form.get("volume") or "70").isdigit() else 70)),
          "sound_quiet": form.get("sound_quiet") == "1",
@@ -363,7 +419,12 @@ def apply_display(form):
     if d["enabled"] != cur.get("enabled", True):
         run(["systemctl", "start" if d["enabled"] else "stop", "solar-display.service"])
         msgs.append("screen " + ("on" if d["enabled"] else "off"))
-    run(["systemctl", "start", "--no-block", "solar-display-power.service"])
+    run(["systemctl", "restart", "--no-block", "solar-display-power.service"])
+    # occupancy from Home Assistant: an automation tells this box when the sensors change
+    if ss.write_if_changed(path("homeassistant", "packages", "solar_display.yaml"), sp.ha_package(d)):
+        r = run(ss.compose_cmd(STACK) + ["restart", "homeassistant"])
+        msgs.append("Home Assistant restarted for the occupancy sensors" if r.returncode == 0 else
+                    f"Home Assistant didn't restart: {r.stderr.strip()[-200:]}")
     if speech_changed or d["speak"]:
         start_speech(speech_changed)
         if speech_changed:
@@ -613,9 +674,7 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect
 <p><small>Screen: {html.escape(display.screen_line())}. The picture size comes from the screen itself (its EDID);
 4K TVs are run at 1920x1080, which they scale up.</small></p>
 <label><input type="checkbox" name="display_enabled" value="1" style="width:auto"{' checked' if dsp['enabled'] else ''}> Show the dashboard on a screen plugged into the HDMI port</label>
-<div class="row"><label>Screen off from (optional) {inp('display_off_from', dsp['off_from'], 'time')}</label>
-<label>Screen on again at {inp('display_off_to', dsp['off_to'], 'time')}</label></div>
-<small>For example 22:00 until 06:00, to save power and the screen.</small>
+{power_fields(dsp)}
 <p style="margin-top:16px"><b>Sounds</b> <small style="display:inline">through the screen's speakers (HDMI), when a UniFi Protect camera sees:</small></p>
 <div class="row">{''.join(f"<label><input type='checkbox' name='sound_{k}' value='1'{' checked' if (dsp.get('sounds') or {}).get(k, on) else ''}> {t}</label>" for k, t, on in display.SOUND_KINDS)}</div>
 <div class="row"><label>Repeat the same alert (same camera, same kind) at most every <select name="sound_cooldown">{''.join(f"<option value='{v}'{' selected' if dsp.get('sound_cooldown', 60) == v else ''}>{t}</option>" for v, t in display.COOLDOWNS)}</select></label>
@@ -1174,6 +1233,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def loopback(self):
+        try:
+            return ipaddress.ip_address(self.client_address[0]).is_loopback
+        except ValueError:
+            return False
+
     def form(self):
         n = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(min(n, 65536)).decode()
@@ -1196,6 +1261,10 @@ class Handler(BaseHTTPRequestHandler):
             self.say(dict(urllib.parse.parse_qsl(url.query)))
         elif self.path == "/display/events":
             self.send(200, json.dumps(display.events(STACK)), "application/json")
+        elif self.path == "/display/power":                  # for solar-display-power.service
+            if not self.loopback():
+                return self.send(403, "local only")
+            self.send(200, json.dumps(display.power_state(STACK)), "application/json")
         elif self.path == "/display/data":
             self.send(200, json.dumps(display.data(STACK, load_site())), "application/json")
         elif self.path == "/api/ha":
@@ -1225,11 +1294,7 @@ class Handler(BaseHTTPRequestHandler):
                             display.go2rtc_source(f[f"cam{i}_url"])
                         except ValueError as e:
                             raise FieldError(f"cam{i}_url", f"Camera {i}: {e}")
-                for k in ("display_off_from", "display_off_to"):
-                    try:
-                        display.parse_hhmm(f.get(k))
-                    except ValueError as e:
-                        raise FieldError(k, f"Screen off hours: {e}")
+                screen_power_form(f)
                 for k in ("speak_template", "speak_doorbell"):
                     try:
                         tts.check_template((f.get(k) or "{object}").strip())
@@ -1311,6 +1376,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, setup_page(load_site(), remote_msg="; ".join(msgs) + "."))
         elif self.path in ("/protect/connect", "/protect/cameras", "/protect/forget"):
             self.send(200, setup_page(load_site(), protect_msg=self.protect_post(self.path, self.form())))
+        elif self.path in ("/display/presence", "/display/power-report"):
+            # from Home Assistant's automation (host network) / the power service: this box only
+            if not self.loopback():
+                return self.send(403, "local only")
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(min(n, 4096)) or b"{}")
+            except ValueError:
+                return self.send(400, "bad json")
+            if self.path == "/display/presence":
+                sp.report_presence(bool(body.get("occupied")))
+            else:
+                sp.REPORT.update(at=time.time(), **{k: body[k] for k in ("on", "tv", "signal") if k in body})
+            self.send(200, "{}", "application/json")
+        elif self.path == "/display/test-power":
+            sp.TEST["until"] = time.time() + 15
+            self.send(200, setup_page(load_site(), done=["the screen turns off for 15 seconds, then back on"]))
         elif self.path == "/display/test-sound":
             display.TEST_SOUND["at"] = time.time()
             ok = display.screen_connected() and run_quietly(["systemctl", "is-active", "--quiet", "solar-display.service"]).returncode == 0

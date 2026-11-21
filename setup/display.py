@@ -21,7 +21,8 @@ Command line (used by the systemd units):
   display.py should-run     exit 0 if the display is enabled, the kiosk software
                             is installed and a screen is connected
   display.py wait-web       wait up to 2 minutes for the start page to answer
-  display.py power          turn the screen off/on for the off hours (timer)
+  display.py power-daemon   switch the screen (HDMI signal, and the TV over HDMI-CEC) as screenpower.py decides
+  display.py power          one-shot: the HDMI signal only
 """
 import argparse
 import datetime as dt
@@ -38,6 +39,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import genlog  # noqa: E402
+import screenpower as sp  # noqa: E402
 import solar_setup as ss  # noqa: E402
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
@@ -69,6 +71,7 @@ def load(stack):
     d = dict(DEFAULTS)
     d.update(ss.load_json(settings_path(stack), {}))
     d["cameras"] = [c for c in (d.get("cameras") or []) if c.get("url")][:MAX_CAMERAS]
+    d.update(sp.migrate(d))              # when the screen is on (screenpower.py); the old off_from/off_to become a rule
     return d
 
 
@@ -119,19 +122,30 @@ def events(stack):
     for i, c in enumerate(d["cameras"], 1):
         if c.get("protect_id") in active:
             out[f"cam{i}"] = active[c["protect_id"]]
+    sp.note_events(d, out, {f"cam{i}": c.get("name") or f"Camera {i}" for i, c in enumerate(d["cameras"], 1)})
+    on, why = sp.wanted(d)
     return {"active": out, "connected": protect.EVENTS.connected, "test_sound": TEST_SOUND["at"],
-            "test_speak": TEST_SOUND.get("speak", 0)}
+            "test_speak": TEST_SOUND.get("speak", 0), "screen_on": on, "screen_why": why, "quiet_hours": quiet_hours(d)}
+
+
+def quiet_hours(d, now=None):
+    """Outside the on-hours (when there are any): the sounds' "not during the screen-off hours"."""
+    return d.get("power_mode") in ("hours", "hours_occupied") and bool(d.get("hours")) and \
+        not sp.in_hours(d["hours"], now or dt.datetime.now())
+
+
+def power_state(stack):
+    """For the power service: should the screen be on now, and should the TV be switched over HDMI-CEC."""
+    ev = events(stack)                  # also notes camera events that wake the screen
+    return {"on": ev["screen_on"], "why": ev["screen_why"], "cec": bool(load(stack).get("cec", True))}
 
 
 TEST_SOUND = {"at": 0, "speak": 0}   # the setup page's test buttons: the screen plays a chime / an announcement when these change
 
 
 def screen_off_now(d, now=None):
-    a, b = d.get("off_from"), d.get("off_to")
-    if not a or not b or a == b:
-        return False
-    t = (now or dt.datetime.now()).strftime("%H:%M")
-    return (a <= t < b) if a < b else (t >= a or t < b)
+    """Is the screen off now (schedule, occupancy, camera wake-ups: screenpower.wanted)?"""
+    return not sp.wanted({**d, **sp.migrate(d)}, now)[0]
 
 
 # --------------------------------------------------------------------------
@@ -377,7 +391,7 @@ def data(stack, site):
         "name": site.get("name") or "Solar", "now": vals, "series": series, "alerts": alerts, "advice": advice,
         "battery_kwh": kwh, "generator": site.get("generator"), "low_soc": site.get("low_soc_alert"),
         "cameras": [{"id": f"cam{i}", "name": c.get("name") or f"Camera {i}"} for i, c in enumerate(d["cameras"], 1)],
-        "screen_off": screen_off_now(d, now.replace(tzinfo=None)),
+        "screen_off": screen_off_now(d, now.replace(tzinfo=None)), "quiet_hours": quiet_hours(d, now.replace(tzinfo=None)),
         "rev": int(os.path.getmtime(settings_path(stack))) if os.path.exists(settings_path(stack)) else 0,
         "time": hm(now, site), "date": now.strftime("%a %b %-d"),
         "sounds": d.get("sounds") or {}, "volume": d.get("volume", 70), "sound_quiet": d.get("sound_quiet", True),
@@ -742,6 +756,8 @@ function soundFor(ev){
 }
 async function pollEvents(){
   try{ const r=await fetch("/display/events",{cache:"no-store"}); const d=await r.json();
+    // screen on/off (schedule, someone in the room, a camera waking it) follows within a poll
+    if("screen_on" in d){ $("blank").style.display=d.screen_on?"none":"block"; soundCfg.off=!!d.quiet_hours; }
     if(lastTest===null)lastTest=d.test_sound; else if(d.test_sound!==lastTest){lastTest=d.test_sound; chime("doorbell");}
     if(lastSpeak===null)lastSpeak=d.test_speak; else if(d.test_speak!==lastSpeak){lastSpeak=d.test_speak; say("/display/say?test=1",null);}
     for(const [cam,ev] of Object.entries(d.active||{})){
@@ -775,7 +791,7 @@ async function tick(){
   let d;try{const r=await fetch("/display/data",{cache:"no-store"});d=await r.json()}catch(e){$("upd").textContent="Waiting for the monitor...";return}
   if(rev!==null&&d.rev!==rev){location.reload();return} rev=d.rev;
   $("blank").style.display=d.screen_off?"block":"none";
-  soundCfg={sounds:d.sounds||{},volume:d.volume,quiet:d.sound_quiet,off:!!d.screen_off,speak:!!d.speak,mode:d.speak_mode||"after",
+  soundCfg={sounds:d.sounds||{},volume:d.volume,quiet:d.sound_quiet,off:!!d.quiet_hours,speak:!!d.speak,mode:d.speak_mode||"after",
     cooldown:+(d.sound_cooldown??60),gap:+(d.sound_gap??5),doorbellAlways:d.doorbell_always!==false};
   $("name").textContent=d.name;$("clock").textContent=d.time;$("date").textContent=d.date;
   buildCams(d.cameras);
@@ -996,35 +1012,82 @@ def wait_web(url="http://127.0.0.1/display/data", timeout=120):
     return False
 
 
-def power(stack):
-    """Screen on/off for the off hours, through the compositor (wlr-randr)."""
+def signal(on):
+    """HDMI signal on/off through the compositor (wlr-randr). -> 'on' / 'off' / '' when the kiosk isn't running."""
     if subprocess.run(["systemctl", "is-active", "--quiet", "solar-display.service"]).returncode != 0:
-        return
+        return ""
     try:
         import pwd
         uid = pwd.getpwnam(KIOSK_USER).pw_uid
     except KeyError:
-        return
+        return ""
     env = dict(os.environ, XDG_RUNTIME_DIR=f"/run/user/{uid}", WAYLAND_DISPLAY="wayland-0")
     run_as = ["runuser", "-u", KIOSK_USER, "--"]
     r = subprocess.run(run_as + ["wlr-randr"], capture_output=True, text=True, env=env)
     outputs = [ln.split()[0] for ln in r.stdout.splitlines() if ln and not ln[0].isspace()]
-    want = "--off" if screen_off_now(load(stack)) else "--on"
     for o in outputs:
-        subprocess.run(run_as + ["wlr-randr", "--output", o, want], capture_output=True, env=env)
+        subprocess.run(run_as + ["wlr-randr", "--output", o, "--on" if on else "--off"], capture_output=True, env=env)
+    return ("on" if on else "off") if outputs else ""
+
+
+def _post(path, obj):
+    try:
+        urllib.request.urlopen(urllib.request.Request("http://127.0.0.1" + path, data=json.dumps(obj).encode(),
+                                                      headers={"Content-Type": "application/json"}), timeout=10).read()
+    except OSError:
+        pass
+
+
+def power_daemon(poll=3):
+    """solar-display-power.service (root): every few seconds ask the web server whether the screen should be on;
+    on a change switch the HDMI signal and, if set, the TV over HDMI-CEC. The signal is re-checked every minute
+    (the kiosk may have restarted); CEC is sent only on changes, so a TV turned off with its remote stays off."""
+    last, last_sig, dev, dev_at = None, 0.0, "", 0.0
+    while True:
+        try:
+            with urllib.request.urlopen("http://127.0.0.1/display/power", timeout=10) as r:
+                w = json.load(r)
+        except (OSError, ValueError):
+            time.sleep(10)
+            continue
+        on, now = bool(w.get("on")), time.time()
+        rep = {}
+        if w.get("cec") and (not dev or now - dev_at > 600) and (on != last):
+            dev, dev_at = sp.cec_device(), now
+        if on != last:
+            if on:
+                rep["signal"] = signal(True)
+                if w.get("cec") and dev:
+                    sp.cec_on(dev)
+            else:
+                if w.get("cec") and dev:
+                    sp.cec_off(dev)
+                rep["signal"] = signal(False)
+            if w.get("cec"):
+                time.sleep(2)
+                rep["tv"] = sp.cec_power(dev) if dev else "no cec"
+            print(f"screen {'on' if on else 'off'}: {w.get('why')}" + (f"; TV: {rep['tv']}" if rep.get("tv") else ""), flush=True)
+            last, last_sig = on, now
+            _post("/display/power-report", {"on": on, **rep})
+        elif now - last_sig > 60:
+            signal(on)
+            last_sig = now
+        time.sleep(poll)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["should-run", "wait-web", "power", "screen-mode", "screen-audio"])
+    ap.add_argument("command", choices=["should-run", "wait-web", "power", "power-daemon", "screen-mode", "screen-audio"])
     ap.add_argument("--stack", default="/opt/solar-monitor/stack")
     a = ap.parse_args()
     if a.command == "should-run":
         sys.exit(0 if should_run(a.stack) else 1)
     if a.command == "wait-web":
         wait_web()  # start anyway after the timeout; the page retries by itself
-    elif a.command == "power":
-        power(a.stack)
+    elif a.command == "power":          # one-shot (older timer): the signal only
+        signal(not screen_off_now(load(a.stack)))
+    elif a.command == "power-daemon":
+        power_daemon()
     elif a.command == "screen-mode":
         screen_mode()
     elif a.command == "screen-audio":
