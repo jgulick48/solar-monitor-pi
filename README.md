@@ -23,6 +23,7 @@ read, never changed.
 | Wall display | Dashboard and up to two cameras on a screen plugged into the Pi's HDMI port | `http://<pi>/display` |
 | go2rtc | Turns the cameras' RTSP(S) streams into video the display's browser can play | localhost only |
 | cloudflared | Optional remote access to Home Assistant through your own Cloudflare account | `https://<name>.<your domain>` |
+| cloudflared-support | Optional remote support: a helper's own Cloudflare Tunnel, while the owner allows it | the helper's hostnames |
 
 ## Hardware
 
@@ -198,6 +199,38 @@ Home Assistant is stopped: since 2026.11 Home Assistant ignores `http:` in YAML)
 - The API token and the tunnel's run token are kept in `state/tunnel.json` and `state/tunnel.env` (mode 600) and are
   included in the USB backups.
 
+## Remote support (optional)
+
+For troubleshooting a box from elsewhere. The **helper** sets up the access in their own Cloudflare account; the **owner**
+turns it on (and off) on the box's setup page (`http://<pi>/setup#support`). It is off by default.
+
+Helper, once:
+
+1. Cloudflare Zero Trust &rarr; Networks &rarr; Tunnels &rarr; **Create a tunnel** (cloudflared), name it after the site.
+   Copy the token (the long string after `cloudflared service install`).
+2. Add public hostnames for what you need, all on the box itself:
+   `ssh://localhost:22` (SSH), `http://localhost:80` (setup page), `http://localhost:3000` (Grafana),
+   `http://localhost:8123` (Home Assistant).
+3. Protect those hostnames with a Cloudflare Access application (your identity provider; optionally a service token
+   for scripts). Without it, anyone who learns the setup page's hostname can use it.
+4. Give the owner the token and your SSH public key.
+
+Owner: paste the token and key under **Remote support**, choose when it switches off (1, 3, 7, 14 or 30 days, or only by
+hand) and press **Turn remote support on**. The start page shows a "Remote support is on" banner with an off button the
+whole time. While it is on the box:
+
+- runs `cloudflared-support` (compose profile `support`) with the helper's token;
+- adds the helper's key to the `solar` account (a marked block in `~solar/.ssh/authorized_keys`, other keys untouched)
+  and allows `sudo` without a password (`/etc/sudoers.d/solar-support`): **full administrator access**;
+- starts SSH if it wasn't running, listening on localhost only (so only the tunnel reaches it) and for keys only
+  (`/etc/ssh/sshd_config.d/solar-support.conf`). If the owner had turned SSH on themselves, it is left as it is.
+
+Turning it off, by hand or when its time is up (the collector checks every minute, and re-applies it after a reboot while
+it is on), removes all of that again. Settings: `state/support.json` and `state/support.env` (mode 600).
+
+Connecting (helper): `ssh -o ProxyCommand="cloudflared access ssh --hostname %h" solar@<ssh hostname>`; add
+`--service-token-id <id> --service-token-secret <secret>` to the `cloudflared` command for a non-interactive login.
+
 ## Advisor
 
 The start page's **Advisor** answers "what would help this system most?" from the site's own history. It
@@ -290,6 +323,7 @@ Home Assistant, Grafana and the rest.
   `dashboards/solar.yaml` are kept current by `solar_setup.py` on every run, which also fills in the Energy
   dashboard once.
 - `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it.
+- `setup/support.py` turns remote support on and off (tunnel, SSH key, sudo, SSH) and switches it off when its time is up.
 - `setup/battery.py` is the battery health check (computed on request from VictoriaMetrics, cached).
 
 - `setup/tunnel.py` sets up remote access through a Cloudflare Tunnel (Cloudflare API calls, `cloudflared` service).

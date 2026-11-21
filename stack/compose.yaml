@@ -92,6 +92,19 @@ services:
         required: false
     depends_on: [homeassistant]
 
+  # Remote support (setup page -> Remote support; setup/support.py): a second cloudflared with a
+  # tunnel token from the helper's own Cloudflare account. Off unless COMPOSE_PROFILES has "support";
+  # what it publishes (SSH, setup page, Grafana...) is set in that account, behind Cloudflare Access.
+  cloudflared-support:
+    image: cloudflare/cloudflared:2026.11.1
+    profiles: [support]
+    restart: unless-stopped
+    network_mode: host
+    command: ["tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:20249", "run"]
+    env_file:
+      - path: ./state/support.env
+        required: false
+
   # Backups to a USB stick (setup/backup.py runs it; not a long-running service).
   backup:
     image: restic/restic:0.20.0
