@@ -79,6 +79,19 @@ services:
     ports:
       - "127.0.0.1:1984:1984"
 
+  # Remote access to Home Assistant through a Cloudflare Tunnel (setup page -> Remote access;
+  # setup/tunnel.py). Off unless .env has COMPOSE_PROFILES=tunnel. Only HA is published.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.11.1
+    profiles: [tunnel]
+    restart: unless-stopped
+    network_mode: host
+    command: ["tunnel", "--no-autoupdate", "run"]
+    env_file:
+      - path: ./state/tunnel.env
+        required: false
+    depends_on: [homeassistant]
+
   # Backups to a USB stick (setup/backup.py runs it; not a long-running service).
   backup:
     image: restic/restic:0.20.0

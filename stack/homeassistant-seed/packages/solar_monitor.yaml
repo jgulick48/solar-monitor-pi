@@ -5,6 +5,14 @@
 # Every figure comes from the box's own /api/ha, the same numbers and alerts as the wall
 # display (all inverters added up), so it works for any number of inverters and dongles.
 
+# Remote access (Cloudflare Tunnel, setup page): cloudflared runs on this box and passes the
+# visitor's address on; trust that only from localhost.
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 127.0.0.1
+    - ::1
+
 rest:
   - resource: http://127.0.0.1/api/ha
     scan_interval: 30

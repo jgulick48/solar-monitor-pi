@@ -376,7 +376,7 @@ def daily_summary(stack, site, now, tz):
         h = st["gen_hours"] or 0
         parts.append(f"generator {h:.1f} h ({_kwh(st['gen_kwh'] or 0)} kWh)" if h >= 0.05 else "no generator")
     text = ", ".join(parts) + "."
-    f = forecast_summary(load_forecast(stack), now, tz)
+    f = forecast_summary(load_forecast(stack, now.timestamp()), now, tz)
     if f:
         nxt = "Today" if day < now.date() else "Tomorrow"
         text += f" {nxt}: about {_kwh(f['today'] if day < now.date() else f['tomorrow'])} kWh of solar expected."

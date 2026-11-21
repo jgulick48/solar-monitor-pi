@@ -30,6 +30,7 @@ import advisor  # noqa: E402
 import backup  # noqa: E402
 import display  # noqa: E402
 import solar_setup as ss  # noqa: E402
+import tunnel  # noqa: E402
 import weather  # noqa: E402
 
 STACK = "/opt/solar-monitor/stack"
@@ -237,9 +238,8 @@ def yaml_str(s):
     return json.dumps(s)  # a JSON string is a valid YAML scalar
 
 
-def apply_site(site):
-    """Write HA core settings + site package and restart what changed."""
-    msgs = []
+def write_core(site):
+    """HA core settings (homeassistant/core.yaml); the public address too when remote access is on."""
     core = [
         "# Written by the solar monitor setup page (http://<this box>/setup); edits are overwritten.",
         f"name: {yaml_str(site['name'])}",
@@ -251,14 +251,22 @@ def apply_site(site):
     ]
     if site["elevation"]:
         core.insert(4, f"elevation: {site['elevation']}")
-    ha_changed = ss.write_if_changed(path("homeassistant", "core.yaml"), "\n".join(core) + "\n")
+    if tunnel.public_url(STACK):
+        core.insert(-1, f"external_url: {yaml_str(tunnel.public_url(STACK))}")
+    return ss.write_if_changed(path("homeassistant", "core.yaml"), "\n".join(core) + "\n")
+
+
+def apply_site(site):
+    """Write HA core settings + site package and restart what changed."""
+    msgs = []
+    ha_changed = write_core(site)
     ha_changed |= ss.write_if_changed(path("homeassistant", "packages", "site.yaml"), ss.site_package(site))
     # System time zone (used by Grafana via .env and by the host clock display)
     if site["time_zone"] != ss.host_timezone():
         r = subprocess.run(["timedatectl", "set-timezone", site["time_zone"]], capture_output=True, text=True)
         msgs.append("time zone set" if r.returncode == 0 else f"could not set the system time zone: {r.stderr.strip()}")
     sec = ss.ensure_secrets(STACK)
-    env_changed = ss.write_if_changed(path(".env"), ss.load_env_text(sec, site["time_zone"]), 0o600)
+    env_changed = ss.write_if_changed(path(".env"), ss.load_env_text(sec, site["time_zone"], ss.env_profiles(STACK)), 0o600)
     restart = (["homeassistant"] if ha_changed else []) + (["grafana"] if env_changed else [])
     if restart:
         r = subprocess.run(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", *restart], capture_output=True, text=True)
@@ -391,6 +399,7 @@ def status_page(handler):
 <div class="card"><b>Advisor</b>: <a href="/advisor">what would help most &mdash; batteries, panels, an inverter or an automatic generator</a>
 <br><small>{html.escape(adv_note)}</small></div>
 <div class="card"><b>Backups</b>: {backup_line()} &nbsp;<a href="/backup">change</a></div>
+<div class="card"><b>Remote access</b>: {remote_line()} &nbsp;<a href="/setup#remote">change</a></div>
 <div class="card"><b>Screen</b>: {display_line} <a href="/display">preview</a> &nbsp;<a href="/setup#screen">change</a></div>
 <div class="card" id="weather"><b>Sunlight data</b>: {weather_line}
 <form method="post" action="/weather/scan" style="margin-top:8px"><button>Scan for weather stations</button>
@@ -403,7 +412,7 @@ Scanning takes up to two minutes. Give each dongle a fixed IP (DHCP reservation)
     return page("Solar monitor", body)
 
 
-def setup_page(site, error="", done=None):
+def setup_page(site, error="", done=None, remote_msg=""):
     upd = update_settings()
     def inp(name, value, typ="text", extra=""):
         return f"<input name='{name}' type='{typ}' value='{html.escape(str(value))}' {extra}>"
@@ -457,6 +466,8 @@ Devices &amp; services; it's usually found automatically) with a local Protect u
     msg = f"<p class='err'>{html.escape(error)}</p>" if error else ""
     if done:
         msg = "<div class='card'>Saved: " + html.escape("; ".join(done)) + ". <a href='/'>Back to the start page</a></div>"
+    if remote_msg:
+        msg = f"<div class='card'>Remote access: {html.escape(remote_msg)} <a href='#remote'>details</a></div>"
     body = f"""<h1>Site setup</h1>{msg}
 <form method="post" action="/setup">
 <fieldset><legend>Location</legend>
@@ -500,7 +511,8 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
 <label>Follow <select name="update_channel"><option value="release"{' selected' if upd['channel'] == 'release' else ''}>Releases (recommended)</option>
 <option value="main"{' selected' if upd['channel'] == 'main' else ''}>Every change on main (test boxes)</option></select></label></fieldset>
 <p><button>Save</button> &nbsp;<a href="/">Cancel</a></p></form>
-<p><small>Saving restarts Home Assistant (about a minute) when the location, time zone or sizes changed.</small></p>"""
+<p><small>Saving restarts Home Assistant (about a minute) when the location, time zone or sizes changed.</small></p>
+{remote_section(remote_msg)}"""
     return page("Site setup", body)
 
 
@@ -513,6 +525,12 @@ def run_quietly(cmd):
 
 def _when(ts):
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts else "never"
+
+
+def remote_line():
+    url = tunnel.public_url(STACK)
+    return (f"Home Assistant at <a href='{html.escape(url)}'>{html.escape(url)}</a> (Cloudflare Tunnel)" if url
+            else "off. Home Assistant is only reachable on this network.")
 
 
 def backup_line():
@@ -565,6 +583,53 @@ so it can be pulled out at any other time. It is never formatted: the backups go
 this box's passwords and camera links. Keep it in the Pi.</small></fieldset>
 <p><button>Save</button> &nbsp;<a href="/">Back</a></p></form>{restore}"""
     return page("Backups", body)
+
+
+def remote_section(msg=""):
+    """Remote access (Cloudflare Tunnel) on the setup page: its own form, since it talks to Cloudflare."""
+    d = tunnel.settings(STACK)
+    def inp(name, value, extra=""):
+        return f"<input name='{name}' value='{html.escape(value)}' autocomplete='off' {extra}>"
+    note = ""
+    if d["message"]:
+        note += f"<p class='err'>{html.escape(d['message'])}</p>"
+    state = "<p>Off.</p>"
+    if d["enabled"]:
+        url = tunnel.public_url(STACK)
+        st = tunnel.tunnel_status(STACK) or "unknown"
+        state = (f"<p><b>On</b>: Home Assistant is at <a href='{html.escape(url)}'>{html.escape(url)}</a> "
+                 f"<small>(Cloudflare says the tunnel is <b>{html.escape(st)}</b>)</small></p>")
+    saved = f"<small>Saved: <code>{tunnel.mask(d['api_token'])}</code>. Leave empty to keep it.</small>" if d["api_token"] else ""
+    off = "" if not d["enabled"] else """<form method="post" action="/tunnel/off">
+<label><input type="checkbox" name="remove" value="1" style="width:auto" checked> Also delete the tunnel and its DNS record at Cloudflare</label>
+<p><button>Turn remote access off</button></p></form>"""
+    owner = "" if tunnel.ha_has_owner(STACK) else (
+        "<p class='err'>Create your Home Assistant account first (open Home Assistant on this network): "
+        "until then, anyone who found the address could claim it.</p>")
+    return f"""<h2 id="remote">Remote access (optional)</h2>{note}{state}{owner}
+<form method="post" action="/tunnel"><fieldset><legend>Cloudflare Tunnel</legend>
+<p><small>Reach Home Assistant, and the Home Assistant phone app, away from home through your own Cloudflare account and domain,
+without opening anything on the router. Only Home Assistant is published (it has its own login; turn on two-factor authentication
+in your Home Assistant profile). This setup page, Grafana and the cameras stay on the local network.</small></p>
+<label>Cloudflare account ID {inp('cf_account', d['account_id'], "placeholder='32 letters and digits'")}</label>
+<small>On the Cloudflare dashboard: the domain's overview page, right-hand column, <i>Account ID</i>.</small>
+<div class="row"><label>Name {inp('cf_name', d['name'], "placeholder='solar'")}</label>
+<label>Domain {inp('cf_domain', d['domain'], "placeholder='example.com'")}</label></div>
+<small>Home Assistant will be at <i>name.domain</i>, e.g. solar.example.com. The domain must already be on that Cloudflare account.</small>
+<label>API token <input name="cf_token" type="password" autocomplete="off" style="max-width:100%"></label>{saved}
+<p><small>Make one at Cloudflare &rarr; My Profile &rarr; API Tokens &rarr; Create Custom Token with the permissions
+<b>Account &middot; Cloudflare Tunnel &middot; Edit</b>, <b>Zone &middot; DNS &middot; Edit</b> and <b>Zone &middot; Zone &middot; Read</b>
+(limit it to that account and domain). This box keeps the token to update or remove the tunnel later.</small></p>
+<p><button>{'Save and update' if d['enabled'] else 'Turn remote access on'}</button></p></fieldset></form>{off}"""
+
+
+def apply_core_change():
+    """Rewrite core.yaml (the public address) and restart Home Assistant if it changed."""
+    site = load_site()
+    if site["_configured"] and write_core(site):
+        r = run_quietly(ss.compose_cmd(STACK) + ["restart", "homeassistant"])
+        return ["Home Assistant restarted"] if r.returncode == 0 else [f"Home Assistant restart failed: {r.stderr.strip()[-200:]}"]
+    return []
 
 
 def advisor_page():
@@ -697,6 +762,25 @@ class Handler(BaseHTTPRequestHandler):
                 return
             backup.save_settings(STACK, {**backup.settings(STACK), "uuid": uuid, "history": f.get("history") == "1"})
             self.send(200, backup_page("Saved." + (" The first backup runs tonight; or use Back up now." if uuid else "")))
+        elif self.path == "/tunnel":
+            cur = tunnel.settings(STACK)
+            try:
+                d = tunnel.clean(self.form(), cur)
+            except ValueError as e:
+                self.send(400, setup_page(load_site(), remote_msg=f"Not saved: {e}."))
+                return
+            try:
+                d = tunnel.enable(STACK, d, prev=cur)
+                msgs = ["remote access on at " + tunnel.public_url(STACK)] + apply_core_change()
+                if d["message"]:
+                    msgs.append(d["message"])
+            except tunnel.CFError as e:
+                tunnel.save(STACK, {**d, "enabled": cur["enabled"], "message": ""})
+                msgs = [f"Not turned on: {e}"]
+            self.send(200, setup_page(load_site(), remote_msg="; ".join(msgs) + "."))
+        elif self.path == "/tunnel/off":
+            msgs = tunnel.disable(STACK, remove=self.form().get("remove") == "1") + apply_core_change()
+            self.send(200, setup_page(load_site(), remote_msg="; ".join(msgs) + "."))
         elif self.path == "/backup/run":
             run_quietly(["systemctl", "start", "--no-block", "solar-backup.service"])
             self.send(303, "", extra={"Location": "/backup"})
