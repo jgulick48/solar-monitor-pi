@@ -822,7 +822,6 @@ const ICONS={clear:d=>d?SUN:MOON,
 function wicon(k,day,cls){return `<svg class="wi ${cls||""}" viewBox="0 0 24 24">${(ICONS[k]||ICONS.cloud)(day!==false)}</svg>`}
 // arrow pointing the way the wind blows (it comes FROM the direction given)
 function warrow(deg){return deg==null?"":`<svg class="wa" viewBox="0 0 10 10"><path transform="rotate(${(+deg+180)%360} 5 5)" d="M5 0.5L8.5 9 5 7 1.5 9z"/></svg>`}
-function wind(w,g,c,deg,u){if(w==null)return"";return `${deg!=null?warrow(deg)+" ":""}${c||""} ${w}${g!=null&&g>w?"&ndash;"+g:""} ${u}`}
 function weather(w){
   const box=$("wx");
   $("wrap").classList.toggle("wxon",!!w);
@@ -834,7 +833,11 @@ function weather(w){
   const extra=[n.feels!=null&&n.feels!==n.temp?`Feels <b>${t(n.feels)}</b>`:"",n.humidity!=null?`Humidity <b>${Math.round(n.humidity)}%</b>`:""].filter(Boolean).join(" &middot; ");
   const rain=n.rain_day!=null?`Rain today <b>${n.rain_day} ${u.rain}</b>${n.rain_rate?` (${n.rain_rate} ${u.rain}/h)`:""}`:"";
   $("wxnow").innerHTML=wicon(n.icon,n.day)+`<div class="t">${t(n.temp)}</div><div class="d"><b>${n.text||""}</b>${n.source==="station"?" &middot; station":""}<br>`+
-    `Wind <b>${n.wind==null?"--":wind(n.wind,n.gust,n.compass,n.wind_dir,u.wind)}</b><br>${[extra,rain].filter(Boolean).join("<br>")}</div>`;
+    `Wind <b>${n.wind==null?"--":(n.wind_dir!=null?warrow(n.wind_dir)+" ":"")+(n.compass||"")+" "+n.wind+" "+u.wind}</b>`+
+    (n.gust!=null?` &middot; Gust <b>${n.gust} ${u.wind}</b>`:"")+"<br>"+
+    (n.gust_max!=null?`${n.gust_max_src==="forecast"?"Today's gusts up to":"Max gust today"} <b>${n.gust_max} ${u.wind}</b>`+
+      (n.gust_max_time?` at ${n.gust_max_time}`:n.gust_max_src==="forecast"?" (forecast)":"")+"<br>":"")+
+    `${[extra,rain].filter(Boolean).join("<br>")}</div>`;
   const dn=Math.max(3,Math.min(7,Math.floor(($("wxtop").clientWidth-$("wxnow").offsetWidth)/(lu*6))));
   box.style.setProperty("--days",dn);
   const days=w.days.slice(0,dn);

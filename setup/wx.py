@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zoneinfo
 
 import solar_setup as ss
 
@@ -103,10 +104,24 @@ def fetch_alerts(stack):
     return len(out)
 
 
-def save_station(stack, reading, source):
+def save_station(stack, reading, source, now=None):
+    """The station's latest readings, plus the day's highest gust: the station's own figure if it has one
+    (Ecowitt), else the highest gust seen since local midnight (the box runs in the site's time zone)."""
     vals = {k: v for k, v in (reading or {}).items() if v is not None}
-    if vals:
-        ss.write_if_changed(path(stack, "wx-station.json"), json.dumps({"at": int(time.time()), "source": source, **vals}) + "\n", 0o644)
+    if not vals:
+        return
+    now = now or time.time()
+    today = time.strftime("%Y-%m-%d", time.localtime(now))
+    prev = ss.load_json(path(stack, "wx-station.json"), {})
+    seen = [v for v in (vals.get("gust_ms"), vals.get("wind_ms")) if v is not None]
+    if prev.get("max_day") == today and prev.get("max_gust_ms") is not None:
+        seen.append(prev["max_gust_ms"])
+    out = {"at": int(now), "source": source, **vals, "max_day": today}
+    if seen:
+        out["max_gust_ms"] = max(seen)
+        out["max_gust_at"] = int(now) if out["max_gust_ms"] != prev.get("max_gust_ms") or prev.get("max_day") != today \
+            else prev.get("max_gust_at", int(now))
+    ss.write_if_changed(path(stack, "wx-station.json"), json.dumps(out) + "\n", 0o644)
 
 
 # --------------------------------------------------------------------------
@@ -121,6 +136,7 @@ def _from_metric(st, site):
     p = st.get("pressure_hpa")
     return {"temp": t(st.get("temp_c")), "feels": t(st.get("feels_c")), "humidity": st.get("humidity"),
             "wind": w(st.get("wind_ms")), "gust": w(st.get("gust_ms")), "wind_dir": st.get("wind_dir"),
+            "gust_max": w(st.get("gust_day_ms") if st.get("gust_day_ms") is not None else st.get("max_gust_ms")),
             "rain_day": r(st.get("rain_day_mm")), "rain_rate": r(st.get("rain_rate_mmh")), "uv": st.get("uv"),
             "pressure": None if p is None else (round(p / 33.8639, 2) if u else round(p))}
 
@@ -147,11 +163,26 @@ def view(stack, site, now=None):
                "wind_dir": cur.get("wind_direction_10m"), "rain_day": None, "rain_rate": None, "uv": None,
                "pressure": None if cur.get("pressure_msl") is None else (round(cur["pressure_msl"] / 33.8639, 2) if us(site) else round(cur["pressure_msl"])),
                "text": text, "icon": icon, "day": bool(cur.get("is_day", 1)), "source": "forecast"}
+    out_now["gust_max"], out_now["gust_max_src"] = None, ""
     if fresh:
         out_now.update({k: v for k, v in _from_metric(st, site).items() if v is not None})
         out_now["source"] = "station"
+        if out_now.get("gust_max") is not None:
+            out_now["gust_max_src"] = "station"
+            if st.get("gust_day_ms") is None and st.get("max_gust_at"):
+                out_now["gust_max_at"] = st["max_gust_at"]
+    if out_now.get("gust_max") is None and (fc.get("daily") or {}).get("wind_gusts_10m_max"):
+        out_now["gust_max"], out_now["gust_max_src"] = fc["daily"]["wind_gusts_10m_max"][0], "forecast"
     out_now["compass"] = compass(out_now.get("wind_dir"))
-    for k in ("temp", "feels", "wind", "gust"):
+    if out_now.get("gust_max") is not None and out_now.get("gust") is not None and out_now["gust_max_src"] == "station":
+        out_now["gust_max"] = max(out_now["gust_max"], out_now["gust"])
+    if out_now.get("gust_max_at"):
+        try:
+            tz = zoneinfo.ZoneInfo(site.get("time_zone") or "UTC")
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+            tz = None
+        out_now["gust_max_time"] = dt.datetime.fromtimestamp(out_now["gust_max_at"], tz).strftime("%-I:%M %p" if h12(site) else "%H:%M")
+    for k in ("temp", "feels", "wind", "gust", "gust_max"):
         if out_now.get(k) is not None:
             out_now[k] = round(out_now[k])
     hours, days = [], []
