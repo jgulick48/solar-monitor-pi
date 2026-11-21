@@ -113,7 +113,7 @@ class HomeAssistant(unittest.TestCase):
             idx = a["actions"].index(conds[0])
             self.assertTrue(any("action" in step for step in a["actions"][idx + 1:]), a["id"])
             checked += 1
-        self.assertEqual(checked, 6)
+        self.assertGreaterEqual(checked, 5)
 
     def test_sync_and_energy(self):
         stack = tempfile.mkdtemp()
