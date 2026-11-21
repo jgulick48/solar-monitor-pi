@@ -236,5 +236,3 @@ To do:
 - Alerts on a phone: tested in Home Assistant's own notifications; the push through the Home Assistant app still
   needs a real phone.
 - EG4 6000XP: confirm the bridge's register map against a real 6000XP.
-- lxp-bridge-go: in read-only mode, 18 settings entities are announced as sensors with
-  `entity_category: config`, which Home Assistant rejects (should be `diagnostic`).
