@@ -506,7 +506,9 @@ def _summary_fields(stack, site):
 PAGE = r"""<!doctype html><html><head><meta charset="utf-8"><title>Solar display</title><link rel="icon" href="data:,">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-:root{--bg:#0b0d10;--panel:#14181d;--fg:#f2f4f6;--muted:#8a96a3;--line:#252b33;
+/* --u: the layout's unit, 1% of the width on a 16:9 screen; on other shapes the tighter of width and height,
+   so the same layout fits 4:3, 16:10, 21:9 and small screens (the screen mode itself comes from the TV's EDID, see screen_mode). */
+:root{--u:min(1vw,1.7778vh);--bg:#0b0d10;--panel:#14181d;--fg:#f2f4f6;--muted:#8a96a3;--line:#252b33;
 --solar:#f5b301;--load:#4aa3ff;--batt:#2ecc71;--gen:#c77dff;--warn:#ff8c42;--bad:#ff4d4d}
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
 font-family:system-ui,"DejaVu Sans",sans-serif;overflow:hidden;cursor:none}
@@ -516,41 +518,48 @@ font-family:system-ui,"DejaVu Sans",sans-serif;overflow:hidden;cursor:none}
 .cam{position:relative;border-bottom:2px solid var(--bg);overflow:hidden}
 solar-cam{display:block;width:100%;height:100%;background:#000}
 solar-cam video{width:100%;height:100%;object-fit:cover;display:block}
-.cam .lbl{position:absolute;z-index:2;left:14px;top:10px;font-size:1.5vw;font-weight:600;text-shadow:0 1px 4px #000}
-.cam .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.4vw}
-#info{display:flex;flex-direction:column;padding:1.6vw 1.8vw;gap:1.1vw;min-width:0;height:100vh;overflow:hidden}
+.cam .lbl{position:absolute;z-index:2;left:14px;top:10px;font-size:calc(var(--u)*1.5);font-weight:600;text-shadow:0 1px 4px #000}
+.cam .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:calc(var(--u)*1.4)}
+#info{display:flex;flex-direction:column;padding:calc(var(--u)*1.6) calc(var(--u)*1.8);gap:calc(var(--u)*1.1);min-width:0;height:100vh;overflow:hidden}
 #top{display:flex;justify-content:space-between;align-items:baseline}
-#name{font-size:2vw;font-weight:600}#clock{font-size:2.6vw;font-variant-numeric:tabular-nums}
-#date{color:var(--muted);font-size:1.1vw;text-align:right}
-#tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:1vw}
+#name{font-size:calc(var(--u)*2);font-weight:600}#clock{font-size:calc(var(--u)*2.6);font-variant-numeric:tabular-nums}
+#date{color:var(--muted);font-size:calc(var(--u)*1.1);text-align:right}
+#tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:calc(var(--u)*1)}
 .nocam #tiles{grid-template-columns:repeat(5,1fr)}
-.tile{background:var(--panel);border-radius:14px;padding:1vw 1.2vw;min-width:0}
-.tile .k{color:var(--muted);font-size:1.05vw}.tile .v{font-size:3.3vw;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
-.tile .s{color:var(--muted);font-size:1vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.nocam .tile .v{font-size:2.6vw}
-#soc .v{font-size:4.6vw}#socbar{height:.8vw;border-radius:.4vw;background:var(--line);margin-top:.5vw;overflow:hidden}
+.tile{background:var(--panel);border-radius:14px;padding:calc(var(--u)*1) calc(var(--u)*1.2);min-width:0}
+.tile .k{color:var(--muted);font-size:calc(var(--u)*1.05)}.tile .v{font-size:calc(var(--u)*3.3);font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.tile .s{color:var(--muted);font-size:calc(var(--u)*1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nocam .tile .v{font-size:calc(var(--u)*2.6)}
+#soc .v{font-size:calc(var(--u)*4.6)}#socbar{height:calc(var(--u)*.8);border-radius:calc(var(--u)*.4);background:var(--line);margin-top:calc(var(--u)*.5);overflow:hidden}
 #socfill{height:100%;background:var(--batt);width:0}
 #soc{grid-row:span 2}.nocam #soc{grid-row:auto}
-#chart{flex:1;background:var(--panel);border-radius:14px;padding:.8vw 1vw;min-height:0;display:flex;flex-direction:column}
-#chart .k{color:var(--muted);font-size:1vw;display:flex;gap:1.4vw}
+#chart{flex:1;background:var(--panel);border-radius:14px;padding:calc(var(--u)*.8) calc(var(--u)*1);min-height:0;display:flex;flex-direction:column}
+#chart .k{color:var(--muted);font-size:calc(var(--u)*1);display:flex;gap:calc(var(--u)*1.4)}
 #chart svg{flex:1;width:100%;min-height:0}
-.dot{display:inline-block;width:.8vw;height:.8vw;border-radius:50%;margin-right:.35vw;vertical-align:middle}
-#notes{display:flex;flex-direction:column;gap:.6vw}
-.note{border-radius:12px;padding:.8vw 1.1vw;font-size:1.25vw;background:var(--panel);border-left:.5vw solid var(--muted)}
+.dot{display:inline-block;width:calc(var(--u)*.8);height:calc(var(--u)*.8);border-radius:50%;margin-right:calc(var(--u)*.35);vertical-align:middle}
+#notes{display:flex;flex-direction:column;gap:calc(var(--u)*.6)}
+.note{border-radius:12px;padding:calc(var(--u)*.8) calc(var(--u)*1.1);font-size:calc(var(--u)*1.25);background:var(--panel);border-left:calc(var(--u)*.5) solid var(--muted)}
 .note.warn{border-left-color:var(--warn);background:#2a1d12}.note.ok{border-left-color:var(--batt)}
-#foot{color:var(--muted);font-size:.9vw;display:flex;justify-content:space-between}
+#foot{color:var(--muted);font-size:calc(var(--u)*.9);display:flex;justify-content:space-between}
 #blank{position:fixed;inset:0;background:#000;display:none;z-index:9}
 /* Burn-in protection (see the script): layouts rotate every 20 minutes and the page drifts a few pixels */
 #wrap{transition:opacity .6s,transform 2s}#wrap.fade{opacity:0}
 #wrap.swap #cams{order:2}#wrap.swap{grid-template-columns:50vw 50vw}#wrap.swap.nocam{grid-template-columns:100vw 0}
 #wrap.flip #info{flex-direction:column-reverse}#wrap.flip #top{flex-direction:row-reverse}#wrap.flip #date{text-align:left}
 #wrap.rtl #tiles{direction:rtl}#wrap.rtl #tiles .tile{direction:ltr}
+/* A screen on its side: cameras side by side on top, the figures below */
+@media (orientation:portrait){:root{--u:min(1.9vw,1.15vh)}
+#wrap,#wrap.swap,#wrap.nocam,#wrap.swap.nocam{grid-template-columns:100vw;grid-template-rows:34vh 66vh}
+#wrap.nocam{grid-template-rows:0 100vh}#wrap.swap{grid-template-rows:66vh 34vh}#wrap.swap.nocam{grid-template-rows:100vh 0}
+#wrap.nocam #tiles{grid-template-columns:repeat(3,1fr)}#wrap.nocam #soc{grid-row:span 2}
+#cams{grid-template-rows:100% !important;grid-auto-flow:column;grid-auto-columns:1fr;height:100%;min-height:0}
+#info{height:100%}}
 </style></head><body>
 <div id="wrap" class="nocam"><div id="cams"></div>
 <div id="info">
  <div id="top"><div id="name">Solar</div><div><div id="clock">--:--</div><div id="date"></div></div></div>
  <div id="tiles">
-  <div class="tile" id="soc"><div class="k">Battery</div><div class="v">--</div><div id="socbar"><div id="socfill"></div></div><div class="s"></div><div class="s" id="runtime" style="margin-top:.6vw;white-space:normal"></div></div>
+  <div class="tile" id="soc"><div class="k">Battery</div><div class="v">--</div><div id="socbar"><div id="socfill"></div></div><div class="s"></div><div class="s" id="runtime" style="margin-top:calc(var(--u)*.6);white-space:normal"></div></div>
   <div class="tile" id="pv"><div class="k">Solar</div><div class="v" style="color:var(--solar)">--</div><div class="s"></div></div>
   <div class="tile" id="load"><div class="k">House</div><div class="v" style="color:var(--load)">--</div><div class="s"></div></div>
   <div class="tile" id="bat"><div class="k">Battery power</div><div class="v">--</div><div class="s"></div></div>
@@ -677,6 +686,102 @@ def screen_connected():
     return False
 
 
+# --------------------------------------------------------------------------
+# Screen mode from the TV's EDID
+# --------------------------------------------------------------------------
+DRM = "/sys/class/drm"
+MAX_PIXELS = 1920 * 1200   # bigger screens (4K TVs, 1440p) get 1080p: the Pi draws and decodes the cameras there, the TV upscales
+
+
+def parse_edid(b):
+    """Monitor name, preferred mode (first detailed timing) and size in cm from an EDID block. {} if not valid."""
+    if len(b) < 128 or b[:8] != bytes.fromhex("00ffffffffffff00"):
+        return {}
+    out = {"width_cm": b[21], "height_cm": b[22]}
+    for off in range(54, 126, 18):
+        d = b[off:off + 18]
+        if d[0] or d[1]:                                   # a detailed timing descriptor
+            if "preferred" not in out:
+                out["preferred"] = (d[2] | (d[4] & 0xF0) << 4, d[5] | (d[7] & 0xF0) << 4)
+        elif d[3] == 0xFC:                                 # monitor name
+            out["name"] = d[5:18].split(b"\n")[0].decode("ascii", "replace").strip()
+    return out
+
+
+def _wh(mode):
+    w, _, h = mode.partition("x")
+    return int(w), int("".join(c for c in h if c.isdigit()))
+
+
+def choose_mode(modes, preferred=None):
+    """The TV's preferred mode, or 1920x1080 when that is bigger (and the TV offers 1080p or something close)."""
+    sizes = []
+    for m in modes:
+        try:
+            wh = _wh(m)
+        except ValueError:
+            continue
+        if wh not in sizes:
+            sizes.append(wh)
+    if not sizes:
+        return None
+    pref = preferred if preferred in sizes else sizes[0]   # the kernel lists the preferred mode first
+    if pref[0] * pref[1] <= MAX_PIXELS:
+        return pref
+    if (1920, 1080) in sizes:
+        return (1920, 1080)
+    smaller = [wh for wh in sizes if wh[0] * wh[1] <= MAX_PIXELS * 1.2]
+    same_shape = [wh for wh in smaller if abs(wh[0] / wh[1] - pref[0] / pref[1]) < 0.05]
+    return max(same_shape or smaller or [pref], key=lambda wh: wh[0] * wh[1])
+
+
+def screens(drm=DRM):
+    """Connected screens: [{output, name, preferred, modes, mode (chosen), width_cm, height_cm}]."""
+    out = []
+    for st in sorted(glob.glob(os.path.join(drm, "card*-*", "status"))):
+        d = os.path.dirname(st)
+        try:
+            if open(st).read().strip() != "connected":
+                continue
+            modes = [m.strip() for m in open(os.path.join(d, "modes")).read().split() if m.strip()]
+        except OSError:
+            continue
+        try:
+            info = parse_edid(open(os.path.join(d, "edid"), "rb").read())
+        except OSError:
+            info = {}
+        chosen = choose_mode(modes, info.get("preferred"))
+        out.append({"output": os.path.basename(d).split("-", 1)[1], "name": info.get("name") or "",
+                    "preferred": info.get("preferred") or (modes and _wh(modes[0])) or None, "modes": modes,
+                    "mode": chosen, "width_cm": info.get("width_cm"), "height_cm": info.get("height_cm")})
+    return out
+
+
+def screen_mode():
+    """Inside the kiosk session (kiosk.sh, before Chromium): set each screen to its chosen mode with wlr-randr."""
+    for sc in screens():
+        if not sc["mode"]:
+            continue
+        mode = f"{sc['mode'][0]}x{sc['mode'][1]}"
+        r = subprocess.run(["wlr-randr", "--output", sc["output"], "--mode", mode], capture_output=True, text=True)
+        print(f"{sc['output']} ({sc['name'] or 'unknown screen'}, prefers {sc['preferred']}): {mode}"
+              + ("" if r.returncode == 0 else f" failed: {r.stderr.strip()[-200:]}"))
+
+
+def screen_line():
+    """For the setup page."""
+    sc = screens()
+    if not sc:
+        return "no screen connected"
+    parts = []
+    for s in sc:
+        pref = "x".join(map(str, s["preferred"])) if s["preferred"] else "?"
+        used = "x".join(map(str, s["mode"])) if s["mode"] else "?"
+        size = f", {round(((s['width_cm'] or 0) ** 2 + (s['height_cm'] or 0) ** 2) ** .5 / 2.54)}\"" if s.get("width_cm") else ""
+        parts.append(f"{s['name'] or s['output']}{size}: shown at {used}" + (f" (its own best is {pref})" if pref != used else ""))
+    return "; ".join(parts)
+
+
 def should_run(stack):
     if not load(stack).get("enabled", True):
         print("display turned off on the setup page")
@@ -721,7 +826,7 @@ def power(stack):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["should-run", "wait-web", "power"])
+    ap.add_argument("command", choices=["should-run", "wait-web", "power", "screen-mode"])
     ap.add_argument("--stack", default="/opt/solar-monitor/stack")
     a = ap.parse_args()
     if a.command == "should-run":
@@ -730,6 +835,8 @@ def main():
         wait_web()  # start anyway after the timeout; the page retries by itself
     elif a.command == "power":
         power(a.stack)
+    elif a.command == "screen-mode":
+        screen_mode()
 
 
 if __name__ == "__main__":

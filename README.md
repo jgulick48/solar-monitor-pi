@@ -60,6 +60,10 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
   whether the battery lasts until the sun is back ("Start the generator before dark: ... about 4.2 kWh more is
   needed"), from the average use over the last three days and the solar forecast: a dull day tomorrow counts too
   ("tomorrow looks dull (about 6 kWh of solar expected) ...").
+- **Any screen**: the screen mode comes from the TV's EDID: its own preferred mode, except that screens bigger than
+  1920x1200 (4K TVs) run at 1920x1080, which the Pi handles much better with cameras and the TV scales up. The layout
+  scales with the tighter of width and height, so 4:3, 16:10, 21:9 and 720p/768p screens fit, and a screen on its
+  side gets the cameras on top and the figures below. The setup page shows the screen found and the mode used.
 - **Burn-in protection**: every 20 minutes the layout changes (cameras on the left or the right, or without cameras
   the tiles in order or reversed; the figures top-down or flipped, clock at the bottom), with a short fade, and every
   minute the whole page drifts a few pixels along a small circle, so no label, border or grid line stays on the same
