@@ -99,6 +99,22 @@ class HomeAssistant(unittest.TestCase):
             self.assertIn(e, entities)
         self.assertEqual(pkg["lovelace"]["dashboards"]["solar-site"]["filename"], "dashboards/solar.yaml")
 
+    def test_startup_check_is_top_level(self):
+        """A condition inside if/then only ends that block: the startup re-check must be a top-level step
+        (in v0.2.1 it wasn't, and every alert fired 5 minutes after each Home Assistant start)."""
+        pkg = load_yaml(os.path.join(SEED, "packages", "solar_monitor.yaml"))
+        checked = 0
+        for a in pkg["automation"]:
+            if not any(t.get("trigger") == "homeassistant" for t in a["triggers"]):
+                continue
+            self.assertFalse(any("if" in step for step in a["actions"]), a["id"])
+            conds = [step for step in a["actions"] if step.get("condition") == "template"]
+            self.assertTrue(conds and "trigger.id != 'start'" in conds[0]["value_template"], a["id"])
+            idx = a["actions"].index(conds[0])
+            self.assertTrue(any("action" in step for step in a["actions"][idx + 1:]), a["id"])
+            checked += 1
+        self.assertEqual(checked, 4)
+
     def test_sync_and_energy(self):
         stack = tempfile.mkdtemp()
         import shutil
