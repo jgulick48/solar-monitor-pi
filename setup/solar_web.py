@@ -28,6 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import advisor  # noqa: E402
 import backup  # noqa: E402
+import boxhealth  # noqa: E402
 import battery  # noqa: E402
 import display  # noqa: E402
 import genlog  # noqa: E402
@@ -263,7 +264,7 @@ def apply_site(site):
     """Write HA core settings + site package and restart what changed."""
     msgs = []
     ha_changed = write_core(site)
-    ha_changed |= ss.write_if_changed(path("homeassistant", "packages", "site.yaml"), ss.site_package(site))
+    ha_changed |= ss.write_if_changed(path("homeassistant", "packages", "site.yaml"), ss.site_package(site, ss.ha_webhook_id(STACK)))
     # System time zone (used by Grafana via .env and by the host clock display)
     if site["time_zone"] != ss.host_timezone():
         r = subprocess.run(["timedatectl", "set-timezone", site["time_zone"]], capture_output=True, text=True)
@@ -391,7 +392,10 @@ def status_page(handler):
     adv_note = (f"last run {adv.get('generated')}: " + (adv.get("message") or (adv.get("recommendation") or [""])[0])) if adv else "not run yet (runs weekly)"
     body = f"""<h1>Solar monitor</h1>{support_banner()}{banner}
 <div class="card"><b>Home Assistant</b>: <a href="http://{host}:8123">http://{host}:8123</a><br>
-<small>First visit: create your own account. The inverter data appears by itself (the MQTT integration is pre-configured).</small></div>
+<small>First visit: create your own account. The inverter data appears by itself (the MQTT integration is pre-configured).</small>
+<br><small>{phones_line()}</small>
+<form method="post" action="/notify/test" style="margin-top:8px"><button>Send a test notification</button>
+<small>to every phone with the Home Assistant app signed in to this box</small></form></div>
 <div class="card"><b>Grafana</b>: <a href="http://{host}:3000">http://{host}:3000</a> &nbsp;<small>dashboards are visible without logging in</small><br>
 <small>Admin login (only to change dashboards): user <code>admin</code>, password <code>{html.escape(sec.get('grafana_admin', ''))}</code></small></div>
 <div class="card"><b>Site</b>: {summary} &nbsp;<a href="/setup">change</a></div>
@@ -402,6 +406,7 @@ def status_page(handler):
 <div class="card"><b>Advisor</b>: <a href="/advisor">what would help most &mdash; batteries, panels, an inverter or an automatic generator</a>
 <br><small>{html.escape(adv_note)}</small></div>
 <div class="card"><b>Backups</b>: {backup_line()} &nbsp;<a href="/backup">change</a></div>
+{box_card()}
 {battery_card(site)}
 {generator_card(site)}
 <div class="card"><b>Remote access</b>: {remote_line()} &nbsp;<a href="/setup#remote">change</a></div>
@@ -642,6 +647,57 @@ def remote_line():
     url = tunnel.public_url(STACK)
     return (f"Home Assistant at <a href='{html.escape(url)}'>{html.escape(url)}</a> (Cloudflare Tunnel)" if url
             else "off. Home Assistant is only reachable on this network.")
+
+
+def phones():
+    """Phones with the Home Assistant app signed in to this box (mobile_app config entries)."""
+    d = ss.load_json(path("homeassistant", ".storage", "core.config_entries"), {})
+    return [e.get("title") or "phone" for e in (d.get("data") or {}).get("entries", []) if e.get("domain") == "mobile_app"]
+
+
+def phones_line():
+    p = phones()
+    if not p:
+        return ("<b>No phone is signed in yet</b>: install the Home Assistant app, sign in to this box with your account "
+                "and allow notifications. Alerts and the daily summary go to every phone signed in.")
+    return "Alerts go to: " + ", ".join(html.escape(x) for x in p) + "."
+
+
+def send_test_notification():
+    import urllib.request
+    req = urllib.request.Request(f"http://127.0.0.1:8123/api/webhook/{ss.ha_webhook_id(STACK)}", data=b"{}", method="POST",
+                                 headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=10).read()
+    except OSError as e:
+        return f"Home Assistant didn't answer ({getattr(e, 'reason', e)}); is it running?"
+    p = phones()
+    if not p:
+        return "Sent to Home Assistant's notifications, but no phone is signed in yet (see the Home Assistant card)."
+    return (f"Sent to {', '.join(p)}. It should arrive within a minute; if not, check the app's notification permission "
+            "and that the phone has internet.")
+
+
+BOX_WORD = {"ok": "good", "note": "worth a look", "warn": "<b>needs attention</b>"}
+
+
+def box_card():
+    try:
+        b = boxhealth.status(STACK)
+    except Exception:  # noqa: BLE001
+        return ""
+    bits = []
+    if b["cpu_temp"] is not None:
+        bits.append(f"{b['cpu_temp']:.0f} °C")
+    if b["disk"]:
+        bits.append(f"{b['disk']['free_gb']:g} GB free")
+    sm = b["smart"] or {}
+    if sm.get("used_pct") is not None:
+        bits.append(f"SSD {sm['used_pct']}% worn")
+    finds = "".join(f"<li>{html.escape(t)}</li>" for _, t in b["findings"])
+    note = "" if sm.get("used_pct") is not None or not sm.get("error") else f"<br><small>SSD health: {html.escape(sm['error'])}.</small>"
+    return (f"<div class='card{' warn' if b['level'] == 'warn' else ''}'><b>This box</b>: {BOX_WORD[b['level']]}"
+            f"{(' (' + ', '.join(bits) + ')') if bits else ''}{('<ul>' + finds + '</ul>') if finds else ''}{note}</div>")
 
 
 def backup_line():
@@ -969,6 +1025,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/tunnel/off":
             msgs = tunnel.disable(STACK, remove=self.form().get("remove") == "1") + apply_core_change()
             self.send(200, setup_page(load_site(), remote_msg="; ".join(msgs) + "."))
+        elif self.path == "/notify/test":
+            msg = send_test_notification()
+            self.send(200, page("Test notification", f"<h1>Test notification</h1><div class='card'>{html.escape(msg)}</div>"
+                                                      "<p><a href='/'>Back</a></p>"))
         elif self.path == "/backup/run":
             run_quietly(["systemctl", "start", "--no-block", "solar-backup.service"])
             self.send(303, "", extra={"Location": "/backup"})

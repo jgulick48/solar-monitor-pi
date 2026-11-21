@@ -147,16 +147,16 @@ views:
               <ha-alert alert-type="{{ {'warn': 'warning', 'note': 'info', 'ok': 'success'}.get(states('sensor.site_battery_health'), 'info') }}">
               {{ state_attr('sensor.site_battery_health', 'battery_health_text') or 'No battery health findings yet.' }}</ha-alert>
           - type: tile
-            entity: sensor.site_battery_spread_top
+            entity: sensor.site_battery_cell_spread_when_full
             name: Cell spread when full
           - type: tile
-            entity: sensor.site_battery_soh
+            entity: sensor.site_battery_state_of_health
             name: State of health
           - type: tile
-            entity: sensor.site_battery_temp_min
+            entity: sensor.site_battery_cell_temperature_low
             name: Coldest cell
           - type: tile
-            entity: sensor.site_battery_temp_max
+            entity: sensor.site_battery_cell_temperature_high
             name: Warmest cell
           - type: tile
             entity: sensor.site_battery_cycles
@@ -164,6 +164,24 @@ views:
           - type: tile
             entity: sensor.site_battery_capacity_estimate
             name: Capacity estimate
+          - type: heading
+            heading: This box
+          - type: tile
+            entity: sensor.site_box_health
+            name: Monitor box
+          - type: tile
+            entity: sensor.site_box_temperature
+            name: Pi temperature
+          - type: tile
+            entity: sensor.site_box_disk_free
+            name: SSD free
+          - type: tile
+            entity: sensor.site_box_ssd_wear
+            name: SSD wear
+            visibility:
+              - condition: state
+                entity: sensor.site_box_ssd_wear
+                state_not: unknown
 
       - type: grid
         cards:
@@ -207,6 +225,8 @@ views:
                 name: Backup overdue
               - entity: automation.solar_battery_needs_attention
                 name: Battery needs attention
+              - entity: automation.solar_the_monitor_box_needs_attention
+                name: Monitor box needs attention
               - entity: automation.solar_generator_service_due
                 name: Generator service due
               - entity: sensor.site_last_backup

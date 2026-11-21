@@ -351,8 +351,18 @@ def seed_homeassistant(stack, sec):
     return True
 
 
-def site_package(site):
-    """packages/site.yaml: the site's sizes and the daily summary settings from the setup page."""
+def ha_webhook_id(stack):
+    """This box's secret webhook id for the setup page's "send a test notification" (kept in state/secrets.json)."""
+    path = os.path.join(stack, "state", "secrets.json")
+    s = load_json(path, {})
+    if not s.get("ha_webhook"):
+        s["ha_webhook"] = "solar-" + secrets.token_urlsafe(24)
+        write_if_changed(path, json.dumps(s, indent=2) + "\n", 0o600)
+    return s["ha_webhook"]
+
+
+def site_package(site, webhook_id=None):
+    """packages/site.yaml: the site's sizes, the daily summary settings and the test notification."""
     js = json.dumps
     on = site.get("summary_enabled", True)
     at = site.get("summary_time") or "00:00"
@@ -370,6 +380,24 @@ def site_package(site):
         "    has_time: true",
         f"    initial: {js(at + ':00')}",
     ]
+    if webhook_id:
+        # the setup page's "Send a test notification" (local network only; the id is this box's secret)
+        pkg += [
+            "automation:",
+            "  - id: solar_test_notification",
+            "    alias: \"Solar: test notification\"",
+            "    triggers:",
+            "      - trigger: webhook",
+            f"        webhook_id: {js(webhook_id)}",
+            "        allowed_methods: [POST]",
+            "        local_only: true",
+            "    actions:",
+            "      - action: script.solar_notify",
+            "        data:",
+            "          tag: test",
+            "          title: Test from the solar monitor",
+            "          message: \"If you can read this, alerts from the solar monitor reach this phone.\"",
+        ]
     if not site.get("battery_count"):
         return "\n".join(pkg) + "\n"
     battery_kwh = round(int(site["battery_count"]) * float(site["battery_kwh_each"]), 2)
@@ -414,7 +442,8 @@ HA_OWNED = ["packages/solar_monitor.yaml", "dashboards/solar.yaml"]
 def sync_homeassistant(stack):
     """Copy the image-owned HA files in; True if any changed."""
     site = load_json(os.path.join(stack, "state", "site.json"), {})
-    changed = write_if_changed(os.path.join(stack, "homeassistant", "packages", "site.yaml"), site_package(site), 0o644)
+    changed = write_if_changed(os.path.join(stack, "homeassistant", "packages", "site.yaml"),
+                               site_package(site, ha_webhook_id(stack)), 0o644)
     for rel in HA_OWNED:
         src = os.path.join(stack, "homeassistant-seed", rel)
         if os.path.exists(src):

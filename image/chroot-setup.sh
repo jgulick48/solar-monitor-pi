@@ -16,6 +16,8 @@ echo "deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.asc] https://download.d
   > /etc/apt/sources.list.d/docker.list
 apt-get update -q
 apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
+# SSD health for the start page's "This box" check (no recommends: they pull in a mail server)
+apt-get install -y -q --no-install-recommends smartmontools
 # Keep Docker's logs from filling the SSD
 mkdir -p /etc/docker
 cat > /etc/docker/daemon.json <<'JSON'
