@@ -35,6 +35,7 @@ class Support(unittest.TestCase):
         self.old_root = support.ROOT
         support.ROOT = self.root
         self.ssh_on = False
+        self.tunnel_up = False
         self.calls = []
         self.old_run = support.run
         support.run = self.fake_run
@@ -50,6 +51,10 @@ class Support(unittest.TestCase):
         self.calls.append(" ".join(cmd))
         if cmd[:3] == ["systemctl", "is-active", "--quiet"]:
             return subprocess.CompletedProcess(cmd, 0 if self.ssh_on else 3, "", "")
+        if "ps" in cmd and "cloudflared-support" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "c0ffee\n" if self.tunnel_up else "", "")
+        if "up" in cmd and "cloudflared-support" in cmd:
+            self.tunnel_up = True
         if cmd[:2] == ["systemctl", "restart"]:
             self.ssh_on = True
         if cmd[:2] == ["systemctl", "stop"]:
@@ -136,6 +141,17 @@ class Support(unittest.TestCase):
         # an empty token field keeps the saved token
         support.save(self.stack, {**support.DEFAULTS, "token": TOKEN, "ssh_key": KEY})
         self.assertEqual(support.clean({"support_token": "", "support_keys": ""}, support.settings(self.stack))["token"], TOKEN)
+
+    def test_new_token_while_on_switches_the_tunnel(self):
+        support.enable(self.stack, self.form())
+        self.assertTrue(self.tunnel_up)
+        self.calls.clear()
+        support.enable(self.stack, self.form())                       # saved again, same token: left running
+        self.assertFalse([c for c in self.calls if " up " in f" {c} "])
+        other = base64.b64encode(json.dumps({"a": "acct", "t": "5678-tunnel", "s": "c2VjcmV0"}).encode()).decode()
+        msgs = support.enable(self.stack, self.form(support_token=other))
+        self.assertTrue(any("--force-recreate" in c and c.endswith("cloudflared-support") for c in self.calls))
+        self.assertIn("support tunnel switched to the new token", msgs)
 
     def test_support_code(self):
         code = support.make_code(TOKEN, KEY)
