@@ -12,6 +12,9 @@
     it backfills 92 days. Timestamps are the end of each hour (Open-Meteo
     reports the mean of the preceding hour). This sends the site's location to
     Open-Meteo (open-meteo.com, free API, no key).
+  * From the same requests, the solar forecast: expected output per hour for
+    today and the next two days in state/forecast.json, scaled by the
+    advisor's calibration (actual output / irradiance model) when it has one.
 """
 import argparse
 import json
@@ -26,6 +29,9 @@ import solar_setup as ss  # noqa: E402
 import weather  # noqa: E402
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
+GAMMA = -0.0035          # PV power change per degree C of cell temperature (as in advisor.py)
+DEFAULT_DERATE = 0.8     # actual / model before the advisor has calibrated this site
+INVERTER_PV_KW = {"6000xp": 8.0, "12000xp": 15.0, "12kpv": 15.0, "18kpv": 18.0}
 OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
 
 
@@ -54,25 +60,52 @@ def station_sample(stack):
     vm_import(lines)
 
 
+def calibration(stack):
+    """(factor, source): the advisor's actual/model ratio if it was calibrated on Open-Meteo, else a default."""
+    adv = ss.load_json(os.path.join(stack, "state", "advisor.json"), {})
+    k = (adv.get("data") or {}).get("calibration")
+    if k and adv.get("source") == "Open-Meteo" and 0.3 <= k <= 1.3:
+        return k, "calibrated"
+    return DEFAULT_DERATE, "default"
+
+
+def forecast_hours(site, gti_by_array, temps, k, n_inverters):
+    """[[hour_end_unix, kW]]: expected average output in each hour, capped at the inverters' PV input."""
+    kwp = [int(a["panels"]) * int(a["panel_watts"]) / 1000 for a in site["arrays"]]
+    cap = n_inverters * INVERTER_PV_KW.get(site.get("inverter_model", "6000xp"), 8.0)
+    out = []
+    for t in sorted(gti_by_array[0]):
+        vals = [g.get(t) for g in gti_by_array]
+        if any(v is None for v in vals):
+            continue
+        temp = temps.get(t, 15.0)
+        kw = sum(p * x / 1000 * (1 + GAMMA * (temp + x / 800 * 20 - 25)) for p, x in zip(kwp, vals)) * k
+        out.append([t, round(min(max(kw, 0.0), cap), 3)])
+    return out
+
+
 def open_meteo_fetch(stack, past_days):
     site = ss.load_json(os.path.join(stack, "state", "site.json"), {})
     if not site.get("latitude") or not site.get("arrays"):
         return 0
     n = 0
     temp_done = False
+    gti_by_array, temps = [], {}
     for i, a in enumerate(site["arrays"], start=1):
         q = {
             "latitude": site["latitude"], "longitude": site["longitude"],
             "hourly": "global_tilted_irradiance,temperature_2m",
             "tilt": a["tilt"],
             "azimuth": (int(a["azimuth"]) - 180 + 540) % 360 - 180,  # Open-Meteo: 0 = south, -90 = east, 90 = west
-            "past_days": past_days, "forecast_days": 1, "timezone": "UTC", "timeformat": "unixtime",
+            "past_days": past_days, "forecast_days": 3, "timezone": "UTC", "timeformat": "unixtime",
         }
         with urllib.request.urlopen(f"{OPEN_METEO}?{urllib.parse.urlencode(q)}", timeout=60) as r:
             d = json.loads(r.read())
         h = d["hourly"]
         now = time.time()
         lines = []
+        gti_by_array.append({t: g for t, g in zip(h["time"], h["global_tilted_irradiance"]) if t > now - 86400 * 1.5})
+        temps.update({t: x for t, x in zip(h["time"], h["temperature_2m"]) if x is not None})
         for t, gti, temp in zip(h["time"], h["global_tilted_irradiance"], h["temperature_2m"]):
             if t > now or gti is None:
                 continue  # only past hours (value at t = mean of the hour ending at t)
@@ -82,6 +115,11 @@ def open_meteo_fetch(stack, past_days):
         temp_done = True
         vm_import(lines)
         n += len(lines)
+    k, source = calibration(stack)
+    n_inv = max(len(ss.load_json(os.path.join(stack, "state", "inverters.json"), {})), 1)
+    fc = {"generated": int(time.time()), "calibration": round(k, 3), "calibration_source": source,
+          "hours": forecast_hours(site, gti_by_array, temps, k, n_inv)}
+    ss.write_if_changed(os.path.join(stack, "state", "forecast.json"), json.dumps(fc) + "\n", 0o644)
     return n
 
 

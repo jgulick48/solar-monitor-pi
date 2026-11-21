@@ -80,6 +80,20 @@ rest:
         device_class: energy
         state_class: total_increasing
         icon: mdi:engine
+      - name: Site solar forecast today
+        unique_id: site_solar_forecast_today
+        # whole day; Open-Meteo, calibrated to this site's panels
+        value_template: "{{ value_json.forecast_today }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        icon: mdi:weather-partly-cloudy
+        json_attributes: [forecast_remaining]
+      - name: Site solar forecast tomorrow
+        unique_id: site_solar_forecast_tomorrow
+        value_template: "{{ value_json.forecast_tomorrow }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        icon: mdi:weather-partly-cloudy
       - name: Site battery stored
         unique_id: site_battery_stored
         value_template: "{{ value_json.battery_stored }}"
