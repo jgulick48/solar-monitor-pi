@@ -99,6 +99,11 @@ It runs Chromium in kiosk mode inside `cage` (a one-app Wayland compositor; no d
 the kiosk software is installed and a screen is connected; plugging a screen in starts it (udev rule). The browser's
 profile lives in RAM. The same page is at `http://<pi>/display` from other computers, without the cameras.
 
+**Camera load.** Playing the camera video is nearly all of the box's CPU work (test Pi 4: 41% of its four
+cores with two medium-quality UniFi Protect streams, 27% with low, 5% with no video). The Protect section's *Camera
+picture* is *Automatic* by default: low on a Pi 4, medium on a Pi 5 (boxes that update switch by themselves). The
+video stops while the screen is off. go2rtc runs on the host network, listening on 127.0.0.1 only.
+
 **Weather** shows in the same panel as the solar figures (setup page: *Show the weather with the solar figures*, on
 by default): now (temperature, conditions, feels-like, wind speed, gusts and direction, humidity, rain today), the next
 days (high/low, rain chance, wind) and, where there's room, the next 12 hours. The forecast comes from Open-Meteo (free,

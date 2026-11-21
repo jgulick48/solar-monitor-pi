@@ -98,7 +98,7 @@ class Display(unittest.TestCase):
         with open(os.path.join(stack, "go2rtc", "go2rtc.yaml")) as f:
             y = f.read()
         self.assertIn('cam1: "rtspx://h:7441/TOK"', y)
-        self.assertIn('listen: ":1984"', y)
+        self.assertIn('listen: "127.0.0.1:1984"', y)
         self.assertEqual(os.stat(os.path.join(stack, "state", "display.json")).st_mode & 0o777, 0o600)
         self.assertFalse(display.save(stack, d))
         display.save(stack, dict(d, cameras=[]))

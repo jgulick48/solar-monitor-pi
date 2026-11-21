@@ -796,6 +796,9 @@ def protect_section(msg=""):
 {rows or '<p>No cameras on this console.</p>'}
 <label><input type="checkbox" name="highlight_motion" value="1" style="width:auto"{' checked' if d['highlight_motion'] else ''}>
  Also bring cameras to the front for plain motion (not only people, vehicles, animals, packages and the doorbell)</label>
+<label>Camera picture <select name="protect_quality">{''.join(f"<option value='{v}'{' selected' if d.get('quality', 'auto') == v else ''}>{html.escape(t)}</option>" for v, t in protect.QUALITIES)}</select></label>
+<small>Now: {html.escape(d.get('applied_quality') or protect.resolve_quality(d.get('quality', 'auto')))}. Playing the video is most of this box's work; low quality takes about a third less on a Pi 4.
+The video also stops while the screen is off.</small>
 <p><button>Save cameras</button></p></fieldset></form>
 <form method="post" action="/protect/forget"><p><button>Forget this console</button></p></form>"""
         except protect.ProtectError as e:
@@ -1505,7 +1508,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 cams = protect.list_cameras(d["host"], d["api_key"])
                 picked = [c["id"] for c in cams if f.get(f"cam_{c['id']}") == "1"]
-                protect.save(STACK, {**protect.settings(STACK), "highlight_motion": f.get("highlight_motion") == "1"})
+                q = f.get("protect_quality") if f.get("protect_quality") in dict(protect.QUALITIES) else "auto"
+                protect.save(STACK, {**protect.settings(STACK), "highlight_motion": f.get("highlight_motion") == "1", "quality": q})
                 changed = protect.apply_cameras(STACK, picked, cams)
                 msgs = [f"{len(picked)} camera(s) on the screen"]
                 if protect.LAST_DUPES:
@@ -1534,6 +1538,16 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("%s %s\n" % (self.address_string(), fmt % a))
 
 
+def refresh_camera_quality():
+    """After an update (or a board change): Protect cameras at the quality the setting asks for."""
+    try:
+        if protect.refresh_quality(STACK):
+            run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", "go2rtc"])
+            print("camera links refreshed at", protect.settings(STACK).get("applied_quality"), flush=True)
+    except (OSError, ValueError, protect.ProtectError) as e:
+        print("camera quality refresh failed:", e, flush=True)
+
+
 def main():
     global STACK
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1542,6 +1556,7 @@ def main():
     args = ap.parse_args()
     STACK = args.stack
     protect.listen(STACK)          # UniFi Protect events for the wall display, if set up
+    threading.Thread(target=refresh_camera_quality, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
 
 

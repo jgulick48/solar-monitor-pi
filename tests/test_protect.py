@@ -160,6 +160,32 @@ class Display(unittest.TestCase):
             self.assertIn(needle, page)
         self.assertEqual(display.MAX_CAMERAS, 16)
 
+    def test_quality(self):
+        r = protect.resolve_quality
+        self.assertEqual(r("auto", "Raspberry Pi 4 Model B Rev 1.5"), "low")
+        self.assertEqual(r("auto", "Raspberry Pi 5 Model B Rev 1.1"), "medium")
+        self.assertEqual(r("auto", ""), "medium")                      # not a Pi (tests, a PC)
+        self.assertEqual(r("medium", "Raspberry Pi 4 Model B"), "medium")
+        # after an update, cameras made at medium are re-fetched at the quality the setting asks for
+        display.save(self.stack, {**display.DEFAULTS, "cameras": []})
+        protect.save(self.stack, {**protect.DEFAULTS, "host": "192.0.2.1", "api_key": "k", "quality": "low",
+                                  "cameras": [{"id": "aaa", "name": "Driveway"}], "applied_quality": "medium"})
+        asked = []
+        o = (protect.stream_url, protect.stream_tokens, protect.list_cameras)
+        protect.stream_url = lambda host, key, cid, quality="medium": asked.append(quality) or f"rtsps://192.0.2.1:7441/{cid}{quality}?enableSrtp"
+        protect.stream_tokens = lambda host, key, cid: set()
+        protect.list_cameras = lambda host, key: [{"id": "aaa", "name": "Driveway"}]
+        try:
+            self.assertTrue(protect.refresh_quality(self.stack))
+            self.assertFalse(protect.refresh_quality(self.stack))      # done: nothing to do the next time
+        finally:
+            protect.stream_url, protect.stream_tokens, protect.list_cameras = o
+        self.assertEqual(asked, ["low"])
+        self.assertEqual(display.load(self.stack)["cameras"][0]["url"], "rtsps://192.0.2.1:7441/aaalow?enableSrtp")
+
+    def test_page_stops_video_when_dark(self):
+        self.assertIn("if(screenDark){ dropPlayer(s); s.cam=null; continue; }", display.PAGE)
+
     def test_clean_host(self):
         self.assertEqual(protect.clean_host("https://192.168.1.1/protect/dashboard"), "192.168.1.1")
         with self.assertRaises(ValueError):
