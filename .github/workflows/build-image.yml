@@ -24,7 +24,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q curl xz-utils parted e2fsprogs util-linux skopeo rsync fdisk
+          sudo apt-get install -y -q curl xz-utils parted e2fsprogs util-linux skopeo rsync fdisk zerofree
 
       - name: Build
         env:
@@ -32,7 +32,11 @@ jobs:
         run: |
           [ -n "$SOLAR_VERSION" ] || unset SOLAR_VERSION
           sudo --preserve-env=SOLAR_VERSION image/build.sh "$PWD/out"
-          ls -lh out
+          ls -l out
+          # GitHub release files must be under 2 GiB: fail here with a clear message, not at the upload
+          size=$(stat -c %s out/*.img.xz)
+          echo "image: $size bytes ($(( (2147483648 - size) / 1048576 )) MiB under the 2 GiB limit)"
+          [ "$size" -lt 2147483648 ] || { echo "::error::image is $size bytes, over GitHub's 2 GiB release file limit"; exit 1; }
 
       - name: Attach to the release
         if: github.event_name == 'release'
