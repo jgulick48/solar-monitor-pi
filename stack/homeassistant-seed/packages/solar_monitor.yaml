@@ -131,6 +131,12 @@ rest:
         value_template: "{{ value_json.advice }}"
         icon: mdi:engine
         json_attributes: [advice_text, advice_need_kwh, advice_empty_at, sunset, generator_mode]
+      - name: Site daily summary
+        unique_id: site_daily_summary
+        # the day it covers; the message is in the attributes
+        value_template: "{{ value_json.summary_day }}"
+        icon: mdi:message-text-clock
+        json_attributes: [summary_title, summary_text]
     binary_sensor:
       - name: Site data stale
         unique_id: site_data_stale
@@ -366,6 +372,28 @@ automation:
     actions:
       - action: script.solar_notify
         data: {tag: generator, title: "", message: clear}
+
+  # Daily summary: on/off and the time come from the setup page (packages/site.yaml).
+  - id: solar_daily_summary
+    alias: "Solar: daily summary"
+    mode: single
+    triggers:
+      - trigger: time
+        at: input_datetime.solar_summary_time
+    conditions:
+      - condition: state
+        entity_id: input_boolean.solar_daily_summary
+        state: "on"
+    actions:
+      - action: homeassistant.update_entity
+        target:
+          entity_id: sensor.site_daily_summary
+      - delay: "00:00:10"
+      - action: script.solar_notify
+        data:
+          tag: summary
+          title: "{{ state_attr('sensor.site_daily_summary', 'summary_title') }}"
+          message: "{{ state_attr('sensor.site_daily_summary', 'summary_text') }}"
 
 lovelace:
   dashboards:

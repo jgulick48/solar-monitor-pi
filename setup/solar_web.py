@@ -56,6 +56,8 @@ DEFAULT_SITE = {
     "future_generator_kw": "28",
     "low_soc_alert": "25",
     "inverter_model": "6000xp",
+    "summary_enabled": True,
+    "summary_time": "00:00",
     "costs": {"battery_each": "", "panel_per_w": "", "inverter_each": "", "generator": "", "fuel_per_gal": ""},
 }
 COST_FIELDS = [("battery_each", "Price per battery ($)"), ("panel_per_w", "Panels, $ per watt (installed)"),
@@ -211,6 +213,8 @@ def validate(form):
         "inverter_model": form.get("inverter_model") if form.get("inverter_model") in advisor.INVERTERS else "6000xp",
         "costs": {k: num(form, f"cost_{k}", 0, 100000, required=False) for k, _ in COST_FIELDS},
         "arrays": [],
+        "summary_enabled": bool(form.get("summary_enabled")),
+        "summary_time": display.parse_hhmm(form.get("summary_time", "")) or "00:00",
     }
     if site["time_zone"] not in zoneinfo.available_timezones():
         raise ValueError(f"unknown time zone '{site['time_zone']}'")
@@ -246,41 +250,8 @@ def apply_site(site):
     ]
     if site["elevation"]:
         core.insert(4, f"elevation: {site['elevation']}")
-    battery_kwh = round(int(site["battery_count"]) * float(site["battery_kwh_each"]), 2)
-    arrays_kwp = [round(int(a["panels"]) * int(a["panel_watts"]) / 1000, 3) for a in site["arrays"]]
-    pkg = [
-        "# Written by the solar monitor setup page; edits are overwritten.",
-        "# Site sizes for dashboards and automations.",
-        "template:",
-        "  - sensor:",
-        "      - name: Site battery capacity",
-        "        unique_id: site_battery_capacity",
-        "        unit_of_measurement: kWh",
-        "        icon: mdi:battery",
-        f"        state: \"{battery_kwh}\"",
-        "        attributes:",
-        f"          batteries: \"{site['battery_count']}\"",
-        f"          kwh_each: \"{site['battery_kwh_each']}\"",
-        "      - name: Site solar array size",
-        "        unique_id: site_solar_array_size",
-        "        unit_of_measurement: kW",
-        "        icon: mdi:solar-panel-large",
-        f"        state: \"{round(sum(arrays_kwp), 3)}\"",
-        "        attributes:",
-        f"          arrays: {yaml_str(json.dumps([dict(a, kwp=k) for a, k in zip(site['arrays'], arrays_kwp)]))}",
-        "      - name: Site generator mode",
-        "        unique_id: site_generator_mode",
-        "        icon: mdi:engine",
-        f"        state: {yaml_str(site['generator'])}",
-        "        attributes:",
-        f"          kw: \"{site['generator_kw']}\"",
-        "      - name: Site low battery alert level",
-        "        unique_id: site_low_battery_alert_level",
-        "        unit_of_measurement: \"%\"",
-        f"        state: \"{site['low_soc_alert']}\"",
-    ]
     ha_changed = ss.write_if_changed(path("homeassistant", "core.yaml"), "\n".join(core) + "\n")
-    ha_changed |= ss.write_if_changed(path("homeassistant", "packages", "site.yaml"), "\n".join(pkg) + "\n")
+    ha_changed |= ss.write_if_changed(path("homeassistant", "packages", "site.yaml"), ss.site_package(site))
     # System time zone (used by Grafana via .env and by the host clock display)
     if site["time_zone"] != ss.host_timezone():
         r = subprocess.run(["timedatectl", "set-timezone", site["time_zone"]], capture_output=True, text=True)
@@ -500,6 +471,11 @@ Devices &amp; services; it's usually found automatically) with a local Protect u
 <label>kWh per battery {inp('battery_kwh_each', site['battery_kwh_each'], 'text', "inputmode='decimal'")}</label></div>
 <small>EG4 LifePower4 48V 100Ah = 5.12 kWh; EG4 LL-S = 5.12 kWh; EG4 WallMount 280Ah = 14.3 kWh.</small>
 <label>Low battery alert at (%) {inp('low_soc_alert', site['low_soc_alert'], 'number', 'min=5 max=80')}</label></fieldset>
+<fieldset><legend>Daily summary</legend>
+<label><input type="checkbox" name="summary_enabled" value="1" style="width:auto"{' checked' if site.get('summary_enabled', True) else ''}> Send a daily summary to the Home Assistant app</label>
+<label>At {inp('summary_time', site.get('summary_time') or '00:00', 'time', "style='max-width:140px'")}</label>
+<small>Solar made, power used, the lowest battery level and generator time for the day, plus the solar forecast; on
+Sundays also the week and the advisor's latest finding. Sent before 06:00 it covers the day before.</small></fieldset>
 {arrays}
 <fieldset><legend>Inverters</legend><label>Model <select name="inverter_model">{inv_opts}</select></label>
 <small>{n_inv} inverter dongle(s) found on the network. Used by the advisor for output, solar input and charging limits.</small></fieldset>

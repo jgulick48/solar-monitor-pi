@@ -343,6 +343,61 @@ def seed_homeassistant(stack, sec):
     return True
 
 
+def site_package(site):
+    """packages/site.yaml: the site's sizes and the daily summary settings from the setup page."""
+    js = json.dumps
+    on = site.get("summary_enabled", True)
+    at = site.get("summary_time") or "00:00"
+    pkg = [
+        "# Written by the solar monitor (setup page settings); edits are overwritten.",
+        "input_boolean:",
+        "  solar_daily_summary:",
+        "    name: Solar daily summary",
+        "    icon: mdi:message-text-clock",
+        f"    initial: {'true' if on else 'false'}",
+        "input_datetime:",
+        "  solar_summary_time:",
+        "    name: Solar daily summary time",
+        "    has_date: false",
+        "    has_time: true",
+        f"    initial: {js(at + ':00')}",
+    ]
+    if not site.get("battery_count"):
+        return "\n".join(pkg) + "\n"
+    battery_kwh = round(int(site["battery_count"]) * float(site["battery_kwh_each"]), 2)
+    arrays_kwp = [round(int(a["panels"]) * int(a["panel_watts"]) / 1000, 3) for a in site["arrays"]]
+    pkg += [
+        "template:",
+        "  - sensor:",
+        "      - name: Site battery capacity",
+        "        unique_id: site_battery_capacity",
+        "        unit_of_measurement: kWh",
+        "        icon: mdi:battery",
+        f"        state: \"{battery_kwh}\"",
+        "        attributes:",
+        f"          batteries: \"{site['battery_count']}\"",
+        f"          kwh_each: \"{site['battery_kwh_each']}\"",
+        "      - name: Site solar array size",
+        "        unique_id: site_solar_array_size",
+        "        unit_of_measurement: kW",
+        "        icon: mdi:solar-panel-large",
+        f"        state: \"{round(sum(arrays_kwp), 3)}\"",
+        "        attributes:",
+        f"          arrays: {js(js([dict(a, kwp=k) for a, k in zip(site['arrays'], arrays_kwp)]))}",
+        "      - name: Site generator mode",
+        "        unique_id: site_generator_mode",
+        "        icon: mdi:engine",
+        f"        state: {js(site.get('generator', 'manual'))}",
+        "        attributes:",
+        f"          kw: \"{site.get('generator_kw', '')}\"",
+        "      - name: Site low battery alert level",
+        "        unique_id: site_low_battery_alert_level",
+        "        unit_of_measurement: \"%\"",
+        f"        state: \"{site.get('low_soc_alert', 25)}\"",
+    ]
+    return "\n".join(pkg) + "\n"
+
+
 # Files the image owns inside Home Assistant's config: replaced on every run (so updates
 # reach them). Everything else under homeassistant/ is only seeded on the first run.
 HA_OWNED = ["packages/solar_monitor.yaml", "dashboards/solar.yaml"]
@@ -350,7 +405,8 @@ HA_OWNED = ["packages/solar_monitor.yaml", "dashboards/solar.yaml"]
 
 def sync_homeassistant(stack):
     """Copy the image-owned HA files in; True if any changed."""
-    changed = False
+    site = load_json(os.path.join(stack, "state", "site.json"), {})
+    changed = write_if_changed(os.path.join(stack, "homeassistant", "packages", "site.yaml"), site_package(site), 0o644)
     for rel in HA_OWNED:
         src = os.path.join(stack, "homeassistant-seed", rel)
         if os.path.exists(src):
