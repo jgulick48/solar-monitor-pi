@@ -1,0 +1,11 @@
+[Unit]
+Description=Solar monitor: back up to the USB stick
+After=docker.service solar-stack.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/solar-monitor/setup/backup.py run --stack /opt/solar-monitor/stack
+TimeoutStartSec=3h
+Nice=10
+IOSchedulingClass=idle

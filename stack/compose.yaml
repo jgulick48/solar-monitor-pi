@@ -79,7 +79,23 @@ services:
     ports:
       - "127.0.0.1:1984:1984"
 
+  # Backups to a USB stick (setup/backup.py runs it; not a long-running service).
+  backup:
+    image: restic/restic:0.20.0
+    profiles: [backup]
+    hostname: solar-monitor
+    environment:
+      RESTIC_REPOSITORY: /repo/repo
+      RESTIC_PASSWORD_FILE: /repo/key
+      RESTIC_CACHE_DIR: /cache
+    volumes:
+      - ./:/data/stack
+      - vm-data:/data/vm
+      - ${SOLAR_BACKUP_MOUNT:-/run/solar-backup}/solar-monitor-backup:/repo
+      - restic-cache:/cache
+
 volumes:
   mosquitto-data:
   vm-data:
   grafana-data:
+  restic-cache:

@@ -159,6 +159,10 @@ views:
                 name: Start the generator
               - entity: automation.solar_daily_summary
                 name: Daily summary
+              - entity: automation.solar_backup_overdue
+                name: Backup overdue
+              - entity: sensor.site_last_backup
+                name: Last backup
           - type: markdown
             grid_options: {columns: full}
             content: >-

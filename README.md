@@ -16,6 +16,7 @@ read, never changed.
 | Grafana | Dashboards, viewable without logging in | `http://<pi>:3000` |
 | Home Assistant | Inverter entities (MQTT discovery), the Solar dashboard, alerts to phones | `http://<pi>:8123` |
 | Advisor | Weekly analysis: batteries, panels, inverter or generator? | `http://<pi>/advisor` |
+| Backups | Nightly backup to a USB stick, and restore | `http://<pi>/backup` |
 | Wall display | Dashboard and up to two cameras on a screen plugged into the Pi's HDMI port | `http://<pi>/display` |
 | go2rtc | Turns the cameras' RTSP(S) streams into video the display's browser can play | localhost only |
 
@@ -106,6 +107,27 @@ Home Assistant comes with a **Solar** dashboard in the sidebar and alerts, from 
 
 The package and the dashboard are replaced on every update (and Home Assistant restarted when they change), so edit
 copies, not the originals: make your own dashboard in Settings -> Dashboards and your own automations.
+
+## Backups (USB stick)
+
+Plug a USB stick into the Pi (FAT32, exFAT, ext4 or NTFS, as most sticks come; 16 GB or more) and choose it on the
+**Backups** page (`http://<pi>/backup`). The box never formats it. Every night at about 01:30 it backs up the settings
+and passwords (`state/`), Home Assistant (config, accounts, dashboards, and its database as a consistent copy), the camera
+config and, unless turned off, the whole inverter history (a VictoriaMetrics snapshot). The backups are
+[restic](https://restic.net) snapshots in a `solar-monitor-backup` folder (deduplicated, so each night only adds what
+changed); 7 daily, 4 weekly and 6 monthly are kept. The stick is mounted only while a backup runs, so it can be pulled
+out at any other time.
+
+**The key to the backups is on the stick, next to them**, so a box whose SSD died can be restored from the stick alone.
+That means whoever has the stick can read the box's passwords and camera links: keep it in the Pi.
+
+To restore (for example onto a new SSD): flash the image, start the box, open the Backups page, choose the stick and
+**Restore from the stick**. It stops everything, puts back the newest backup, rebuilds the generated config and starts
+again (a few minutes). Home Assistant alerts (and the start page shows it) when there has been no good backup for two
+days.
+
+restic runs in a container (`backup` service in `stack/compose.yaml`, profile `backup`), so boxes updated from older
+versions download it on the first backup.
 
 ## Advisor
 
@@ -198,6 +220,7 @@ Home Assistant, Grafana and the rest.
 - `stack/homeassistant-seed/` is Home Assistant's first-run config; its `packages/solar_monitor.yaml` and
   `dashboards/solar.yaml` are kept current by `solar_setup.py` on every run, which also fills in the Energy
   dashboard once.
+- `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it.
 - `setup/display.py` is the wall display (page, data, settings, go2rtc config, screen schedule);
   `setup/kiosk.sh` starts Chromium; `system/` has the kiosk PAM session and the HDMI hotplug rule.
 - `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the
