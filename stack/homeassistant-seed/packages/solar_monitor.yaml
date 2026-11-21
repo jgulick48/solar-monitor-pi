@@ -143,6 +143,21 @@ rest:
         device_class: timestamp
         icon: mdi:usb-flash-drive
         json_attributes: [backup_configured, backup_message]
+      # Generator log (genlog.py): hours since the last service of the generator closest to its service
+      - name: Site generator hours since service
+        unique_id: site_generator_hours_since_service
+        value_template: "{{ value_json.generator_hours_since_service }}"
+        unit_of_measurement: h
+        device_class: duration
+        state_class: total_increasing
+        icon: mdi:engine
+        json_attributes: [generator_service_interval, generator_service_left]
+      - name: Site generator last run
+        unique_id: site_generator_last_run
+        value_template: "{{ value_json.generator_last_run }}"
+        device_class: timestamp
+        icon: mdi:engine-outline
+        json_attributes: [generator_last_run_hours, generator_runs_30d, generator_hours_30d]
     binary_sensor:
       - name: Site data stale
         unique_id: site_data_stale
@@ -165,6 +180,16 @@ rest:
         value_template: "{{ value_json.backup_overdue }}"
         device_class: problem
         icon: mdi:usb-flash-drive
+      - name: Site generator running
+        unique_id: site_generator_running
+        value_template: "{{ value_json.generator_running }}"
+        device_class: running
+        icon: mdi:engine
+      - name: Site generator service due
+        unique_id: site_generator_service_due
+        value_template: "{{ value_json.generator_service_due }}"
+        device_class: problem
+        icon: mdi:oil
       - name: Site generator needed
         unique_id: site_generator_needed
         value_template: "{{ value_json.generator_needed }}"
@@ -372,6 +397,37 @@ automation:
             {% if trigger.id != 'off' %}The solar monitor hasn't backed up to its USB stick for 2 days
             ({{ state_attr('sensor.site_last_backup', 'backup_message') }}). Check the stick is plugged into
             the Pi.{% else %}clear{% endif %}
+
+  # Generator service (oil change): 200 h on the inverters' GEN input, 100 h on a DC charger.
+  # Mark it serviced on the box's Generator page (http://<this box>/generator).
+  - id: solar_generator_service_due
+    alias: "Solar: generator service due"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_generator_service_due
+        to: "on"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_generator_service_due
+        from: "on"
+        to: "off"
+        id: "off"
+      - trigger: homeassistant
+        event: start
+        id: start
+    actions:
+      - delay: "{{ '00:05:00' if trigger.id == 'start' else '00:00:00' }}"
+      - condition: template
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_generator_service_due', 'on') }}"
+      - action: script.solar_notify
+        data:
+          tag: generator_service
+          title: Generator service due
+          message: >-
+            {% if trigger.id != 'off' %}The generator has run {{ states('sensor.site_generator_hours_since_service') }} hours
+            since its last service (every {{ state_attr('sensor.site_generator_hours_since_service', 'generator_service_interval') }} h):
+            change the oil, then press "Serviced" on the solar monitor's Generator page.{% else %}clear{% endif %}
 
   # Hand-started generator: from mid-afternoon on, will the battery last until the sun is back?
   - id: solar_generator_needed
