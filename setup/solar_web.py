@@ -347,6 +347,23 @@ def host_of(handler):
     return (handler.headers.get("Host") or ss.lan_ip()).split(":")[0]
 
 
+def display_problem(dsp):
+    """When the display should be on but the kiosk isn't running: its state and last log lines, so a box
+    without SSH can still say why the screen is black."""
+    if not dsp["enabled"] or not display.screen_connected():
+        return ""
+    st = run_quietly(["systemctl", "show", "solar-display.service", "-p", "ActiveState,SubState,Result,NRestarts,ExecMainStatus"])
+    props = dict(ln.split("=", 1) for ln in st.stdout.splitlines() if "=" in ln)
+    if props.get("ActiveState") == "active" and props.get("SubState") == "running":
+        return ""
+    log = run_quietly(["journalctl", "-u", "solar-display.service", "-b", "-n", "40", "--no-pager", "-o", "short-iso"])
+    state = ", ".join(f"{k} {props.get(k, '?')}" for k in ("ActiveState", "SubState", "Result", "NRestarts", "ExecMainStatus"))
+    return (f"<br><b>The screen is connected but the dashboard isn't running</b> ({html.escape(state)}). "
+            "<form method='post' action='/display/restart' style='display:inline'><button>Try again</button></form>"
+            f"<details><summary>Details</summary><pre style='white-space:pre-wrap;font-size:12px'>"
+            f"{html.escape((log.stdout or log.stderr)[-6000:])}</pre></details>")
+
+
 def status_page(handler):
     host = host_of(handler)
     site = load_site()
@@ -410,7 +427,7 @@ def status_page(handler):
 {battery_card(site)}
 {generator_card(site)}
 <div class="card"><b>Remote access</b>: {remote_line()} &nbsp;<a href="/setup#remote">change</a></div>
-<div class="card"><b>Screen</b>: {display_line} <a href="/display">preview</a> &nbsp;<a href="/setup#screen">change</a></div>
+<div class="card"><b>Screen</b>: {display_line} <a href="/display">preview</a> &nbsp;<a href="/setup#screen">change</a>{display_problem(dsp)}</div>
 <div class="card" id="weather"><b>Sunlight data</b>: {weather_line}
 <form method="post" action="/weather/scan" style="margin-top:8px"><button>Scan for weather stations</button>
 <small>Looks for Ecowitt gateways and WeatherFlow Tempest hubs (about a minute).</small></form>{scan_rows}</div>
@@ -1025,6 +1042,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/tunnel/off":
             msgs = tunnel.disable(STACK, remove=self.form().get("remove") == "1") + apply_core_change()
             self.send(200, setup_page(load_site(), remote_msg="; ".join(msgs) + "."))
+        elif self.path == "/display/restart":
+            run_quietly(["systemctl", "reset-failed", "solar-display.service"])
+            run_quietly(["systemctl", "restart", "--no-block", "solar-display.service"])
+            self.send(303, "", extra={"Location": "/"})
         elif self.path == "/notify/test":
             msg = send_test_notification()
             self.send(200, page("Test notification", f"<h1>Test notification</h1><div class='card'>{html.escape(msg)}</div>"
