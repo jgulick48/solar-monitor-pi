@@ -91,12 +91,19 @@ class HomeAssistant(unittest.TestCase):
         ids = [a["id"] for a in pkg["automation"]]
         self.assertEqual(len(ids), len(set(ids)))
         # the dashboard only uses entities the package creates
-        entities = {"sensor." + e["unique_id"] for e in rest["sensor"]}
-        entities |= {"binary_sensor." + e["unique_id"] for e in rest["binary_sensor"]}
+        # Home Assistant names YAML entities after their name, not their unique_id (v0.2.4 to v0.2.6 got this
+        # wrong for battery health: the alert watched an entity that didn't exist)
+        slug = lambda n: re.sub(r"[^a-z0-9]+", "_", n.lower()).strip("_")  # noqa: E731
+        entities = {"sensor." + slug(e["name"]) for e in rest["sensor"]}
+        entities |= {"binary_sensor." + slug(e["name"]) for e in rest["binary_sensor"]}
         entities |= {"automation." + re.sub(r"[^a-z0-9]+", "_", a["alias"].lower()).strip("_") for a in pkg["automation"]}
         dash = read(os.path.join(SEED, "dashboards", "solar.yaml"))
         for e in set(re.findall(r"\b(?:sensor|binary_sensor|automation)\.[a-z0-9_]+", dash)):
-            self.assertIn(e, entities)
+            self.assertIn(e, entities, "dashboard")
+        # ... and so do the package's own templates and triggers
+        pkg_text = read(os.path.join(SEED, "packages", "solar_monitor.yaml"))
+        for e in set(re.findall(r"\b(?:sensor|binary_sensor)\.site_[a-z0-9_]+", pkg_text)):
+            self.assertIn(e, entities, "package")
         self.assertEqual(pkg["lovelace"]["dashboards"]["solar-site"]["filename"], "dashboards/solar.yaml")
 
     def test_startup_check_is_top_level(self):

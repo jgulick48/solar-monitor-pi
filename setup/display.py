@@ -464,7 +464,13 @@ def ha_status(stack, site):
         **backup_fields(stack),
         **_battery_fields(stack, site),
         **genlog.ha_fields(stack, site),
+        **_box_fields(stack),
     }
+
+
+def _box_fields(stack):
+    import boxhealth  # here, like battery: keeps the module light for the kiosk
+    return boxhealth.ha_fields(stack)
 
 
 def _battery_fields(stack, site):

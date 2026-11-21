@@ -200,6 +200,31 @@ rest:
         device_class: timestamp
         icon: mdi:engine-outline
         json_attributes: [generator_last_run_hours, generator_runs_30d, generator_hours_30d]
+      # The box itself (boxhealth.py): temperature, power supply, disk, SSD, containers, dongle drop-outs
+      - name: Site box health
+        unique_id: site_box_health
+        # ok, note, warn or unknown
+        value_template: "{{ value_json.box_health }}"
+        icon: mdi:raspberry-pi
+        json_attributes: [box_health_text]
+      - name: Site box temperature
+        unique_id: site_box_cpu_temp
+        value_template: "{{ value_json.box_cpu_temp }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+      - name: Site box disk free
+        unique_id: site_box_disk_free
+        value_template: "{{ value_json.box_disk_free }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:harddisk
+      - name: Site box SSD wear
+        unique_id: site_box_ssd_used
+        value_template: "{{ value_json.box_ssd_used }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:harddisk-remove
     binary_sensor:
       - name: Site data stale
         unique_id: site_data_stale
@@ -237,6 +262,16 @@ rest:
         value_template: "{{ value_json.generator_service_due }}"
         device_class: problem
         icon: mdi:oil
+      - name: Site box needs attention
+        unique_id: site_box_attention
+        value_template: "{{ value_json.box_health == 'warn' }}"
+        device_class: problem
+        icon: mdi:raspberry-pi
+      - name: Site box power problem
+        unique_id: site_box_power_problem
+        value_template: "{{ value_json.box_power_problem }}"
+        device_class: problem
+        icon: mdi:power-plug-off
       - name: Site generator needed
         unique_id: site_generator_needed
         value_template: "{{ value_json.generator_needed }}"
@@ -451,12 +486,12 @@ automation:
     mode: single
     triggers:
       - trigger: state
-        entity_id: binary_sensor.site_battery_attention
+        entity_id: binary_sensor.site_battery_needs_attention
         to: "on"
         for: "00:30:00"
         id: "on"
       - trigger: state
-        entity_id: binary_sensor.site_battery_attention
+        entity_id: binary_sensor.site_battery_needs_attention
         from: "on"
         to: "off"
         for: "00:30:00"
@@ -467,7 +502,7 @@ automation:
     actions:
       - delay: "{{ '00:30:00' if trigger.id == 'start' else '00:00:00' }}"
       - condition: template
-        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_battery_attention', 'on') }}"
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_battery_needs_attention', 'on') }}"
       - action: script.solar_notify
         data:
           tag: battery_health
@@ -506,6 +541,37 @@ automation:
             {% if trigger.id != 'off' %}The generator has run {{ states('sensor.site_generator_hours_since_service') }} hours
             since its last service (every {{ state_attr('sensor.site_generator_hours_since_service', 'generator_service_interval') }} h):
             change the oil, then press "Serviced" on the solar monitor's Generator page.{% else %}clear{% endif %}
+
+  # The box itself: overheating, a weak power supply, full or worn SSD, a container down.
+  - id: solar_box_health
+    alias: "Solar: the monitor box needs attention"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_box_needs_attention
+        to: "on"
+        for: "00:15:00"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_box_needs_attention
+        from: "on"
+        to: "off"
+        for: "00:15:00"
+        id: "off"
+      - trigger: homeassistant
+        event: start
+        id: start
+    actions:
+      - delay: "{{ '00:20:00' if trigger.id == 'start' else '00:00:00' }}"
+      - condition: template
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_box_needs_attention', 'on') }}"
+      - action: script.solar_notify
+        data:
+          tag: box_health
+          title: The solar monitor box needs attention
+          message: >-
+            {% if trigger.id != 'off' %}{{ state_attr('sensor.site_box_health', 'box_health_text') }}
+            Details on the box's start page.{% else %}clear{% endif %}
 
   # Hand-started generator: from mid-afternoon on, will the battery last until the sun is back?
   - id: solar_generator_needed

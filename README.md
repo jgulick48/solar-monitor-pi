@@ -118,6 +118,24 @@ Home Assistant comes with a **Solar** dashboard in the sidebar and alerts, from 
 The package and the dashboard are replaced on every update (and Home Assistant restarted when they change), so edit
 copies, not the originals: make your own dashboard in Settings -> Dashboards and your own automations.
 
+## The box's own health and a test notification
+
+The start page's **This box** card (and Home Assistant's *Site box health*, *temperature*, *disk free* and *SSD wear*
+sensors, with a *monitor box needs attention* alert) watches the Pi itself:
+
+| Check | Worth a look | Needs attention |
+|---|---|---|
+| CPU temperature | 70 °C | 80 °C |
+| Power supply (`vcgencmd get_throttled`) | under-voltage or throttling since the last start | now |
+| SSD free space | under 15% | under 5% or 2 GB |
+| SSD health (`smartctl`, through the USB adapter when it allows) | 70% of rated life used | 90%, media errors, failed self-assessment |
+| Containers | | any not running |
+| Dongle drop-outs (24 h) | 6 or more | |
+
+**Send a test notification** (start page, Home Assistant card) checks that alerts reach the phones: it lists the phones
+with the Home Assistant app signed in to the box and triggers the same notification script the alerts use, through a
+local-only webhook whose id is a per-box secret.
+
 ## Backups (USB stick)
 
 Plug a USB stick into the Pi (FAT32, exFAT, ext4 or NTFS, as most sticks come; 16 GB or more) and choose it on the
