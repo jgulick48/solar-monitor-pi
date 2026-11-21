@@ -222,7 +222,9 @@ def cmd_get(a):
     cfg, name = config(), check_name(a.name)
     cid, secret = service()
     url = f"https://{host(cfg, name, a.app)}{a.path if a.path.startswith('/') else '/' + a.path}"
-    req = urllib.request.Request(url, headers={"CF-Access-Client-Id": cid, "CF-Access-Client-Secret": secret})
+    # Cloudflare refuses Python's default User-Agent (error 1010, "browser signature banned")
+    req = urllib.request.Request(url, headers={"CF-Access-Client-Id": cid, "CF-Access-Client-Secret": secret,
+                                               "User-Agent": "solar-support-helper/1"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             sys.stdout.buffer.write(r.read())
