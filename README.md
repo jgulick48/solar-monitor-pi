@@ -20,6 +20,7 @@ read, never changed.
 | Generator log | Every generator run, hours since the last service, service reminder | `http://<pi>/generator` |
 | Wall display | Dashboard and up to two cameras on a screen plugged into the Pi's HDMI port | `http://<pi>/display` |
 | go2rtc | Turns the cameras' RTSP(S) streams into video the display's browser can play | localhost only |
+| cloudflared | Optional remote access to Home Assistant through your own Cloudflare account | `https://<name>.<your domain>` |
 
 ## Hardware
 
@@ -148,6 +149,32 @@ display, Home Assistant, daily summary) now includes a generator charging throug
 
 State: `state/generator.json`; `setup/genlog.py` (run by the collector every 5 minutes; `genlog.py update` by hand).
 
+## Remote access (Cloudflare Tunnel, optional)
+
+To reach Home Assistant (and the Home Assistant phone app) away from home without opening anything on the router, fill in
+**Remote access** at the bottom of the setup page (`http://<pi>/setup#remote`):
+
+- **Cloudflare account ID**: on the Cloudflare dashboard, a domain's overview page, right-hand column.
+- **Name** and **Domain**: Home Assistant will be at `https://<name>.<domain>`, e.g. `solar.example.com`. The domain must
+  already be on that Cloudflare account.
+- **API token**: Cloudflare &rarr; My Profile &rarr; API Tokens &rarr; Create Custom Token with *Account &middot; Cloudflare
+  Tunnel &middot; Edit*, *Zone &middot; DNS &middot; Edit* and *Zone &middot; Zone &middot; Read*, limited to that account and domain.
+
+The box then creates a remotely managed tunnel, points it at Home Assistant only (`http://localhost:8123`; any other
+hostname gets a 404), adds a proxied CNAME `<name>.<domain>` &rarr; `<tunnel id>.cfargotunnel.com` and starts the
+`cloudflared` container (compose profile `tunnel`, switched on by `COMPOSE_PROFILES=tunnel` in the generated `.env`).
+Home Assistant's `external_url` is set to the new address, so the phone app uses it away from home, and it trusts the
+forwarded client address from localhost only (`use_x_forwarded_for` and `trusted_proxies` in `.storage/http`, edited while
+Home Assistant is stopped: since 2026.11 Home Assistant ignores `http:` in YAML).
+
+- Only Home Assistant is published. The setup page, Grafana and the cameras stay on the local network.
+- It refuses to turn on before the Home Assistant owner account exists, since anyone who found the address could
+  otherwise claim it. Turn on two-factor authentication in your Home Assistant profile.
+- It never overwrites a DNS record it didn't make; pick another name if `<name>.<domain>` is taken.
+- **Turn remote access off** stops `cloudflared` and, unless unticked, deletes the tunnel and its DNS record at Cloudflare.
+- The API token and the tunnel's run token are kept in `state/tunnel.json` and `state/tunnel.env` (mode 600) and are
+  included in the USB backups.
+
 ## Advisor
 
 The start page's **Advisor** answers "what would help this system most?" from the site's own history. It
@@ -240,6 +267,7 @@ Home Assistant, Grafana and the rest.
   `dashboards/solar.yaml` are kept current by `solar_setup.py` on every run, which also fills in the Energy
   dashboard once.
 - `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it.
+- `setup/tunnel.py` sets up remote access through a Cloudflare Tunnel (Cloudflare API calls, `cloudflared` service).
 - `setup/display.py` is the wall display (page, data, settings, go2rtc config, screen schedule);
   `setup/kiosk.sh` starts Chromium; `system/` has the kiosk PAM session and the HDMI hotplug rule.
 - `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the
