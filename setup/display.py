@@ -104,7 +104,7 @@ def save(stack, d):
     """Write display.json and go2rtc's config. Returns True if the camera config changed."""
     ss.write_if_changed(settings_path(stack), json.dumps(d, indent=2) + "\n", 0o600)
     lines = ["# Written by the solar monitor setup page (cameras for the HDMI display); edits are overwritten.",
-             "api:", "  listen: \":1984\"", "  origin: \"*\"",
+             "api:", "  listen: \"127.0.0.1:1984\"", "  origin: \"*\"",
              "rtsp:", "  listen: \"\"", "webrtc:", "  listen: \"\"", "log:", "  level: warn", "streams:"]
     for i, c in enumerate(d["cameras"], start=1):
         lines.append(f"  cam{i}: {json.dumps(go2rtc_source(c['url']))}")
@@ -711,6 +711,7 @@ function pickCams(){
   for(let i=0;chosen.length<n&&i<rest.length;i++){ const c=rest[(rot+i)%rest.length]; if(!chosen.some(x=>same(x,c)))chosen.push(c); }
   return chosen;
 }
+let screenDark=false;   // screen off (schedule, nobody in the room): no video, which is nearly all of the box's CPU load
 async function showCams(){
   const want=pickCams(), local=location.hostname==="127.0.0.1"||location.hostname==="localhost";
   for(let i=0;i<slots.length;i++){
@@ -719,6 +720,7 @@ async function showCams(){
     s.el.classList.toggle("hot",!!ev); s.el.classList.toggle("ring",!!ev&&ev.level>=3);
     s.el.querySelector(".badge").textContent=ev?ev.label:"";
     s.el.querySelector(".lbl").textContent=c.name;
+    if(screenDark){ dropPlayer(s); s.cam=null; continue; }
     if(s.cam===c.id)continue;
     dropPlayer(s); s.cam=c.id; const m=s.el.querySelector(".msg"); m.textContent="";
     if(!local){m.textContent="Cameras show on the box's own screen";continue}
@@ -778,7 +780,8 @@ function soundFor(ev){
 async function pollEvents(){
   try{ const r=await fetch("/display/events",{cache:"no-store"}); const d=await r.json();
     // screen on/off (schedule, someone in the room, a camera waking it) follows within a poll
-    if("screen_on" in d){ $("blank").style.display=d.screen_on?"none":"block"; soundCfg.off=!!d.quiet_hours; }
+    if("screen_on" in d){ $("blank").style.display=d.screen_on?"none":"block"; soundCfg.off=!!d.quiet_hours;
+      if(screenDark!==!d.screen_on){ screenDark=!d.screen_on; showCams(); } }
     if(lastTest===null)lastTest=d.test_sound; else if(d.test_sound!==lastTest){lastTest=d.test_sound; chime("doorbell");}
     if(lastSpeak===null)lastSpeak=d.test_speak; else if(d.test_speak!==lastSpeak){lastSpeak=d.test_speak; say("/display/say?test=1",null);}
     for(const [cam,ev] of Object.entries(d.active||{})){

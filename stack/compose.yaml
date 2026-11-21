@@ -74,10 +74,11 @@ services:
   go2rtc:
     image: alexxit/go2rtc:1.9.15
     restart: unless-stopped
+    # host network, listening on 127.0.0.1 only (go2rtc.yaml): the video doesn't pass through docker-proxy,
+    # which cost the Pi 4 a few percent of CPU
+    network_mode: host
     volumes:
       - ./go2rtc:/config
-    ports:
-      - "127.0.0.1:1984:1984"
 
   # Remote access to Home Assistant through a Cloudflare Tunnel (setup page -> Remote access;
   # setup/tunnel.py). Off unless .env has COMPOSE_PROFILES=tunnel. Only HA is published.

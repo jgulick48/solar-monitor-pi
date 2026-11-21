@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import solar_setup as ss  # noqa: E402
 
 BASE = "/proxy/protect/integration/v1"
-DEFAULTS = {"host": "", "api_key": "", "cameras": [], "highlight_motion": False}
+DEFAULTS = {"host": "", "api_key": "", "cameras": [], "highlight_motion": False, "quality": "auto", "applied_quality": ""}
 HOLD_S = 60            # a camera stays highlighted this long after its last event ended
 OPEN_MAX_S = 300       # an event without an end counts as over after this long
 LABELS = {"person": "Person", "vehicle": "Vehicle", "animal": "Animal", "package": "Package", "licensePlate": "Vehicle",
@@ -338,11 +338,46 @@ def listen(stack):
     t.start()
 
 
-def apply_cameras(stack, picked_ids, cams, quality="medium"):
+QUALITIES = [("auto", "Automatic (low on a Pi 4, medium on a Pi 5)"), ("medium", "Medium (sharper)"),
+             ("low", "Low (much lighter on the box)")]
+
+
+def board():
+    try:
+        with open("/proc/device-tree/model") as f:
+            return f.read().strip("\x00 \n")
+    except OSError:
+        return ""
+
+
+def resolve_quality(setting, model=None):
+    """The stream quality to use. A Pi 4 spends about a third of its CPU moving medium-quality video around
+    (measured: whole box 41% -> 27% with low); a Pi 5 has room for medium."""
+    if setting in ("medium", "low"):
+        return setting
+    model = board() if model is None else model
+    return "low" if "Raspberry Pi" in model and "Raspberry Pi 5" not in model else "medium"
+
+
+def refresh_quality(stack):
+    """After an update or a quality change: re-fetch the picked cameras' links if they were made at another
+    quality. Returns True when display.json changed (go2rtc then needs a restart)."""
+    d = settings(stack)
+    if not (d.get("host") and d.get("api_key") and d.get("cameras")):
+        return False
+    want = resolve_quality(d.get("quality", "auto"))
+    if d.get("applied_quality") == want:
+        return False
+    cams = list_cameras(d["host"], d["api_key"])
+    return apply_cameras(stack, [c["id"] for c in d["cameras"]], cams)
+
+
+def apply_cameras(stack, picked_ids, cams, quality=None):
     """Store the picked Protect cameras (in this order) with fresh stream links in display.json.
     Manual (non-Protect) cameras stay as they are, after the Protect ones. Returns messages; raises ProtectError."""
     import display
     d = settings(stack)
+    quality = quality or resolve_quality(d.get("quality", "auto"))
     by_id = {c["id"]: c for c in cams}
     out = []
     for cid in picked_ids:
@@ -367,6 +402,7 @@ def apply_cameras(stack, picked_ids, cams, quality="medium"):
     dsp["cameras"] = (out + manual)[:display.MAX_CAMERAS]
     changed = display.save(stack, dsp)
     d["cameras"] = [{"id": c["protect_id"], "name": c["name"]} for c in out]
+    d["applied_quality"] = quality
     save(stack, d)
     LAST_DUPES[:] = [c["name"] for c in dupes]
     return changed
