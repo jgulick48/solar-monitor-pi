@@ -61,6 +61,24 @@ class Screen(unittest.TestCase):
             finally:
                 display.screens = old
 
+    def test_condition_runs_as_root(self):
+        """display.json is root's (mode 600): the start check must run with "+" or the kiosk never starts."""
+        unit = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "systemd", "solar-display.service")).read()
+        cond = [ln for ln in unit.splitlines() if ln.startswith("ExecCondition=")]
+        self.assertEqual(len(cond), 1)
+        self.assertTrue(cond[0].startswith("ExecCondition=+"), cond[0])
+        self.assertIn("User=solar-display", unit)
+
+    def test_should_run_reports_unreadable_settings(self):
+        orig = display.load
+        def denied(stack):
+            raise PermissionError(13, "Permission denied", "/opt/solar-monitor/stack/state/display.json")
+        display.load = denied
+        try:
+            self.assertFalse(display.should_run("/tmp"))
+        finally:
+            display.load = orig
+
     def test_page_uses_the_scale_unit(self):
         css = display.PAGE.split("<script>")[0]
         self.assertIn("--u:min(1vw,1.7778vh)", css)
