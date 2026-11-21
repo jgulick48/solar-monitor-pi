@@ -225,9 +225,15 @@ def apply_on(stack, d):
         if changed or not ssh_active():
             r = run(["systemctl", "restart", "ssh"])
             msgs.append("SSH started (this box only, keys only)" if r.returncode == 0 else f"SSH didn't start: {r.stderr.strip()[-200:]}")
-    ss.write_if_changed(env_path(stack), f"TUNNEL_TOKEN={d['token']}\n", 0o600)
+    new_token = ss.write_if_changed(env_path(stack), f"TUNNEL_TOKEN={d['token']}\n", 0o600)
     ss.write_env(stack, ss.ensure_secrets(stack))
-    if run(ss.compose_cmd(stack) + ["ps", "-q", "--status", "running", "cloudflared-support"]).stdout.strip() == "" or msgs:
+    running = run(ss.compose_cmd(stack) + ["ps", "-q", "--status", "running", "cloudflared-support"]).stdout.strip() != ""
+    if new_token and running:
+        # a new token (another helper, or a new support code) while on: compose doesn't notice an env_file change,
+        # so without recreating, the old tunnel kept running (seen on the test Pi)
+        r = run(ss.compose_cmd(stack) + ["up", "-d", "--force-recreate", "cloudflared-support"])
+        msgs.append("support tunnel switched to the new token" if r.returncode == 0 else f"support tunnel didn't restart: {r.stderr.strip()[-300:]}")
+    elif not running or msgs:
         r = run(ss.compose_cmd(stack) + ["up", "-d", "cloudflared-support"])
         msgs.append("support tunnel started" if r.returncode == 0 else f"support tunnel didn't start: {r.stderr.strip()[-300:]}")
     return msgs
