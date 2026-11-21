@@ -157,6 +157,8 @@ views:
                 name: No data
               - entity: automation.solar_start_the_generator
                 name: Start the generator
+              - entity: automation.solar_daily_summary
+                name: Daily summary
           - type: markdown
             grid_options: {columns: full}
             content: >-

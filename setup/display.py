@@ -336,6 +336,71 @@ def data(stack, site):
     }
 
 
+def vm_at(q, ts):
+    try:
+        r = _vm("/api/v1/query", {"query": q, "time": int(ts)})
+        return float(r[0]["value"][1]) if r else None
+    except (OSError, ValueError, KeyError, IndexError):
+        return None
+
+
+def day_stats(start, end):
+    """Totals for [start, end): the inverters' daily counters at their highest, lowest battery, generator time."""
+    secs = max(int(end - start), 60)
+    w = f"[{secs}s:1m]"
+    return {
+        "solar": vm_at(f"max_over_time((sum(lxp_e_pv_day)){w})", end),
+        "used": vm_at(f"max_over_time((sum(lxp_e_load_day) or sum(lxp_e_eps_day)){w})", end),
+        "gen_kwh": vm_at(f"max_over_time((sum(lxp_e_gen_day)){w})", end),
+        "low_soc": vm_at(f"min_over_time((max(lxp_soc)){w})", end),
+        "gen_hours": (lambda f: None if f is None else f * secs / 3600)(
+            vm_at(f"avg_over_time((sum(lxp_p_gen) > bool 200){w})", end)),
+    }
+
+
+def _kwh(v):
+    return "?" if v is None else f"{v:.0f}" if v >= 20 else f"{v:.1f}"
+
+
+def daily_summary(stack, site, now, tz):
+    """The day to report (before 06:00 the day before, else today so far) as a short phone message."""
+    day = now.date() - dt.timedelta(days=1) if now.hour < 6 else now.date()
+    start = dt.datetime.combine(day, dt.time(0), tz)
+    end = min(start + dt.timedelta(days=1), now)
+    complete = end < now or end == start + dt.timedelta(days=1)
+    st = _cached(("day", str(day), complete), 300, lambda: day_stats(start.timestamp(), end.timestamp() - 1))
+    parts = [f"{_kwh(st['solar'])} kWh solar, {_kwh(st['used'])} kWh used"]
+    if st["low_soc"] is not None:
+        parts.append(f"battery down to {st['low_soc']:.0f}%")
+    if site.get("generator", "manual") != "none":
+        h = st["gen_hours"] or 0
+        parts.append(f"generator {h:.1f} h ({_kwh(st['gen_kwh'] or 0)} kWh)" if h >= 0.05 else "no generator")
+    text = ", ".join(parts) + "."
+    f = forecast_summary(load_forecast(stack), now, tz)
+    if f:
+        nxt = "Today" if day < now.date() else "Tomorrow"
+        text += f" {nxt}: about {_kwh(f['today'] if day < now.date() else f['tomorrow'])} kWh of solar expected."
+    title = f"Solar {start:%a %b %-d}" + ("" if complete else " so far")
+    weekly = ""
+    if day.weekday() == 6:                            # Sunday: the week, and what the advisor found
+        wk = _cached(("week", str(day)), 3600, lambda: [day_stats(
+            dt.datetime.combine(day - dt.timedelta(days=i), dt.time(0), tz).timestamp(),
+            min(dt.datetime.combine(day - dt.timedelta(days=i - 1), dt.time(0), tz), now).timestamp() - 1)
+            for i in range(7)])
+        tot = lambda k: sum(d[k] or 0 for d in wk)  # noqa: E731
+        weekly = f"This week: {_kwh(tot('solar'))} kWh solar, {_kwh(tot('used'))} kWh used"
+        if site.get("generator", "manual") != "none":
+            weekly += f", generator {tot('gen_hours'):.1f} h"
+        weekly += "."
+        adv = ss.load_json(os.path.join(stack, "state", "advisor.json"), {})
+        if adv.get("recommendation"):
+            weekly += " Advisor: " + adv["recommendation"][0]
+        elif adv.get("message"):
+            weekly += " Advisor: " + adv["message"]
+        text += " " + weekly
+    return {"day": str(day), "complete": complete, "title": title, "text": text, "weekly": weekly}
+
+
 def _r(v, n=0):
     return None if v is None else round(v, n) if n else int(round(v))
 
@@ -376,7 +441,18 @@ def ha_status(stack, site):
         "generator_needed": adv.get("level") == "warn",
         "forecast_today": (d["forecast"] or {}).get("today"), "forecast_remaining": (d["forecast"] or {}).get("remaining"),
         "forecast_tomorrow": (d["forecast"] or {}).get("tomorrow"),
+        **_summary_fields(stack, site),
     }
+
+
+def _summary_fields(stack, site):
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(site.get("time_zone") or ss.host_timezone())
+    except Exception:  # noqa: BLE001
+        tz = dt.timezone.utc
+    sm = daily_summary(stack, site, dt.datetime.now(tz), tz)
+    return {"summary_day": sm["day"], "summary_title": sm["title"], "summary_text": sm["text"]}
 
 
 # --------------------------------------------------------------------------
