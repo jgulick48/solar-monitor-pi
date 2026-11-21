@@ -175,10 +175,18 @@ def status(stack, probe=None):
         elif t >= 70:
             f.append(("note", f"The Pi is warm: {t:.0f} °C."))
     if th:
-        if th["now"]:
-            f.append(("warn", f"Power supply: {', '.join(th['now'])} now. Use the official 5.1 V 3 A supply and a short cable."))
-        elif th["since_boot"]:
-            f.append(("note", f"Power supply: {', '.join(th['since_boot'])} since the last start (a weak supply or cable)."))
+        # under-voltage is the power supply; the other flags are the Pi slowing down, usually from heat
+        power_now, power_before = "under-voltage" in th["now"], "under-voltage" in th["since_boot"]
+        slow_now = [x for x in th["now"] if x != "under-voltage"]
+        slow_before = [x for x in th["since_boot"] if x != "under-voltage"]
+        if power_now:
+            f.append(("warn", "Power supply: under-voltage now. Use the official 5.1 V 3 A supply and a short cable."))
+        elif power_before:
+            f.append(("note", "Power supply: under-voltage since the last start (a weak supply or cable)."))
+        if slow_now:
+            f.append(("warn", f"The Pi is slowing itself down now ({', '.join(slow_now)}): give it air or a case with a fan."))
+        elif slow_before:
+            f.append(("note", f"The Pi slowed itself down since the last start ({', '.join(slow_before)}), usually from heat."))
     if dk:
         if dk["free_pct"] < 5 or dk["free_gb"] < 2:
             f.append(("warn", f"The SSD is nearly full: {dk['free_gb']} GB free."))
@@ -216,7 +224,7 @@ def ha_fields(stack):
         "box_cpu_temp": None if s["cpu_temp"] is None else round(s["cpu_temp"]),
         "box_disk_free": None if not s["disk"] else s["disk"]["free_pct"],
         "box_ssd_used": sm.get("used_pct"),
-        "box_power_problem": bool(th.get("now")),
+        "box_power_problem": "under-voltage" in (th.get("now") or []),
     }
 
 
