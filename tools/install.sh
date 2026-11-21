@@ -30,6 +30,9 @@ if [ -d /run/systemd/system ]; then
   udevadm control --reload 2>/dev/null || true
   # The display needs cage + chromium (in the image since v0.2; on older installs:
   # sudo apt-get install cage chromium wlr-randr). It starts only if a screen is connected.
+  # restart a running dashboard so a new kiosk.sh (screen mode, sound) and group changes take effect;
+  # start it if it isn't running (it checks by itself whether a screen is connected)
+  systemctl try-restart --no-block solar-display.service || true
   systemctl start --no-block solar-display.service || true
   systemctl restart solar-collector.service || true
   # SSD health (boxhealth.py); in the image since v0.2.7, added once on boxes updated from older versions

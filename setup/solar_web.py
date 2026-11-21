@@ -627,7 +627,9 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect
 <small>{{object}} is Person, Vehicle, Animal or Package; {{camera}} the camera's name. {html.escape(speech_line(dsp))}</small>
 <p><button formaction="/display/test-sound" formmethod="post" formnovalidate>Play a test sound</button>
 <button formaction="/display/test-speak" formmethod="post" formnovalidate>Play a test announcement</button>
+<button formaction="/display/restart" formmethod="post" formnovalidate>Restart the dashboard</button>
 <small style="display:inline">on the screen (save first if you changed something). The TV's own volume applies too.</small></p>
+<details><summary>Sound check</summary><pre style="white-space:pre-wrap;font-size:12px">{html.escape(sound_check())}</pre></details>
 <p><small>Two cameras at a time are shown next to the power figures, taking turns every 15 seconds. To add one by its stream link instead, in UniFi Protect: open the camera &rarr; Settings &rarr; Advanced &rarr;
 RTSPS, turn on <b>Medium</b> quality and copy its link (<code>rtsps://...:7441/...</code>). The camera pictures are only shown on the
 box's own screen, not to other computers on the network.</small></p>{cams}
@@ -740,6 +742,25 @@ UniFi OS &rarr; Settings &rarr; Control Plane &rarr; Integrations &rarr; Create 
 
 
 speech_lock = threading.Lock()
+
+
+def sound_check():
+    """What the Pi's sound looks like from here: its sound cards, the card the kiosk chose (~/.asoundrc) and the
+    kiosk's own sound line from this boot. Shown on the setup page, to see why the screen is silent."""
+    try:
+        cards = [ln.strip() for ln in open("/proc/asound/cards") if ln.strip() and ln.strip()[0].isdigit()]
+    except OSError:
+        cards = []
+    try:
+        chosen = [ln.strip() for ln in open("/var/lib/solar-display/.asoundrc") if ln.startswith("pcm.")]
+    except OSError:
+        chosen = []
+    log = run_quietly(["journalctl", "-u", "solar-display.service", "-b", "--no-pager", "-o", "cat", "-n", "400"]).stdout
+    said = [ln for ln in log.splitlines() if ln.startswith("sound:") or "ALSA" in ln or "alsa" in ln.lower()][-6:]
+    lines = ["Sound cards: " + ("; ".join(cards) or "none found"),
+             "The kiosk's sound goes to: " + ("; ".join(chosen) or "the default card (no choice written yet: restart the dashboard)")]
+    lines += said
+    return "\n".join(lines)
 
 
 def speech_line(dsp):
