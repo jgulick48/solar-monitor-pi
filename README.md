@@ -145,7 +145,8 @@ The box then creates a remotely managed tunnel, points it at Home Assistant only
 hostname gets a 404), adds a proxied CNAME `<name>.<domain>` &rarr; `<tunnel id>.cfargotunnel.com` and starts the
 `cloudflared` container (compose profile `tunnel`, switched on by `COMPOSE_PROFILES=tunnel` in the generated `.env`).
 Home Assistant's `external_url` is set to the new address, so the phone app uses it away from home, and it trusts the
-forwarded client address only from localhost (`http:` in `packages/solar_monitor.yaml`).
+forwarded client address from localhost only (`use_x_forwarded_for` and `trusted_proxies` in `.storage/http`, edited while
+Home Assistant is stopped: since 2026.11 Home Assistant ignores `http:` in YAML).
 
 - Only Home Assistant is published. The setup page, Grafana and the cameras stay on the local network.
 - It refuses to turn on before the Home Assistant owner account exists, since anyone who found the address could

@@ -624,12 +624,21 @@ in your Home Assistant profile). This setup page, Grafana and the cameras stay o
 
 
 def apply_core_change():
-    """Rewrite core.yaml (the public address) and restart Home Assistant if it changed."""
+    """Rewrite core.yaml (the public address) and, with remote access on, let HA trust cloudflared on
+    localhost (.storage/http, edited while HA is stopped); restart HA when either changed."""
     site = load_site()
-    if site["_configured"] and write_core(site):
+    core_changed = site["_configured"] and write_core(site)
+    if tunnel.public_url(STACK) and tunnel.proxy_edit_needed(STACK):
+        r = run_quietly(ss.compose_cmd(STACK) + ["stop", "homeassistant"])
+        if r.returncode != 0:
+            return [f"couldn't stop Home Assistant to change its proxy setting: {r.stderr.strip()[-200:]}"]
+        tunnel.trust_local_proxy(STACK)
+        r = run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "homeassistant"])
+    elif core_changed:
         r = run_quietly(ss.compose_cmd(STACK) + ["restart", "homeassistant"])
-        return ["Home Assistant restarted"] if r.returncode == 0 else [f"Home Assistant restart failed: {r.stderr.strip()[-200:]}"]
-    return []
+    else:
+        return []
+    return ["Home Assistant restarted"] if r.returncode == 0 else [f"Home Assistant restart failed: {r.stderr.strip()[-200:]}"]
 
 
 def advisor_page():

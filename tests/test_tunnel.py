@@ -199,6 +199,22 @@ class Tunnel(unittest.TestCase):
         self.assertEqual(len(self.fake.dns), 1)
         self.assertTrue(tunnel.settings(self.stack)["tunnel_id"])
 
+    def test_trust_local_proxy_edits_ha_http_store(self):
+        store = os.path.join(self.stack, "homeassistant", ".storage", "http")
+        stable = {"server_port": 8123, "cors_allowed_origins": ["https://cast.home-assistant.io"], "ip_ban_enabled": True,
+                  "ssl_profile": "intermediate_v6", "trusted_proxies": ["10.0.0.5/32"], "created_at": "x"}
+        with open(store, "w") as f:
+            json.dump({"version": 3, "minor_version": 1, "key": "http",
+                       "data": {"stable": stable, "pending": None, "yaml_migration_done": True}}, f)
+        self.assertTrue(tunnel.proxy_edit_needed(self.stack))
+        self.assertTrue(tunnel.trust_local_proxy(self.stack))
+        doc = json.load(open(store))
+        self.assertEqual(doc["data"]["stable"]["trusted_proxies"], ["10.0.0.5/32", "127.0.0.1/32", "::1/128"])
+        self.assertTrue(doc["data"]["stable"]["use_x_forwarded_for"])
+        self.assertEqual((doc["version"], doc["data"]["pending"], doc["data"]["stable"]["server_port"]), (3, None, 8123))
+        self.assertFalse(tunnel.proxy_edit_needed(self.stack))
+        self.assertFalse(tunnel.trust_local_proxy(self.stack))
+
     def test_validation(self):
         for bad, msg in [({"cf_account": "abc"}, "account ID"), ({"cf_domain": "localhost"}, "domain"),
                          ({"cf_name": "my site"}, "letters, digits"), ({"cf_token": ""}, "API token")]:

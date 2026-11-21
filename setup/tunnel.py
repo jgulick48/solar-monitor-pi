@@ -14,6 +14,9 @@ the address (solar -> solar.example.com) and an API token. With those this box:
 The setup page, Grafana and the cameras are never published. The API token needs:
 Account > Cloudflare Tunnel > Edit, Zone > DNS > Edit and Zone > Zone > Read.
 
+Home Assistant is told to trust X-Forwarded-For from localhost (its .storage/http; YAML `http:` is
+ignored since 2026.11) and gets the address as external_url; solar_web restarts it for both.
+
 The settings (with the API token) are kept in state/tunnel.json and the run token in
 state/tunnel.env, both mode 600.
 """
@@ -65,6 +68,37 @@ def public_url(stack):
 
 def mask(token):
     return "•" * 6 + token[-4:] if token else ""
+
+
+LOCAL_PROXIES = ["127.0.0.1/32", "::1/128"]
+
+
+def _http_store(stack):
+    return os.path.join(stack, "homeassistant", ".storage", "http")
+
+
+def _proxy_slots(doc):
+    data = (doc or {}).get("data") or {}
+    return [c for c in (data.get("stable"), data.get("pending")) if isinstance(c, dict)]
+
+
+def proxy_edit_needed(stack):
+    """Home Assistant (2026.11+) keeps its HTTP settings in .storage/http, not YAML. cloudflared connects
+    from localhost with X-Forwarded-For, which HA answers with 400 unless it trusts localhost as a proxy."""
+    slots = _proxy_slots(ss.load_json(_http_store(stack), None))
+    return any(not c.get("use_x_forwarded_for") or not set(LOCAL_PROXIES) <= set(c.get("trusted_proxies") or [])
+               for c in slots)
+
+
+def trust_local_proxy(stack):
+    """Turn on X-Forwarded-For from localhost in .storage/http (keeping any other trusted proxies).
+    Only while Home Assistant is stopped: it would overwrite the file. True when changed."""
+    doc = ss.load_json(_http_store(stack), None)
+    slots = _proxy_slots(doc)
+    for c in slots:
+        c["use_x_forwarded_for"] = True
+        c["trusted_proxies"] = list(c.get("trusted_proxies") or []) + [p for p in LOCAL_PROXIES if p not in (c.get("trusted_proxies") or [])]
+    return bool(slots) and ss.write_if_changed(_http_store(stack), json.dumps(doc, indent=2) + "\n", 0o600)
 
 
 def ha_has_owner(stack):
