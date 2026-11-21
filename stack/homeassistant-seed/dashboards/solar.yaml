@@ -97,6 +97,14 @@ views:
           - type: tile
             entity: sensor.site_dongles_connected
             name: Dongles
+          - type: tile
+            entity: sensor.site_solar_forecast_today
+            name: Forecast today
+            color: amber
+          - type: tile
+            entity: sensor.site_solar_forecast_tomorrow
+            name: Forecast tomorrow
+            color: amber
           - type: heading
             heading: Last 14 days
           - type: statistics-graph

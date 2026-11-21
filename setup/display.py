@@ -185,9 +185,54 @@ def _cached(key, ttl, fn):
     return val
 
 
-def generator_advice(site, now_vals, now, tz):
+def load_forecast(stack, now_ts=None):
+    """state/forecast.json (written hourly by solar-collector) if it is fresh, else None."""
+    fc = ss.load_json(os.path.join(stack, "state", "forecast.json"), {})
+    now_ts = now_ts or time.time()
+    if not fc.get("hours") or now_ts - fc.get("generated", 0) > 6 * 3600:
+        return None
+    return fc
+
+
+def forecast_kw(fc, ts):
+    """Expected solar kW at ts (the hour containing ts), or None outside the forecast."""
+    if not fc:
+        return None
+    if "_by_end" not in fc:
+        fc["_by_end"] = {int(t): kw for t, kw in fc["hours"]}
+    return fc["_by_end"].get(-(-int(ts) // 3600) * 3600)
+
+
+def forecast_summary(fc, now, tz):
+    """kWh expected today (whole day), for the rest of today and tomorrow (local days)."""
+    if not fc:
+        return None
+    today, tomorrow = now.date(), now.date() + dt.timedelta(days=1)
+    out = {"today": 0.0, "remaining": 0.0, "tomorrow": 0.0}
+    seen_tomorrow = False
+    nts = now.timestamp()
+    for t, kw in fc["hours"]:
+        day = dt.datetime.fromtimestamp(t - 1800, tz).date()
+        if day == today:
+            out["today"] += kw
+            out["remaining"] += kw * min(1.0, max(0.0, (t - nts) / 3600))
+        elif day == tomorrow:
+            out["tomorrow"] += kw
+            seen_tomorrow = True
+    if not seen_tomorrow:
+        return None
+    return {k: round(v, 1) for k, v in out.items()}
+
+
+def _hhmm(t, now):
+    return f"{t:%H:%M}" + (" tomorrow" if t.date() > now.date() else "")
+
+
+def generator_advice(site, now_vals, now, tz, fc=None):
     """For a hand-started generator: will the battery last until the sun is back?
-    Uses the average load since the last 3 days; solar is counted from 2 h after sunrise."""
+    With a solar forecast the battery is simulated in 15-minute steps (forecast solar against the
+    average use of the last 3 days) until the next sunset after tomorrow's sunrise, so a cloudy
+    tomorrow counts. Without one, solar is assumed to carry the load from 2 h after sunrise."""
     try:
         lat, lon = float(site["latitude"]), float(site["longitude"])
         kwh = int(site["battery_count"]) * float(site["battery_kwh_each"])
@@ -201,24 +246,52 @@ def generator_advice(site, now_vals, now, tz):
     rise, sset = sun_times(lat, lon, today, tz)
     if rise is None:
         return None
+    fsum = forecast_summary(fc, now, tz)
+    tomorrow_txt = f" Tomorrow: about {fsum['tomorrow']:.0f} kWh of solar expected." if fsum else ""
     if now < rise:                                  # before dawn: tonight is today's sunrise
-        relief = rise + dt.timedelta(hours=2)       # (solar carries the load again ~2 h after sunrise)
+        next_rise, next_set = rise, sset
     elif now < sset - dt.timedelta(hours=4):        # daytime: judge the coming night from mid-afternoon on
-        return {"level": "info", "text": f"Sunset {sset:%H:%M}.", "sunset": sset.strftime("%H:%M")}
+        return {"level": "info", "text": f"Sunset {sset:%H:%M}.{tomorrow_txt}", "sunset": sset.strftime("%H:%M"),
+                "forecast_tomorrow_kwh": fsum and fsum["tomorrow"]}
     else:
-        nxt = sun_times(lat, lon, today + dt.timedelta(days=1), tz)[0] or rise + dt.timedelta(days=1)
-        relief = nxt + dt.timedelta(hours=2)
-    hours_left = max(0.0, (soc - floor) / 100 * kwh) / (load_w / 1000)
-    empty_at = now + dt.timedelta(hours=hours_left)
-    need = max(0.0, (relief - now).total_seconds() / 3600 * load_w / 1000 - (soc - floor) / 100 * kwh)
-    base = {"sunset": sset.strftime("%H:%M"), "empty_at": empty_at.strftime("%H:%M"), "need_kwh": round(need, 1)}
-    if empty_at < relief:
-        when = "now" if now >= sset - dt.timedelta(minutes=30) else f"before dark ({sset:%H:%M})"
+        next_rise, next_set = sun_times(lat, lon, today + dt.timedelta(days=1), tz)
+        next_rise = next_rise or rise + dt.timedelta(days=1)
+        next_set = next_set or sset + dt.timedelta(days=1)
+    usable = (soc - floor) / 100 * kwh                # kWh above the alert level
+    headroom = (100 - floor) / 100 * kwh
+    load_kw = load_w / 1000
+    empty_at, lowest = None, usable
+    if fsum and forecast_kw(fc, next_set.timestamp() - 3600) is not None:
+        e, t, step = usable, now, dt.timedelta(minutes=15)
+        while t < next_set:
+            pv = forecast_kw(fc, t.timestamp()) or 0.0
+            e = min(e + (pv - load_kw) * 0.25, headroom)
+            if e < 0 and empty_at is None:
+                empty_at = t
+            lowest = min(lowest, e)
+            t += step
+        need = max(0.0, -lowest)
+    else:                                             # no forecast: solar carries the load 2 h after sunrise
+        fsum = None
+        relief = next_rise + dt.timedelta(hours=2)
+        hours_left = max(0.0, usable) / load_kw
+        if now + dt.timedelta(hours=hours_left) < relief:
+            empty_at = now + dt.timedelta(hours=hours_left)
+        need = max(0.0, (relief - now).total_seconds() / 3600 * load_kw - max(usable, 0))
+    base = {"sunset": sset.strftime("%H:%M"), "empty_at": empty_at and _hhmm(empty_at, now),
+            "need_kwh": round(need, 1), "forecast_tomorrow_kwh": fsum and fsum["tomorrow"]}
+    when = "now" if now >= sset - dt.timedelta(minutes=30) or now < rise else f"before dark ({sset:%H:%M})"
+    if empty_at is not None and empty_at < next_rise + dt.timedelta(hours=2):
         return dict(base, level="warn", text=(f"Start the generator {when}: at the usual use the battery reaches "
-                                              f"{floor:.0f}% about {empty_at:%H:%M}, before the sun is back. "
+                                              f"{floor:.0f}% about {_hhmm(empty_at, now)}, before the sun is back. "
+                                              f"About {need:.1f} kWh more is needed.{tomorrow_txt}"))
+    if empty_at is not None:                          # lasts the night, but the next day is too dull to recover
+        return dict(base, level="warn", text=(f"Start the generator {when}: tomorrow looks dull (about "
+                                              f"{fsum['tomorrow']:.0f} kWh of solar expected), so at the usual use the "
+                                              f"battery reaches {floor:.0f}% about {_hhmm(empty_at, now)}. "
                                               f"About {need:.1f} kWh more is needed."))
     return dict(base, level="ok", text=f"No generator needed tonight: the battery should stay above {floor:.0f}% "
-                                         f"until the sun is back (sunset {sset:%H:%M}).")
+                                         f"until the sun is back (sunset {sset:%H:%M}).{tomorrow_txt}")
 
 
 def data(stack, site):
@@ -246,7 +319,8 @@ def data(stack, site):
             alerts.append({"id": "low_battery", "level": "warn", "text": f"Battery low: {vals['soc']:.0f}%."})
     except ValueError:
         pass
-    advice = generator_advice(site, vals, now, tz) if site.get("generator") == "manual" else None
+    fc = load_forecast(stack)
+    advice = generator_advice(site, vals, now, tz, fc) if site.get("generator") == "manual" else None
     try:
         kwh = round(int(site["battery_count"]) * float(site["battery_kwh_each"]), 1)
     except (KeyError, TypeError, ValueError):
@@ -258,7 +332,7 @@ def data(stack, site):
         "screen_off": screen_off_now(d, now.replace(tzinfo=None)),
         "rev": int(os.path.getmtime(settings_path(stack))) if os.path.exists(settings_path(stack)) else 0,
         "time": now.strftime("%H:%M"), "date": now.strftime("%a %b %-d"),
-        "expected": expected,
+        "expected": expected, "forecast": forecast_summary(fc, now, tz),
     }
 
 
@@ -300,6 +374,8 @@ def ha_status(stack, site):
         "advice": adv.get("level") or "none", "advice_text": adv.get("text") or "",
         "advice_need_kwh": adv.get("need_kwh"), "advice_empty_at": adv.get("empty_at"), "sunset": adv.get("sunset"),
         "generator_needed": adv.get("level") == "warn",
+        "forecast_today": (d["forecast"] or {}).get("today"), "forecast_remaining": (d["forecast"] or {}).get("remaining"),
+        "forecast_tomorrow": (d["forecast"] or {}).get("tomorrow"),
     }
 
 
@@ -321,7 +397,7 @@ solar-cam{display:block;width:100%;height:100%;background:#000}
 solar-cam video{width:100%;height:100%;object-fit:cover;display:block}
 .cam .lbl{position:absolute;z-index:2;left:14px;top:10px;font-size:1.5vw;font-weight:600;text-shadow:0 1px 4px #000}
 .cam .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:1.4vw}
-#info{display:flex;flex-direction:column;padding:1.6vw 1.8vw;gap:1.1vw;min-width:0}
+#info{display:flex;flex-direction:column;padding:1.6vw 1.8vw;gap:1.1vw;min-width:0;height:100vh;overflow:hidden}
 #top{display:flex;justify-content:space-between;align-items:baseline}
 #name{font-size:2vw;font-weight:600}#clock{font-size:2.6vw;font-variant-numeric:tabular-nums}
 #date{color:var(--muted);font-size:1.1vw;text-align:right}
@@ -424,7 +500,8 @@ async function tick(){
   if(soc!=null&&d.battery_kwh&&use>0){const h=Math.max(0,(soc-low)/100*d.battery_kwh)/(use/1000);
     $("runtime").textContent=`About ${h<1?Math.round(h*60)+" min":h.toFixed(h<10?1:0)+" h"} to ${low}% at the usual ${kw(use)} use`;}
   else $("runtime").textContent="";
-  setTile("pv",kw(n.pv),n.pv_today!=null?n.pv_today.toFixed(1)+" kWh today":"");
+  const fc=d.forecast;
+  setTile("pv",kw(n.pv),(n.pv_today!=null?n.pv_today.toFixed(1)+" kWh today":"")+(fc?`, ${fc.tomorrow.toFixed(0)} tomorrow`:""));
   setTile("load",kw(n.load),n.used_today!=null?n.used_today.toFixed(1)+" kWh today":"");
   const b=n.battery; setTile("bat",kw(b==null?null:Math.abs(b)),b==null?"":b>50?"charging":b<-50?"discharging":"idle",
     b==null?null:b>50?"var(--batt)":b<-50?"var(--warn)":"var(--fg)");

@@ -52,7 +52,18 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
   (charging/discharging) and **generator**, with today's totals and the last 24 hours as a chart.
 - **Notes**: dongles offline, inverter faults, low battery and, for a hand-started generator, from mid-afternoon on
   whether the battery lasts until the sun is back ("Start the generator before dark: ... about 4.2 kWh more is
-  needed"), from the average use over the last three days.
+  needed"), from the average use over the last three days and the solar forecast: a dull day tomorrow counts too
+  ("tomorrow looks dull (about 6 kWh of solar expected) ...").
+
+### Solar forecast
+
+`solar-collector` keeps Open-Meteo's irradiance forecast for each array (the same hourly request it already makes)
+and turns it into expected output per hour for today and the next two days (`state/forecast.json`), scaled by the
+advisor's calibration of this site's panels once it has one (0.8 of the model until then) and capped at the
+inverters' solar input. It shows on the display's solar tile, as `sensor.site_solar_forecast_today` / `_tomorrow` in
+Home Assistant, and drives the generator advice, which steps the battery through tonight and tomorrow in 15-minute
+steps (forecast solar against the usual use) instead of assuming the sun takes over two hours after sunrise. With no
+fresh forecast (no internet) the advice falls back to that rule.
 
 It runs Chromium in kiosk mode inside `cage` (a one-app Wayland compositor; no desktop) as the locked
 `solar-display` account (`solar-display.service`). It only starts when the display is turned on on the setup page,
@@ -219,7 +230,6 @@ screen off hours) needs a real Pi and screen.
 
 To do:
 - First boot of the image on a real Raspberry Pi 4, with a screen and the UniFi Protect cameras.
-- The solar forecast (tomorrow's production) on the display, in Home Assistant and in the generator advice.
 - Alerts on a phone: tested in Home Assistant's own notifications; the push through the Home Assistant app still
   needs a real phone.
 - EG4 6000XP: confirm the bridge's register map against a real 6000XP.
