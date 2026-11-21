@@ -31,6 +31,7 @@ if [ -d /run/systemd/system ]; then
   systemctl start --no-block solar-display.service || true
   systemctl restart solar-collector.service || true
   # SSD health (boxhealth.py); in the image since v0.2.7, added once on boxes updated from older versions
-  command -v smartctl >/dev/null || timeout 300 apt-get install -y -q --no-install-recommends smartmontools >/dev/null 2>&1 || true
+  # (the image ships without apt's package lists, so refresh them first)
+  command -v smartctl >/dev/null || { timeout 300 apt-get update -q >/dev/null 2>&1; timeout 300 apt-get install -y -q --no-install-recommends smartmontools >/dev/null 2>&1; } || true
 fi
 echo "installed to $DEST; reboot or: systemctl start solar-setup solar-stack solar-web"
