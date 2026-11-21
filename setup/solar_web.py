@@ -27,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import advisor  # noqa: E402
+import backup  # noqa: E402
 import display  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import weather  # noqa: E402
@@ -389,6 +390,7 @@ def status_page(handler):
 <form method="post" action="/update" style="margin-top:8px"><button>Check for updates now</button></form></div>
 <div class="card"><b>Advisor</b>: <a href="/advisor">what would help most &mdash; batteries, panels, an inverter or an automatic generator</a>
 <br><small>{html.escape(adv_note)}</small></div>
+<div class="card"><b>Backups</b>: {backup_line()} &nbsp;<a href="/backup">change</a></div>
 <div class="card"><b>Screen</b>: {display_line} <a href="/display">preview</a> &nbsp;<a href="/setup#screen">change</a></div>
 <div class="card" id="weather"><b>Sunlight data</b>: {weather_line}
 <form method="post" action="/weather/scan" style="margin-top:8px"><button>Scan for weather stations</button>
@@ -502,6 +504,69 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
     return page("Site setup", body)
 
 
+def run_quietly(cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True)
+    except OSError as e:
+        return subprocess.CompletedProcess(cmd, 1, "", str(e))
+
+
+def _when(ts):
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts else "never"
+
+
+def backup_line():
+    """One line for the start page."""
+    cfg, st = backup.settings(STACK), ss.load_json(backup.status_path(STACK), {})
+    if not cfg["uuid"]:
+        return "<b>not set up</b>: plug a USB stick into the Pi and choose it."
+    line = f"last backup {_when(st.get('last_ok'))}"
+    if st.get("snapshots"):
+        line += f", {st['snapshots']} on the stick, {st.get('free_gb', '?')} GB free"
+    if st.get("result") == "error":
+        line += f". <b>Last attempt failed</b>: {html.escape(st.get('message', ''))}"
+    elif st.get("result") in ("running", "restoring"):
+        line += f". {html.escape(st.get('message', ''))}..."
+    return line
+
+
+def backup_page(msg=""):
+    cfg, st = backup.settings(STACK), ss.load_json(backup.status_path(STACK), {})
+    sticks = backup.list_sticks()
+    known = {k["uuid"] for k in sticks}
+    opts = []
+    for k in sticks:
+        desc = f"{k['model'].strip() or 'USB stick'}, {k['size']}, {k['fstype']}" + (f", label {k['label']}" if k["label"] else "")
+        opts.append(f"<label><input type='radio' name='uuid' value='{html.escape(k['uuid'])}' style='width:auto'"
+                    f"{' checked' if k['uuid'] == cfg['uuid'] else ''}> {html.escape(desc)}</label>")
+    if cfg["uuid"] and cfg["uuid"] not in known:
+        opts.append(f"<label><input type='radio' name='uuid' value='{html.escape(cfg['uuid'])}' style='width:auto' checked>"
+                    " The chosen stick (not plugged in right now)</label>")
+    opts.append(f"<label><input type='radio' name='uuid' value='' style='width:auto'{'' if cfg['uuid'] else ' checked'}>"
+                " No backups</label>")
+    found = "" if sticks else "<p><small>No USB stick found. Plug one in (FAT32, exFAT, ext4 or NTFS; 16 GB or more) and reload this page.</small></p>"
+    status = html.escape(st.get("message", "no backup yet"))
+    restore = ""
+    if cfg["uuid"]:
+        restore = """<h2>Restore</h2><form method="post" action="/backup/restore">
+<p>Replaces this box's settings, passwords, Home Assistant (accounts, dashboards, history) and the inverter history with the
+newest backup on the stick. Use it after replacing the SSD: flash the image, start the box, choose the stick above, then restore.
+It stops everything for a few minutes.</p>
+<label><input type="checkbox" name="confirm" value="1" style="width:auto"> Yes, replace everything on this box with the backup</label>
+<p><button>Restore from the stick</button></p></form>"""
+    body = f"""<h1>Backups</h1>{('<div class="card">' + html.escape(msg) + '</div>') if msg else ''}
+<div class="card"><b>Status</b>: {backup_line()}<br><small>Last result: {status}</small>
+<form method="post" action="/backup/run" style="margin-top:8px"><button{'' if cfg['uuid'] else ' disabled'}>Back up now</button></form></div>
+<form method="post" action="/backup/settings"><fieldset><legend>USB stick</legend>{''.join(opts)}{found}
+<label><input type="checkbox" name="history" value="1" style="width:auto"{' checked' if cfg['history'] else ''}> Include the inverter history (VictoriaMetrics)</label>
+<small>Every night at about 01:30; 7 daily, 4 weekly and 6 monthly backups are kept. The stick is only in use during a backup,
+so it can be pulled out at any other time. It is never formatted: the backups go in a <code>solar-monitor-backup</code> folder.
+<b>The key to the backups is on the stick too</b> (so a new box can restore from the stick alone): whoever has the stick can read
+this box's passwords and camera links. Keep it in the Pi.</small></fieldset>
+<p><button>Save</button> &nbsp;<a href="/">Back</a></p></form>{restore}"""
+    return page("Backups", body)
+
+
 def advisor_page():
     a = ss.load_json(path("state", "advisor.json"), {})
     running = advisor_lock.locked()
@@ -580,6 +645,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(display.data(STACK, load_site())), "application/json")
         elif self.path == "/api/ha":
             self.send(200, json.dumps(display.ha_status(STACK, load_site())), "application/json")
+        elif self.path == "/backup":
+            self.send(200, backup_page())
         elif self.path == "/setup":
             self.send(200, setup_page(load_site()))
         elif self.path == "/api/status":
@@ -622,6 +689,25 @@ class Handler(BaseHTTPRequestHandler):
                 w["source"] = src
                 save_weather(w)
             self.send(200, setup_page(load_site(), done=msgs))
+        elif self.path == "/backup/settings":
+            f = self.form()
+            uuid = f.get("uuid", "").strip()
+            if uuid and uuid not in {k["uuid"] for k in backup.list_sticks()} | {backup.settings(STACK)["uuid"]}:
+                self.send(400, backup_page("That stick isn't plugged in."))
+                return
+            backup.save_settings(STACK, {**backup.settings(STACK), "uuid": uuid, "history": f.get("history") == "1"})
+            self.send(200, backup_page("Saved." + (" The first backup runs tonight; or use Back up now." if uuid else "")))
+        elif self.path == "/backup/run":
+            run_quietly(["systemctl", "start", "--no-block", "solar-backup.service"])
+            self.send(303, "", extra={"Location": "/backup"})
+        elif self.path == "/backup/restore":
+            if self.form().get("confirm") != "1":
+                self.send(400, backup_page("Tick the box to confirm the restore."))
+                return
+            # Its own unit: the restore restarts the stack, and must outlive this request.
+            run_quietly(["systemd-run", "--unit=solar-restore", "--collect", "--no-block", sys.executable,
+                         os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup.py"), "restore", "--stack", STACK])
+            self.send(200, backup_page("Restoring: this takes a few minutes. Reload this page to see when it's done."))
         elif self.path == "/update":
             if os.path.exists(UPDATE_SCRIPT):
                 # Its own systemd unit: the update restarts this web service, which must not take the update with it.

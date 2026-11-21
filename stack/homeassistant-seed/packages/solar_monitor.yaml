@@ -137,6 +137,12 @@ rest:
         value_template: "{{ value_json.summary_day }}"
         icon: mdi:message-text-clock
         json_attributes: [summary_title, summary_text]
+      - name: Site last backup
+        unique_id: site_last_backup
+        value_template: "{{ value_json.backup_last_ok }}"
+        device_class: timestamp
+        icon: mdi:usb-flash-drive
+        json_attributes: [backup_configured, backup_message]
     binary_sensor:
       - name: Site data stale
         unique_id: site_data_stale
@@ -154,6 +160,11 @@ rest:
         unique_id: site_battery_low
         value_template: "{{ value_json.battery_low }}"
         device_class: battery
+      - name: Site backup overdue
+        unique_id: site_backup_overdue
+        value_template: "{{ value_json.backup_overdue }}"
+        device_class: problem
+        icon: mdi:usb-flash-drive
       - name: Site generator needed
         unique_id: site_generator_needed
         value_template: "{{ value_json.generator_needed }}"
@@ -329,6 +340,38 @@ automation:
           message: >-
             {% if trigger.id != 'off' %}No inverter data for 10 minutes. Check the inverter dongles and the
             network.{% else %}clear{% endif %}
+
+  - id: solar_backup_overdue
+    alias: "Solar: backup overdue"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_backup_overdue
+        to: "on"
+        for: "01:00:00"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_backup_overdue
+        from: "on"
+        to: "off"
+        id: "off"
+      - trigger: homeassistant
+        event: start
+        id: start
+    actions:
+      # After a restart the sensor starts out "on" without a change to trigger on: wait, then check
+      # it. (Top level on purpose: a condition inside if/then only ends that block, not the automation.)
+      - delay: "{{ '00:05:00' if trigger.id == 'start' else '00:00:00' }}"
+      - condition: template
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_backup_overdue', 'on') }}"
+      - action: script.solar_notify
+        data:
+          tag: backup
+          title: No backup for 2 days
+          message: >-
+            {% if trigger.id != 'off' %}The solar monitor hasn't backed up to its USB stick for 2 days
+            ({{ state_attr('sensor.site_last_backup', 'backup_message') }}). Check the stick is plugged into
+            the Pi.{% else %}clear{% endif %}
 
   # Hand-started generator: from mid-afternoon on, will the battery last until the sun is back?
   - id: solar_generator_needed
