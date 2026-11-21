@@ -1,0 +1,372 @@
+# Solar monitor: site sensors, alerts and the Solar dashboard.
+# Ships with the solar monitor and is replaced on every update; edits here are overwritten.
+# To change an alert, turn the automation off (Settings -> Automations) and make your own copy.
+#
+# Every figure comes from the box's own /api/ha, the same numbers and alerts as the wall
+# display (all inverters added up), so it works for any number of inverters and dongles.
+
+rest:
+  - resource: http://127.0.0.1/api/ha
+    scan_interval: 30
+    timeout: 20
+    sensor:
+      - name: Site battery level
+        unique_id: site_battery_level
+        value_template: "{{ value_json.battery_level }}"
+        unit_of_measurement: "%"
+        device_class: battery
+        state_class: measurement
+      - name: Site solar power
+        unique_id: site_solar_power
+        value_template: "{{ value_json.solar_power }}"
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:solar-power-variant
+      - name: Site house load
+        unique_id: site_house_load
+        value_template: "{{ value_json.house_load }}"
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:home-lightning-bolt
+      - name: Site battery power
+        unique_id: site_battery_power
+        # positive = charging, negative = discharging
+        value_template: "{{ value_json.battery_power }}"
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:battery-charging
+      - name: Site generator power
+        unique_id: site_generator_power
+        value_template: "{{ value_json.generator_power }}"
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:engine
+      - name: Site solar today
+        unique_id: site_solar_today
+        value_template: "{{ value_json.solar_today }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        icon: mdi:solar-power-variant
+      - name: Site used today
+        unique_id: site_used_today
+        value_template: "{{ value_json.used_today }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        icon: mdi:home-lightning-bolt
+      - name: Site battery charged today
+        unique_id: site_battery_charged_today
+        value_template: "{{ value_json.charged_today }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        icon: mdi:battery-arrow-up
+      - name: Site battery discharged today
+        unique_id: site_battery_discharged_today
+        value_template: "{{ value_json.discharged_today }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        icon: mdi:battery-arrow-down
+      - name: Site generator today
+        unique_id: site_generator_today
+        value_template: "{{ value_json.generator_today }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total_increasing
+        icon: mdi:engine
+      - name: Site battery stored
+        unique_id: site_battery_stored
+        value_template: "{{ value_json.battery_stored }}"
+        unit_of_measurement: kWh
+        device_class: energy_storage
+        state_class: measurement
+        icon: mdi:battery
+      - name: Site battery runtime
+        unique_id: site_battery_runtime
+        # hours until the low battery level at the usual (3-day average) use
+        value_template: "{{ value_json.battery_runtime }}"
+        unit_of_measurement: h
+        device_class: duration
+        icon: mdi:timer-sand
+        json_attributes: [usual_load, low_battery_level, battery_capacity]
+      - name: Site dongles connected
+        unique_id: site_dongles_connected
+        value_template: "{{ value_json.dongles_connected }}"
+        icon: mdi:wifi
+        json_attributes: [dongles_expected, data_age]
+      - name: Site inverter fault code
+        unique_id: site_inverter_fault_code
+        value_template: "{{ value_json.fault_code }}"
+        icon: mdi:alert-circle-outline
+        json_attributes: [warning_code]
+      - name: Site alerts
+        unique_id: site_alerts
+        # number of open alerts; the texts are in the "alerts" attribute
+        value_template: "{{ value_json.alerts | count }}"
+        icon: mdi:alert
+        json_attributes: [alerts]
+      - name: Site generator advice
+        unique_id: site_generator_advice
+        # none (no hand-started generator), info (daytime), ok or warn
+        value_template: "{{ value_json.advice }}"
+        icon: mdi:engine
+        json_attributes: [advice_text, advice_need_kwh, advice_empty_at, sunset, generator_mode]
+    binary_sensor:
+      - name: Site data stale
+        unique_id: site_data_stale
+        value_template: "{{ value_json.data_stale }}"
+        device_class: problem
+      - name: Site dongle offline
+        unique_id: site_dongle_offline
+        value_template: "{{ value_json.dongle_offline }}"
+        device_class: problem
+      - name: Site inverter fault
+        unique_id: site_inverter_fault
+        value_template: "{{ value_json.inverter_fault }}"
+        device_class: problem
+      - name: Site battery low
+        unique_id: site_battery_low
+        value_template: "{{ value_json.battery_low }}"
+        device_class: battery
+      - name: Site generator needed
+        unique_id: site_generator_needed
+        value_template: "{{ value_json.generator_needed }}"
+        device_class: problem
+        icon: mdi:engine
+
+script:
+  solar_notify:
+    alias: Solar monitor notification
+    description: >-
+      Shows a notification in Home Assistant and sends it to every phone with the Home Assistant
+      app signed in to this box. message "clear" removes it again.
+    mode: queued
+    fields:
+      tag:
+        description: Notification id
+      title:
+        description: Title
+      message:
+        description: The text, or clear to remove the notification
+    sequence:
+      - if: "{{ message == 'clear' }}"
+        then:
+          - action: persistent_notification.dismiss
+            data: {notification_id: "solar_{{ tag }}"}
+        else:
+          - action: persistent_notification.create
+            data: {notification_id: "solar_{{ tag }}", title: "{{ title }}", message: "{{ message }}"}
+      # The app's notify action is named after the phone, like its device_tracker entity.
+      - repeat:
+          for_each: >-
+            {{ integration_entities('mobile_app') | select('match', 'device_tracker\.')
+               | map('replace', 'device_tracker.', '') | list }}
+          sequence:
+            - action: notify.mobile_app_{{ repeat.item }}
+              continue_on_error: true
+              data:
+                title: "{{ title }}"
+                message: "{{ 'clear_notification' if message == 'clear' else message }}"
+                data: {tag: "solar_{{ tag }}", group: solar}
+
+automation:
+  - id: solar_battery_low
+    alias: "Solar: battery low"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_battery_low
+        to: "on"
+        for: "00:05:00"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_battery_low
+        from: "on"
+        to: "off"
+        for: "00:10:00"
+        id: "off"
+      - trigger: homeassistant
+        event: start
+        id: start
+    actions:
+      # after a restart the sensor starts out "on" without a change to trigger on: check again
+      - if: "{{ trigger.id == 'start' }}"
+        then:
+          - delay: "00:05:00"
+          - condition: state
+            entity_id: binary_sensor.site_battery_low
+            state: "on"
+      - action: script.solar_notify
+        data:
+          tag: battery_low
+          title: Battery low
+          message: >-
+            {% if trigger.id != 'off' %}Battery at {{ states('sensor.site_battery_level') }}%
+            (alert level {{ state_attr('sensor.site_battery_runtime', 'low_battery_level') | int(0) }}%).
+            The house is using {{ states('sensor.site_house_load') }} W.{% else %}clear{% endif %}
+
+  - id: solar_inverter_fault
+    alias: "Solar: inverter fault"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_inverter_fault
+        to: "on"
+        for: "00:01:00"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_inverter_fault
+        from: "on"
+        to: "off"
+        id: "off"
+      - trigger: homeassistant
+        event: start
+        id: start
+    actions:
+      # after a restart the sensor starts out "on" without a change to trigger on: check again
+      - if: "{{ trigger.id == 'start' }}"
+        then:
+          - delay: "00:05:00"
+          - condition: state
+            entity_id: binary_sensor.site_inverter_fault
+            state: "on"
+      - action: script.solar_notify
+        data:
+          tag: inverter_fault
+          title: Inverter fault
+          message: >-
+            {% if trigger.id != 'off' %}An inverter reports fault code {{ states('sensor.site_inverter_fault_code') }}.
+            Check the inverter's screen.{% else %}clear{% endif %}
+
+  - id: solar_dongle_offline
+    alias: "Solar: dongle offline"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_dongle_offline
+        to: "on"
+        for: "00:10:00"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_dongle_offline
+        from: "on"
+        to: "off"
+        id: "off"
+      - trigger: homeassistant
+        event: start
+        id: start
+    actions:
+      # after a restart the sensor starts out "on" without a change to trigger on: check again
+      - if: "{{ trigger.id == 'start' }}"
+        then:
+          - delay: "00:05:00"
+          - condition: state
+            entity_id: binary_sensor.site_dongle_offline
+            state: "on"
+      - action: script.solar_notify
+        data:
+          tag: dongle_offline
+          title: Inverter dongle offline
+          message: >-
+            {% if trigger.id != 'off' %}Only {{ states('sensor.site_dongles_connected') }} of
+            {{ state_attr('sensor.site_dongles_connected', 'dongles_expected') }} inverter dongles are connected.
+            Check the dongle's WiFi or network cable.{% else %}clear{% endif %}
+
+  - id: solar_no_data
+    alias: "Solar: no data"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_data_stale
+        to: "on"
+        for: "00:10:00"
+        id: "on"
+      - trigger: state
+        entity_id: sensor.site_battery_level
+        to: unavailable
+        for: "00:10:00"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_data_stale
+        from: "on"
+        to: "off"
+        id: "off"
+      - trigger: homeassistant
+        event: start
+        id: start
+    conditions:
+      - "{{ trigger.id != 'off' or states('sensor.site_battery_level') not in ['unknown', 'unavailable'] }}"
+    actions:
+      # after a restart the sensor starts out "on" without a change to trigger on: check again
+      - if: "{{ trigger.id == 'start' }}"
+        then:
+          - delay: "00:05:00"
+          - condition: state
+            entity_id: binary_sensor.site_data_stale
+            state: "on"
+      - action: script.solar_notify
+        data:
+          tag: no_data
+          title: No solar data
+          message: >-
+            {% if trigger.id != 'off' %}No inverter data for 10 minutes. Check the inverter dongles and the
+            network.{% else %}clear{% endif %}
+
+  # Hand-started generator: from mid-afternoon on, will the battery last until the sun is back?
+  - id: solar_generator_needed
+    alias: "Solar: start the generator"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_generator_needed
+        to: "on"
+        for: "00:05:00"
+      # second reminder at sunset if it still hasn't been started
+      - trigger: sun
+        event: sunset
+        offset: "-00:30:00"
+    conditions:
+      - condition: state
+        entity_id: binary_sensor.site_generator_needed
+        state: "on"
+      - condition: numeric_state
+        entity_id: sensor.site_generator_power
+        below: 100
+    actions:
+      - action: script.solar_notify
+        data:
+          tag: generator
+          title: Start the generator
+          message: "{{ state_attr('sensor.site_generator_advice', 'advice_text') }}"
+
+  - id: solar_generator_running
+    alias: "Solar: generator started, clear the reminder"
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.site_generator_power
+        above: 500
+        for: "00:02:00"
+      - trigger: state
+        entity_id: binary_sensor.site_generator_needed
+        from: "on"
+        to: "off"
+    actions:
+      - action: script.solar_notify
+        data: {tag: generator, title: "", message: clear}
+
+lovelace:
+  dashboards:
+    solar-site:
+      mode: yaml
+      filename: dashboards/solar.yaml
+      title: Solar
+      icon: mdi:solar-power-variant
+      show_in_sidebar: true
+      require_admin: false

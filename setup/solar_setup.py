@@ -343,6 +343,41 @@ def seed_homeassistant(stack, sec):
     return True
 
 
+# Files the image owns inside Home Assistant's config: replaced on every run (so updates
+# reach them). Everything else under homeassistant/ is only seeded on the first run.
+HA_OWNED = ["packages/solar_monitor.yaml", "dashboards/solar.yaml"]
+
+
+def sync_homeassistant(stack):
+    """Copy the image-owned HA files in; True if any changed."""
+    changed = False
+    for rel in HA_OWNED:
+        src = os.path.join(stack, "homeassistant-seed", rel)
+        if os.path.exists(src):
+            with open(src) as f:
+                changed |= write_if_changed(os.path.join(stack, "homeassistant", rel), f.read(), 0o644)
+    return changed
+
+
+def seed_energy(stack):
+    """Fill in HA's Energy dashboard with the site sensors, once (later edits in HA are kept)."""
+    path = os.path.join(stack, "homeassistant", ".storage", "energy")
+    if os.path.exists(path):
+        return False
+    prefs = {
+        "energy_sources": [
+            {"type": "solar", "stat_energy_from": "sensor.site_solar_today", "config_entry_solar_forecast": None},
+            {"type": "battery", "stat_energy_from": "sensor.site_battery_discharged_today",
+             "stat_energy_to": "sensor.site_battery_charged_today"},
+        ],
+        "device_consumption": [],
+    }
+    doc = {"version": 1, "minor_version": 1, "key": "energy", "data": prefs}
+    write_if_changed(path, json.dumps(doc, indent=2) + "\n", 0o600)
+    log("Home Assistant energy dashboard seeded")
+    return True
+
+
 # --------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -357,7 +392,14 @@ def main():
     inverters = load_json(state_path, {})
     sec = ensure_secrets(stack)
     write_env(stack, sec)
-    seed_homeassistant(stack, sec)
+    first = seed_homeassistant(stack, sec)
+    ha_changed = sync_homeassistant(stack)
+    ha_changed |= seed_energy(stack)
+    if ha_changed and not first:
+        # running HA only reads packages and YAML dashboards at start; harmless if it isn't up yet
+        r = subprocess.run(compose_cmd(stack) + ["restart", "homeassistant"], capture_output=True, text=True)
+        log("Home Assistant restarted for the solar monitor package" if r.returncode == 0
+            else f"Home Assistant restart skipped: {r.stderr.strip()[-200:]}")
     if not os.path.exists(os.path.join(stack, "go2rtc", "go2rtc.yaml")):
         import display  # the camera service's config (no cameras until the setup page adds them)
         display.save(stack, display.load(stack))
