@@ -16,6 +16,8 @@ read, never changed.
 | Grafana | Dashboards, viewable without logging in | `http://<pi>:3000` |
 | Home Assistant | Inverter entities (MQTT discovery), dashboards, alerts | `http://<pi>:8123` |
 | Advisor | Weekly analysis: batteries, panels, inverter or generator? | `http://<pi>/advisor` |
+| Wall display | Dashboard and up to two cameras on a screen plugged into the Pi's HDMI port | `http://<pi>/display` |
+| go2rtc | Turns the cameras' RTSP(S) streams into video the display's browser can play | localhost only |
 
 ## Hardware
 
@@ -24,6 +26,8 @@ read, never changed.
   Five years of history for two inverters is a few GB; the extra space spreads the writes so the drive
   lasts. SATA-in-USB enclosures are safer than NVMe on a Pi 4 (its USB ports share about 1.2 A).
 - Wired Ethernet on the same network (subnet) as the inverter dongles.
+- Optional: a 1080p monitor or TV on the Pi's HDMI port (micro-HDMI 0, next to the power socket) for the
+  wall display. Plugging it in, even later, starts the display.
 
 ## First boot
 
@@ -36,6 +40,38 @@ read, never changed.
 
 Give each dongle a fixed IP (DHCP reservation) in the router if you can. If a dongle's IP changes anyway,
 the hourly scan finds it again by its serial number.
+
+## Wall display
+
+![Wall display at 1920x1080 (test data and test-pattern cameras)](docs/display.png)
+
+With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
+
+- **Cameras** (left half, two stacked 960x540 tiles; without cameras the power figures use the whole screen).
+- **Battery** (%, kWh stored, how long it lasts at the usual use), **solar**, **house load**, **battery power**
+  (charging/discharging) and **generator**, with today's totals and the last 24 hours as a chart.
+- **Notes**: dongles offline, inverter faults, low battery and, for a hand-started generator, from mid-afternoon on
+  whether the battery lasts until the sun is back ("Start the generator before dark: ... about 4.2 kWh more is
+  needed"), from the average use over the last three days.
+
+It runs Chromium in kiosk mode inside `cage` (a one-app Wayland compositor; no desktop) as the locked
+`solar-display` account (`solar-display.service`). It only starts when the display is turned on on the setup page,
+the kiosk software is installed and a screen is connected; plugging a screen in starts it (udev rule). The browser's
+profile lives in RAM. The setup page can turn the screen off for set hours (`solar-display-power.timer`,
+via `wlr-randr`). The same page is at `http://<pi>/display` from other computers, without the cameras.
+
+### Cameras (UniFi Protect)
+
+Setup page, *Screen and cameras*: name each camera and paste its stream link. In UniFi Protect: open the camera
+-> Settings -> Advanced -> RTSPS, turn on **Medium** quality (720p: sharp enough for a 960x540 tile and light on
+the Pi; the Pi 4 decodes H.264 in hardware) and copy the `rtsps://<console>:7441/<token>?enableSrtp` link.
+`go2rtc` reads the streams (RTSPS without checking Protect's self-signed certificate) and serves them to the
+display over MSE on 127.0.0.1 only, so the pictures aren't reachable from the network. The links are kept in
+`state/display.json` and `go2rtc/go2rtc.yaml` (mode 600) and aren't shown again on the setup page (the token in
+the link is effectively a password). Any camera with an RTSP/RTSPS H.264 stream works the same way.
+
+For camera entities, motion and doorbell events in Home Assistant, add the **UniFi Protect** integration in
+Home Assistant (Settings -> Devices & services; it's usually discovered automatically) with a local Protect user.
 
 ## Advisor
 
@@ -125,8 +161,10 @@ Home Assistant, Grafana and the rest.
 - `setup/weather.py` finds and reads weather stations; `setup/collector.py` (`solar-collector.service`)
   stores station and Open-Meteo sunlight in VictoriaMetrics; `setup/advisor.py` (`solar-advisor.timer`)
   is the advisor.
+- `setup/display.py` is the wall display (page, data, settings, go2rtc config, screen schedule);
+  `setup/kiosk.sh` starts Chromium; `system/` has the kiosk PAM session and the HDMI hotplug rule.
 - `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the
-  root partition, installs Docker, avahi (`solar-monitor.local`) and unattended-upgrades in a chroot, runs
+  root partition, installs Docker, avahi (`solar-monitor.local`), unattended-upgrades and the kiosk (cage, Chromium) in a chroot, runs
   the installer and stores the arm64 container images in the image so the first boot works offline
   (`solar-images.service` loads them). It needs root and arm64 emulation (binfmt `qemu-aarch64`).
 
@@ -148,8 +186,12 @@ python3 setup/solar_web.py --stack "$PWD/stack" --port 8088
 Tested on an amd64 Docker host against an EG4 18kPV dongle: discovery, bridge, broker, VictoriaMetrics,
 Grafana, Home Assistant (185 inverter entities by MQTT discovery) and the setup form all work.
 
+Wall display: tested with Google Chrome at 1920x1080 against test data and two go2rtc H.264 test streams
+(`python3 -m unittest discover -s tests`). The kiosk itself (cage + Chromium on the Pi, hardware video decoding,
+screen off hours) needs a real Pi and screen.
+
 To do:
-- First boot of the image on a real Raspberry Pi 4.
+- First boot of the image on a real Raspberry Pi 4, with a screen and the UniFi Protect cameras.
 - Home Assistant dashboards and alerts (low battery, inverter faults, dongle offline), the solar forecast,
   and the "start the generator before dark" check for sites with a manual generator.
 - EG4 6000XP: confirm the bridge's register map against a real 6000XP.

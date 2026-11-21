@@ -69,6 +69,16 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on: [mosquitto]
 
+  # Cameras for the HDMI display (setup/display.py writes go2rtc/go2rtc.yaml from the setup page).
+  # Turns the cameras' RTSP(S) streams into MSE for the kiosk browser; localhost only.
+  go2rtc:
+    image: alexxit/go2rtc:1.9.15
+    restart: unless-stopped
+    volumes:
+      - ./go2rtc:/config
+    ports:
+      - "127.0.0.1:1984:1984"
+
 volumes:
   mosquitto-data:
   vm-data:

@@ -1,0 +1,6 @@
+[Unit]
+Description=Solar monitor: screen off during the off hours set on the setup page
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/solar-monitor/setup/display.py power
