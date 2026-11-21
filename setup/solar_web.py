@@ -32,6 +32,7 @@ import battery  # noqa: E402
 import display  # noqa: E402
 import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
+import support  # noqa: E402
 import tunnel  # noqa: E402
 import weather  # noqa: E402
 
@@ -388,7 +389,7 @@ def status_page(handler):
                     + (f", {len(dsp['cameras'])} camera(s)" if dsp["cameras"] else ", no cameras") + ".")
     adv = ss.load_json(path("state", "advisor.json"), {})
     adv_note = (f"last run {adv.get('generated')}: " + (adv.get("message") or (adv.get("recommendation") or [""])[0])) if adv else "not run yet (runs weekly)"
-    body = f"""<h1>Solar monitor</h1>{banner}
+    body = f"""<h1>Solar monitor</h1>{support_banner()}{banner}
 <div class="card"><b>Home Assistant</b>: <a href="http://{host}:8123">http://{host}:8123</a><br>
 <small>First visit: create your own account. The inverter data appears by itself (the MQTT integration is pre-configured).</small></div>
 <div class="card"><b>Grafana</b>: <a href="http://{host}:3000">http://{host}:3000</a> &nbsp;<small>dashboards are visible without logging in</small><br>
@@ -416,7 +417,7 @@ Scanning takes up to two minutes. Give each dongle a fixed IP (DHCP reservation)
     return page("Solar monitor", body)
 
 
-def setup_page(site, error="", done=None, remote_msg=""):
+def setup_page(site, error="", done=None, remote_msg="", support_msg=""):
     upd = update_settings()
     def inp(name, value, typ="text", extra=""):
         return f"<input name='{name}' type='{typ}' value='{html.escape(str(value))}' {extra}>"
@@ -472,6 +473,8 @@ Devices &amp; services; it's usually found automatically) with a local Protect u
         msg = "<div class='card'>Saved: " + html.escape("; ".join(done)) + ". <a href='/'>Back to the start page</a></div>"
     if remote_msg:
         msg = f"<div class='card'>Remote access: {html.escape(remote_msg)} <a href='#remote'>details</a></div>"
+    if support_msg:
+        msg = f"<div class='card'>Remote support: {html.escape(support_msg)} <a href='#support'>details</a></div>"
     body = f"""<h1>Site setup</h1>{msg}
 <form method="post" action="/setup">
 <fieldset><legend>Location</legend>
@@ -516,7 +519,8 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
 <option value="main"{' selected' if upd['channel'] == 'main' else ''}>Every change on main (test boxes)</option></select></label></fieldset>
 <p><button>Save</button> &nbsp;<a href="/">Cancel</a></p></form>
 <p><small>Saving restarts Home Assistant (about a minute) when the location, time zone or sizes changed.</small></p>
-{remote_section(remote_msg)}"""
+{remote_section(remote_msg)}
+{support_section(support_msg)}"""
     return page("Site setup", body)
 
 
@@ -728,6 +732,47 @@ in your Home Assistant profile). This setup page, Grafana and the cameras stay o
 <p><button>{'Save and update' if d['enabled'] else 'Turn remote access on'}</button></p></fieldset></form>{off}"""
 
 
+def _until(st):
+    if not st["enabled"]:
+        return ""
+    if not st["until"]:
+        return "until it is turned off"
+    return "until " + time.strftime("%a %b %-d %H:%M", time.localtime(st["until"]))
+
+
+def support_section(msg=""):
+    """Remote support (a helper's Cloudflare tunnel + SSH key): its own form on the setup page."""
+    st = support.status(STACK)
+    days = "".join(f"<option value='{d}'{' selected' if d == st['days'] else ''}>{('after ' + str(d) + (' day' if d == 1 else ' days')) if d else 'only when I turn it off'}</option>"
+                   for d in support.DAYS)
+    state = (f"<p><b>On</b>, {_until(st)}. The helper can log in to this box and has full administrator access.</p>"
+             if st["enabled"] else "<p>Off.</p>")
+    if st["message"] and not st["enabled"]:
+        state += f"<p><small>{html.escape(st['message'])}</small></p>"
+    saved = "<small>A tunnel token is saved; leave the field empty to keep it.</small>" if st["has_token"] else ""
+    off = "" if not st["enabled"] else """<form method="post" action="/support/off"><p><button>Turn remote support off now</button></p></form>"""
+    return f"""<h2 id="support">Remote support (optional)</h2>{state}
+<form method="post" action="/support"><fieldset><legend>Let a helper connect to this box</legend>
+<p><small>For troubleshooting: someone you trust sets up a Cloudflare Tunnel in <b>their</b> Cloudflare account and gives you its
+token and their SSH key. While remote support is on they can reach this box through that tunnel (what exactly, such as SSH, this
+setup page or Grafana, is set up in their account, behind their Cloudflare Access login), log in and change anything on it.
+Nothing is opened on your router. It switches itself off when the time you choose is up, and you can turn it off here at any time.</small></p>
+<label>Tunnel token <input name="support_token" type="password" autocomplete="off" style="max-width:100%"></label>{saved}
+<label>Their SSH public key(s), one per line
+<textarea name="support_keys" rows="3" style="width:100%;font:inherit;box-sizing:border-box;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px">{html.escape(st['keys'])}</textarea></label>
+<label>Switch off <select name="support_days">{days}</select></label>
+<p><button>{'Save and keep on' if st['enabled'] else 'Turn remote support on'}</button></p></fieldset></form>{off}"""
+
+
+def support_banner():
+    st = support.status(STACK)
+    if not st["enabled"]:
+        return ""
+    return (f"<div class='card warn'><b>Remote support is on</b>, {_until(st)}: a helper can log in to this box. "
+            "<form method='post' action='/support/off' style='display:inline'><button>Turn it off</button></form> "
+            "<a href='/setup#support'>settings</a></div>")
+
+
 def apply_core_change():
     """Rewrite core.yaml (the public address) and, with remote access on, let HA trust cloudflared on
     localhost (.storage/http, edited while HA is stopped); restart HA when either changed."""
@@ -908,6 +953,17 @@ class Handler(BaseHTTPRequestHandler):
                 tunnel.save(STACK, {**d, "enabled": cur["enabled"], "message": ""})
                 msgs = [f"Not turned on: {e}"]
             self.send(200, setup_page(load_site(), remote_msg="; ".join(msgs) + "."))
+        elif self.path == "/support":
+            try:
+                d = support.clean(self.form(), support.settings(STACK))
+            except ValueError as e:
+                self.send(400, setup_page(load_site(), support_msg=f"Not turned on: {e}."))
+                return
+            msgs = support.enable(STACK, d)
+            self.send(200, setup_page(load_site(), support_msg="; ".join(["on, " + _until(support.status(STACK))] + msgs) + "."))
+        elif self.path == "/support/off":
+            msgs = support.disable(STACK)
+            self.send(200, setup_page(load_site(), support_msg="; ".join(["off"] + msgs) + "."))
         elif self.path == "/tunnel/off":
             msgs = tunnel.disable(STACK, remove=self.form().get("remove") == "1") + apply_core_change()
             self.send(200, setup_page(load_site(), remote_msg="; ".join(msgs) + "."))

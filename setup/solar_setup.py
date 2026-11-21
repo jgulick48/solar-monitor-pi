@@ -243,8 +243,10 @@ def host_timezone():
 
 
 def env_profiles(stack):
-    """Optional compose services that are turned on (cloudflared: remote access, see tunnel.py)."""
-    return ["tunnel"] if load_json(os.path.join(stack, "state", "tunnel.json"), {}).get("enabled") else []
+    """Optional compose services that are turned on: cloudflared for remote access (tunnel.py) and
+    cloudflared-support for remote support (support.py)."""
+    on = lambda name: load_json(os.path.join(stack, "state", name), {}).get("enabled")  # noqa: E731
+    return [p for p, f in (("tunnel", "tunnel.json"), ("support", "support.json")) if on(f)]
 
 
 def load_env_text(sec, tz, profiles=()):

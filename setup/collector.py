@@ -27,6 +27,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
+import support  # noqa: E402
 import weather  # noqa: E402
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
@@ -157,6 +158,11 @@ def main():
             except Exception as e:  # noqa: BLE001
                 log("generator log update failed:", e)
             last_gen = time.time()
+        try:
+            for m in support.check(args.stack):   # remote support: switch off when its time is up
+                log("remote support:", m)
+        except Exception as e:  # noqa: BLE001
+            log("remote support check failed:", e)
         if args.once:
             return
         time.sleep(60)
