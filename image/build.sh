@@ -3,7 +3,7 @@
 #
 # Runs as root on a Linux host (or a --privileged container with /dev mounted)
 # that is arm64 or can execute arm64 binaries (binfmt_misc qemu-aarch64, F flag).
-# Needs: curl xz-utils parted e2fsprogs util-linux skopeo rsync.
+# Needs: curl xz-utils parted e2fsprogs util-linux skopeo rsync zerofree.
 #
 #   sudo image/build.sh [output-dir]
 #
@@ -89,6 +89,10 @@ sync
 for m in boot/firmware dev/pts dev proc sys run; do umount "$ROOT/$m"; done
 umount "$ROOT"
 e2fsck -fy "${LOOP}p2" >/dev/null || [ $? -le 1 ]
+# Zero the free space: apt's downloaded packages were deleted in the chroot, but their (already
+# compressed, so incompressible) data is still in the free blocks. Without this the image grew past
+# GitHub's 2 GiB limit for a release file.
+zerofree "${LOOP}p2"
 losetup -d "$LOOP"; LOOP=""
 xz -T0 -6 -c "$WORK/$NAME.img" > "$OUT/$NAME.img.xz"
 (cd "$OUT" && sha256sum "$NAME.img.xz" > "$NAME.img.xz.sha256")
