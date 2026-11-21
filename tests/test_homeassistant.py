@@ -110,6 +110,10 @@ class HomeAssistant(unittest.TestCase):
             self.assertFalse(any("if" in step for step in a["actions"]), a["id"])
             conds = [step for step in a["actions"] if step.get("condition") == "template"]
             self.assertTrue(conds and "trigger.id != 'start'" in conds[0]["value_template"], a["id"])
+            # the re-check looks at the entity the automation is about (a bad merge once crossed two of them)
+            watched = {t.get("entity_id") for t in a["triggers"] if t.get("entity_id")}
+            self.assertTrue(any(f"'{e}'" in conds[0]["value_template"] for e in watched), a["id"])
+            self.assertEqual(sum(1 for step in a["actions"] if step.get("condition") == "template"), 1, a["id"])
             idx = a["actions"].index(conds[0])
             self.assertTrue(any("action" in step for step in a["actions"][idx + 1:]), a["id"])
             checked += 1

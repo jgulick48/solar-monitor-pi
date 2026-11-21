@@ -460,6 +460,22 @@ automation:
         from: "on"
         to: "off"
         for: "00:30:00"
+        id: "off"
+      - trigger: homeassistant
+        event: start
+        id: start
+    actions:
+      - delay: "{{ '00:30:00' if trigger.id == 'start' else '00:00:00' }}"
+      - condition: template
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_battery_attention', 'on') }}"
+      - action: script.solar_notify
+        data:
+          tag: battery_health
+          title: Battery needs attention
+          message: >-
+            {% if trigger.id != 'off' %}{{ state_attr('sensor.site_battery_health', 'battery_health_text') }}
+            Details on the solar monitor's Battery health page.{% else %}clear{% endif %}
+
   # Generator service (oil change): 200 h on the inverters' GEN input, 100 h on a DC charger.
   # Mark it serviced on the box's Generator page (http://<this box>/generator).
   - id: solar_generator_service_due
@@ -479,16 +495,6 @@ automation:
         event: start
         id: start
     actions:
-      - delay: "{{ '00:30:00' if trigger.id == 'start' else '00:00:00' }}"
-      - condition: template
-        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_battery_attention', 'on') }}"
-      - action: script.solar_notify
-        data:
-          tag: battery_health
-          title: Battery needs attention
-          message: >-
-            {% if trigger.id != 'off' %}{{ state_attr('sensor.site_battery_health', 'battery_health_text') }}
-            Details on the solar monitor's Battery health page.{% else %}clear{% endif %}
       - delay: "{{ '00:05:00' if trigger.id == 'start' else '00:00:00' }}"
       - condition: template
         value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_generator_service_due', 'on') }}"
