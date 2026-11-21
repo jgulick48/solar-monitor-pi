@@ -540,6 +540,11 @@ solar-cam video{width:100%;height:100%;object-fit:cover;display:block}
 .note.warn{border-left-color:var(--warn);background:#2a1d12}.note.ok{border-left-color:var(--batt)}
 #foot{color:var(--muted);font-size:.9vw;display:flex;justify-content:space-between}
 #blank{position:fixed;inset:0;background:#000;display:none;z-index:9}
+/* Burn-in protection (see the script): layouts rotate every 20 minutes and the page drifts a few pixels */
+#wrap{transition:opacity .6s,transform 2s}#wrap.fade{opacity:0}
+#wrap.swap #cams{order:2}#wrap.swap{grid-template-columns:50vw 50vw}#wrap.swap.nocam{grid-template-columns:100vw 0}
+#wrap.flip #info{flex-direction:column-reverse}#wrap.flip #top{flex-direction:row-reverse}#wrap.flip #date{text-align:left}
+#wrap.rtl #tiles{direction:rtl}#wrap.rtl #tiles .tile{direction:ltr}
 </style></head><body>
 <div id="wrap" class="nocam"><div id="cams"></div>
 <div id="info">
@@ -580,7 +585,7 @@ async function camElement(id){
 async function buildCams(cams){
   const key=JSON.stringify(cams); if(key===camsBuilt)return; camsBuilt=key;
   const box=$("cams"); box.innerHTML="";
-  $("wrap").className=cams.length?"":"nocam";
+  $("wrap").classList.toggle("nocam",!cams.length); layoutNow=null; if(typeof applyLayout==="function")applyLayout();
   box.style.gridTemplateRows=cams.length>1?"50vh 50vh":"100vh";
   const host=location.hostname;
   for(const c of cams){
@@ -633,7 +638,28 @@ async function tick(){
   $("notes").innerHTML="";for(const a of notes){const e=document.createElement("div");e.className="note "+(a.level||"");e.textContent=a.text;$("notes").appendChild(e)}
   const age=n.age; $("upd").textContent=age==null?"No inverter data":"Inverter data "+(age<90?"live":Math.round(age/60)+" min old");
 }
-tick();setInterval(tick,10000);
+// Burn-in protection. Every 20 minutes one of four layouts, picked from the clock (so a reload keeps it):
+// cameras left or right (without cameras: tiles in order or reversed) x info panel top-down or flipped.
+// Every minute the whole page moves a few pixels along a small circle. ?layout=0..3 pins a layout.
+const LAYOUT_MIN=20, pinned=new URLSearchParams(location.search).get("layout");
+let layoutNow=null;
+function applyLayout(){
+  const n=pinned!==null?(+pinned%4):Math.floor(Date.now()/60000/LAYOUT_MIN)%4;
+  const w=$("wrap"), nocam=w.classList.contains("nocam");
+  const want={swap:!nocam&&(n&1)===1, rtl:nocam&&(n&1)===1, flip:(n&2)===2};
+  const key=nocam+":"+n; if(key===layoutNow)return;
+  const first=layoutNow===null; layoutNow=key;
+  const set=()=>{for(const c in want)w.classList.toggle(c,want[c])};
+  if(first){set();return}
+  w.classList.add("fade");setTimeout(()=>{set();w.classList.remove("fade")},700);
+}
+function drift(){
+  if(pinned!==null)return;
+  const a=(Date.now()/60000)%60/60*2*Math.PI;
+  $("wrap").style.transform=`translate(${(Math.cos(a)*6).toFixed(1)}px,${(Math.sin(a)*6).toFixed(1)}px)`;
+}
+tick().then(applyLayout);setInterval(tick,10000);
+setInterval(()=>{applyLayout();drift()},60000);drift();
 setTimeout(()=>location.reload(),6*3600*1000);
 </script></body></html>"""
 

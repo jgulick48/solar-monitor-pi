@@ -60,6 +60,11 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
   whether the battery lasts until the sun is back ("Start the generator before dark: ... about 4.2 kWh more is
   needed"), from the average use over the last three days and the solar forecast: a dull day tomorrow counts too
   ("tomorrow looks dull (about 6 kWh of solar expected) ...").
+- **Burn-in protection**: every 20 minutes the layout changes (cameras on the left or the right, or without cameras
+  the tiles in order or reversed; the figures top-down or flipped, clock at the bottom), with a short fade, and every
+  minute the whole page drifts a few pixels along a small circle, so no label, border or grid line stays on the same
+  pixels for hours. `http://<pi>/display?layout=0` (to 3) shows one layout without rotating. The screen can also be
+  switched off for set hours on the setup page.
 
 ### Solar forecast
 
