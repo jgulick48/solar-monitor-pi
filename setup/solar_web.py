@@ -322,6 +322,9 @@ def apply_display(form):
          "sounds": {k: form.get(f"sound_{k}") == "1" for k, _, _ in display.SOUND_KINDS},
          "volume": max(0, min(100, int(form.get("volume") or 70) if str(form.get("volume") or "70").isdigit() else 70)),
          "sound_quiet": form.get("sound_quiet") == "1",
+         "sound_cooldown": (lambda v: v if v in dict(display.COOLDOWNS) else 60)(int(form.get("sound_cooldown")) if str(form.get("sound_cooldown", "")).isdigit() else 60),
+         "sound_gap": (lambda v: v if v in dict(display.GAPS) else 5)(int(form.get("sound_gap")) if str(form.get("sound_gap", "")).isdigit() else 5),
+         "doorbell_always": form.get("doorbell_always") == "1",
          "speak": form.get("speak") == "1",
          "speak_mode": "only" if form.get("speak_mode") == "only" else "after",
          "speak_template": (form.get("speak_template") or tts.DEFAULT_TEMPLATE).strip()[:120],
@@ -615,6 +618,10 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect
 <small>For example 22:00 until 06:00, to save power and the screen.</small>
 <p style="margin-top:16px"><b>Sounds</b> <small style="display:inline">through the screen's speakers (HDMI), when a UniFi Protect camera sees:</small></p>
 <div class="row">{''.join(f"<label><input type='checkbox' name='sound_{k}' value='1'{' checked' if (dsp.get('sounds') or {}).get(k, on) else ''}> {t}</label>" for k, t, on in display.SOUND_KINDS)}</div>
+<div class="row"><label>Repeat the same alert (same camera, same kind) at most every <select name="sound_cooldown">{''.join(f"<option value='{v}'{' selected' if dsp.get('sound_cooldown', 60) == v else ''}>{t}</option>" for v, t in display.COOLDOWNS)}</select></label>
+<label>Any two sounds at least <select name="sound_gap">{''.join(f"<option value='{v}'{' selected' if dsp.get('sound_gap', 5) == v else ''}>{t}</option>" for v, t in display.GAPS)}</select></label></div>
+<label><input type="checkbox" name="doorbell_always" value="1"{' checked' if dsp.get('doorbell_always', True) else ''}> The doorbell always rings (not held back by these limits)</label>
+<small>Limits the sounds and announcements only; the camera still comes to the front of the screen.</small>
 <div class="row"><label>Volume <input type="range" name="volume" min="0" max="100" step="5" value="{dsp.get('volume', 70)}"></label>
 <label><input type="checkbox" name="sound_quiet" value="1"{' checked' if dsp.get('sound_quiet', True) else ''}> Not during the screen-off hours</label></div>
 <p style="margin-top:16px"><b>Spoken announcements</b> <small style="display:inline">(like UniFi's Alarm Manager; Piper text-to-speech on this box)</small></p>
