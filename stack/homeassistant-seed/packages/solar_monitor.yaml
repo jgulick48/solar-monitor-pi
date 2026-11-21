@@ -143,6 +143,48 @@ rest:
         device_class: timestamp
         icon: mdi:usb-flash-drive
         json_attributes: [backup_configured, backup_message]
+      # Battery health (battery.py; the box's Battery health page has the details)
+      - name: Site battery health
+        unique_id: site_battery_health
+        # ok, note, warn or unknown
+        value_template: "{{ value_json.battery_health }}"
+        icon: mdi:battery-heart-variant
+        json_attributes: [battery_health_text, battery_spread_top_day, battery_last_full, bms_fault_code, bms_warning_code]
+      - name: Site battery cell spread when full
+        unique_id: site_battery_spread_top
+        value_template: "{{ value_json.battery_spread_top }}"
+        unit_of_measurement: mV
+        state_class: measurement
+        icon: mdi:battery-sync
+      - name: Site battery cell temperature low
+        unique_id: site_battery_temp_min
+        value_template: "{{ value_json.battery_temp_min }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+      - name: Site battery cell temperature high
+        unique_id: site_battery_temp_max
+        value_template: "{{ value_json.battery_temp_max }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+      - name: Site battery state of health
+        unique_id: site_battery_soh
+        value_template: "{{ value_json.battery_soh }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:battery-heart
+      - name: Site battery cycles
+        unique_id: site_battery_cycles
+        value_template: "{{ value_json.battery_cycles }}"
+        state_class: total_increasing
+        icon: mdi:battery-sync-outline
+      - name: Site battery capacity estimate
+        unique_id: site_battery_capacity_estimate
+        value_template: "{{ value_json.battery_capacity_estimate }}"
+        unit_of_measurement: kWh
+        device_class: energy_storage
+        state_class: measurement
       # Generator log (genlog.py): hours since the last service of the generator closest to its service
       - name: Site generator hours since service
         unique_id: site_generator_hours_since_service
@@ -180,6 +222,11 @@ rest:
         value_template: "{{ value_json.backup_overdue }}"
         device_class: problem
         icon: mdi:usb-flash-drive
+      - name: Site battery needs attention
+        unique_id: site_battery_attention
+        value_template: "{{ value_json.battery_health == 'warn' }}"
+        device_class: problem
+        icon: mdi:battery-alert-variant
       - name: Site generator running
         unique_id: site_generator_running
         value_template: "{{ value_json.generator_running }}"
@@ -397,6 +444,37 @@ automation:
             {% if trigger.id != 'off' %}The solar monitor hasn't backed up to its USB stick for 2 days
             ({{ state_attr('sensor.site_last_backup', 'backup_message') }}). Check the stick is plugged into
             the Pi.{% else %}clear{% endif %}
+
+  # Battery health: cells drifting apart, too cold or hot, low SOH, BMS fault, no full charge for 30 days.
+  - id: solar_battery_health
+    alias: "Solar: battery needs attention"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_battery_attention
+        to: "on"
+        for: "00:30:00"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_battery_attention
+        from: "on"
+        to: "off"
+        for: "00:30:00"
+        id: "off"
+      - trigger: homeassistant
+        event: start
+        id: start
+    actions:
+      - delay: "{{ '00:30:00' if trigger.id == 'start' else '00:00:00' }}"
+      - condition: template
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_battery_attention', 'on') }}"
+      - action: script.solar_notify
+        data:
+          tag: battery_health
+          title: Battery needs attention
+          message: >-
+            {% if trigger.id != 'off' %}{{ state_attr('sensor.site_battery_health', 'battery_health_text') }}
+            Details on the solar monitor's Battery health page.{% else %}clear{% endif %}
 
   # Generator service (oil change): 200 h on the inverters' GEN input, 100 h on a DC charger.
   # Mark it serviced on the box's Generator page (http://<this box>/generator).

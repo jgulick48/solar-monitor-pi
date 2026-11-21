@@ -140,6 +140,34 @@ views:
       - type: grid
         cards:
           - type: heading
+            heading: Battery health
+          - type: markdown
+            grid_options: {columns: full}
+            content: >-
+              <ha-alert alert-type="{{ {'warn': 'warning', 'note': 'info', 'ok': 'success'}.get(states('sensor.site_battery_health'), 'info') }}">
+              {{ state_attr('sensor.site_battery_health', 'battery_health_text') or 'No battery health findings yet.' }}</ha-alert>
+          - type: tile
+            entity: sensor.site_battery_spread_top
+            name: Cell spread when full
+          - type: tile
+            entity: sensor.site_battery_soh
+            name: State of health
+          - type: tile
+            entity: sensor.site_battery_temp_min
+            name: Coldest cell
+          - type: tile
+            entity: sensor.site_battery_temp_max
+            name: Warmest cell
+          - type: tile
+            entity: sensor.site_battery_cycles
+            name: Cycles
+          - type: tile
+            entity: sensor.site_battery_capacity_estimate
+            name: Capacity estimate
+
+      - type: grid
+        cards:
+          - type: heading
             heading: Last 24 hours
           - type: history-graph
             grid_options: {columns: full}
@@ -177,6 +205,8 @@ views:
                 name: Daily summary
               - entity: automation.solar_backup_overdue
                 name: Backup overdue
+              - entity: automation.solar_battery_needs_attention
+                name: Battery needs attention
               - entity: automation.solar_generator_service_due
                 name: Generator service due
               - entity: sensor.site_last_backup

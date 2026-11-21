@@ -145,6 +145,7 @@ INSTANT = {
     "gen_today": "sum(lxp_e_gen_day)",
     "online": "sum(lxp_bridge_connected)",
     "fault": "max(lxp_fault_code)",
+    "bms_fault": "max(lxp_fault_code_bms)",
     "warning": "max(lxp_warning_code)",
     "age": "time() - max(timestamp(lxp_soc))",
     "load_avg_24h": "avg_over_time((sum(lxp_p_load) or sum(lxp_p_eps))[24h:5m])",
@@ -318,6 +319,8 @@ def data(stack, site):
         alerts.append({"id": "offline", "level": "warn", "text": f"{int(vals.get('online') or 0)} of {expected} inverter dongles connected."})
     if vals.get("fault"):
         alerts.append({"id": "fault", "level": "warn", "text": f"Inverter fault code {int(vals['fault'])}."})
+    if vals.get("bms_fault"):
+        alerts.append({"id": "bms_fault", "level": "warn", "text": f"Battery (BMS) fault code {int(vals['bms_fault'])}."})
     try:
         low = float(site.get("low_soc_alert") or 25)
         if vals.get("soc") is not None and vals["soc"] <= low:
@@ -459,8 +462,17 @@ def ha_status(stack, site):
         "forecast_tomorrow": (d["forecast"] or {}).get("tomorrow"),
         **_summary_fields(stack, site),
         **backup_fields(stack),
+        **_battery_fields(stack, site),
         **genlog.ha_fields(stack, site),
     }
+
+
+def _battery_fields(stack, site):
+    import battery  # here: battery.py imports this module
+    try:
+        return battery.ha_fields(stack, site)
+    except Exception:  # noqa: BLE001 - never let the health check break the main figures
+        return battery.ha_fields_empty()
 
 
 def backup_fields(stack, now=None):

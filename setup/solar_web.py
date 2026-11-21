@@ -28,6 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import advisor  # noqa: E402
 import backup  # noqa: E402
+import battery  # noqa: E402
 import display  # noqa: E402
 import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
@@ -400,6 +401,7 @@ def status_page(handler):
 <div class="card"><b>Advisor</b>: <a href="/advisor">what would help most &mdash; batteries, panels, an inverter or an automatic generator</a>
 <br><small>{html.escape(adv_note)}</small></div>
 <div class="card"><b>Backups</b>: {backup_line()} &nbsp;<a href="/backup">change</a></div>
+{battery_card(site)}
 {generator_card(site)}
 <div class="card"><b>Remote access</b>: {remote_line()} &nbsp;<a href="/setup#remote">change</a></div>
 <div class="card"><b>Screen</b>: {display_line} <a href="/display">preview</a> &nbsp;<a href="/setup#screen">change</a></div>
@@ -527,6 +529,55 @@ def run_quietly(cmd):
 
 def _when(ts):
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)) if ts else "never"
+
+
+LEVEL_WORD = {"ok": "good", "note": "worth a look", "warn": "<b>needs attention</b>", "unknown": "no data yet"}
+
+
+def battery_card(site):
+    try:
+        b = battery.status(STACK, site)
+    except Exception:  # noqa: BLE001
+        return ""
+    bits = [f"cells {b['spread_top_mv']} mV apart when full" if b["spread_top_mv"] is not None else None,
+            f"SOH {b['soh']:.0f}%" if b["soh"] is not None else None,
+            f"{b['cycles']:.0f} cycles" if b["cycles"] is not None else None]
+    return (f"<div class='card{' warn' if b['level'] == 'warn' else ''}'><b>Battery health</b>: {LEVEL_WORD[b['level']]}"
+            f"{(': ' + ', '.join(x for x in bits if x)) if any(bits) else ''} &nbsp;<a href='/battery'>details</a></div>")
+
+
+def battery_page(site):
+    b = battery.status(STACK, site)
+    def f(v, fmt, unit=""):
+        return "?" if v is None else (fmt.format(v) + unit)
+    finds = "".join(f"<li{' style=\"color:var(--warn)\"' if lvl == 'warn' else ''}>{'<b>' if lvl == 'warn' else ''}{html.escape(t)}"
+                    f"{'</b>' if lvl == 'warn' else ''}</li>" for lvl, t in b["findings"]) or "<li>Nothing to report.</li>"
+    days = "".join(f"<tr><td>{d}</td><td>{'' if v is None else str(v) + ' mV'}</td></tr>"
+                   for d, v in sorted(b["spread_days"].items(), reverse=True))
+    full = (time.strftime("%a %b %-d %H:%M", time.localtime(b["last_full"])) if b["last_full"] else
+            "not in the last 60 days" if not b["history_start"] or time.time() - b["history_start"] > 59 * 86400 else
+            "not since the history starts (" + time.strftime("%b %-d", time.localtime(b["history_start"])) + ")")
+    cap = (f"{b['capacity_kwh']} kWh (from {b['capacity_samples']} long discharge(s))" if b["capacity_kwh"] else
+           "not yet: needs a discharge of 30% or more without charging")
+    body = f"""<h1>Battery health</h1>
+<div class="card{' warn' if b['level'] == 'warn' else ''}"><b>Overall</b>: {LEVEL_WORD[b['level']]}<ul>{finds}</ul></div>
+<table>
+<tr><td>Cells now</td><td>{f(b['min_cell_v'], '{:.3f}', ' V')} to {f(b['max_cell_v'], '{:.3f}', ' V')} ({f(b['spread_now_mv'], '{}', ' mV')} apart; only meaningful near full)</td></tr>
+<tr><td>Spread when last full</td><td>{f(b['spread_top_mv'], '{}', ' mV')} {('(' + b['spread_top_day'] + ')') if b['spread_top_day'] else ''}; good under 50, watch 50-100, over 100 drifting</td></tr>
+<tr><td>Last full charge</td><td>{full}</td></tr>
+<tr><td>Cell temperatures</td><td>{f(b['temp_min'], '{:.0f}', ' °C')} to {f(b['temp_max'], '{:.0f}', ' °C')} now; {f(b['temp_min_24h'], '{:.0f}')} to {f(b['temp_max_24h'], '{:.0f}', ' °C')} in the last 24 hours</td></tr>
+<tr><td>State of health</td><td>{f(b['soh'], '{:.0f}', '%')} (lowest the BMS reports)</td></tr>
+<tr><td>Cycles</td><td>{f(b['cycles'], '{:.0f}')}</td></tr>
+<tr><td>Capacity estimate</td><td>{cap}; {f(b['nameplate_kwh'], '{}', ' kWh')} entered on the setup page</td></tr>
+<tr><td>BMS fault / warning</td><td>{f(b['bms_fault'], '{:.0f}')} / {f(b['bms_warning'], '{:.0f}')}</td></tr>
+</table>
+<h2>Cell spread when full, per day</h2><table><tr><th>Day</th><th>Spread at 98% or more</th></tr>{days}</table>
+<p><small>LiFePO4 cells all sit near 3.3 V for most of the charge, so a weak or unbalanced cell only shows near full,
+where the BMS balances them. The capacity estimate is the energy taken out per 1% of charge on long discharges, times 100:
+it follows the BMS's own charge count, so it checks the BMS against the size entered on the setup page rather than
+measuring the cells. The figures are for the whole bank (the highest and lowest cells of all batteries).</small></p>
+<p><a href="/">Back</a></p>"""
+    return page("Battery health", body)
 
 
 def _hm(ts):
@@ -775,6 +826,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(display.ha_status(STACK, load_site())), "application/json")
         elif self.path == "/backup":
             self.send(200, backup_page())
+        elif self.path == "/battery":
+            self.send(200, battery_page(load_site()))
         elif self.path == "/generator":
             self.send(200, generator_page(load_site()))
         elif self.path == "/setup":
