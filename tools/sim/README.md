@@ -40,3 +40,13 @@ per inverter on a macvlan network.
 Answers the Ecowitt discovery broadcast (UDP 46000) and serves `/get_livedata_info` on port 80 with solar radiation
 and outdoor temperature following the sun. Settings: `IP` (the address it announces), `MAC`, `NAME`, `LAT`, `LON`.
 `http://<ip>/?clouds=0.6` sets the cloud cover.
+
+## protectsim.py: a UniFi Protect console
+
+The Integration API parts the box uses, over HTTPS with a self-signed certificate: the camera list, RTSPS stream links
+(POST creates one) and the `subscribe/events` WebSocket, all behind `X-API-Key`. Control page (plain HTTP):
+`/?cam=cam2&kind=ring` fires an event (`person, vehicle, animal, package, motion, ring`), ending after `&seconds=20`.
+The stream links point at `--rtsp-host`, so the pictures stay black unless something serves RTSPS there.
+
+    openssl req -x509 -newkey rsa:2048 -nodes -days 30 -subj /CN=protect -keyout key.pem -out cert.pem
+    python3 protectsim.py --cert cert.pem --certkey key.pem --key test-api-key --cameras "Driveway,Front door:doorbell,Back yard"

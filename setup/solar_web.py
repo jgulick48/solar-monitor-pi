@@ -31,6 +31,7 @@ import backup  # noqa: E402
 import boxhealth  # noqa: E402
 import battery  # noqa: E402
 import display  # noqa: E402
+import protect  # noqa: E402
 import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import support  # noqa: E402
@@ -293,10 +294,13 @@ def apply_display(form):
     d = {"enabled": form.get("display_enabled") == "1",
          "off_from": display.parse_hhmm(form.get("display_off_from")),
          "off_to": display.parse_hhmm(form.get("display_off_to")), "cameras": []}
+    # UniFi Protect's cameras are set in their own section (protect.py); the fields here are the manual ones
+    keep = [c for c in cur["cameras"] if c.get("protect_id")]
+    manual = [c for c in cur["cameras"] if not c.get("protect_id")]
     for i in range(1, display.MAX_CAMERAS + 1):
         name = form.get(f"cam{i}_name", "").strip()[:30]
         url = form.get(f"cam{i}_url", "").strip()
-        old = cur["cameras"][i - 1] if len(cur["cameras"]) >= i else None
+        old = manual[i - 1] if len(manual) >= i else None
         if form.get(f"cam{i}_remove") == "1":
             continue
         if not url and old:
@@ -304,6 +308,7 @@ def apply_display(form):
         if url:
             display.go2rtc_source(url)  # validates
             d["cameras"].append({"name": name or f"Camera {i}", "url": url})
+    d["cameras"] = (keep + d["cameras"])[:display.MAX_CAMERAS]
     def run(cmd):
         try:
             return subprocess.run(cmd, capture_output=True, text=True)
@@ -439,7 +444,7 @@ Scanning takes up to two minutes. Give each dongle a fixed IP (DHCP reservation)
     return page("Solar monitor", body)
 
 
-def setup_page(site, error="", done=None, remote_msg="", support_msg=""):
+def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect_msg=""):
     upd = update_settings()
     def inp(name, value, typ="text", extra=""):
         return f"<input name='{name}' type='{typ}' value='{html.escape(str(value))}' {extra}>"
@@ -474,8 +479,9 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg=""):
                         + (f"Last data received {html.escape(wth['last_push'])}." if wth.get("last_push") else "Nothing received yet."))
     dsp = display.load(STACK)
     cams = ""
-    for i in range(1, display.MAX_CAMERAS + 1):
-        c = dsp["cameras"][i - 1] if len(dsp["cameras"]) >= i else {}
+    manual = [c for c in dsp["cameras"] if not c.get("protect_id")]
+    for i in range(1, min(len(manual) + 1, display.MAX_CAMERAS - (len(dsp["cameras"]) - len(manual))) + 1):
+        c = manual[i - 1] if len(manual) >= i else {}
         saved = (f"<small>Saved: <code>{html.escape(mask_url(c['url']))}</code>. Leave the link empty to keep it. "
                  f"<label style='display:inline'><input type='checkbox' name='cam{i}_remove' value='1' style='width:auto'> remove</label></small>") if c else ""
         cams += (f"<div class='row'><label>Camera {i} name {inp(f'cam{i}_name', c.get('name', ''), 'text', 'placeholder=' + chr(39) + ('Driveway' if i == 1 else 'Front door') + chr(39))}</label>"
@@ -487,16 +493,19 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg=""):
 <div class="row"><label>Screen off from (optional) {inp('display_off_from', dsp['off_from'], 'time')}</label>
 <label>Screen on again at {inp('display_off_to', dsp['off_to'], 'time')}</label></div>
 <small>For example 22:00 until 06:00, to save power and the screen.</small>
-<p><small>Up to two cameras are shown next to the power figures. UniFi Protect: open the camera &rarr; Settings &rarr; Advanced &rarr;
+<p><small>Two cameras at a time are shown next to the power figures, taking turns every 15 seconds. To add one by its stream link instead, in UniFi Protect: open the camera &rarr; Settings &rarr; Advanced &rarr;
 RTSPS, turn on <b>Medium</b> quality and copy its link (<code>rtsps://...:7441/...</code>). The camera pictures are only shown on the
 box's own screen, not to other computers on the network.</small></p>{cams}
-<p><small>Camera entities, motion and doorbell events in Home Assistant: add the UniFi Protect integration there (Settings &rarr;
+<p><small>UniFi Protect cameras can be picked from a list instead (and come to the front when they see someone):
+<a href="#protect">UniFi Protect cameras</a> below. Camera entities, motion and doorbell events in Home Assistant: add the UniFi Protect integration there (Settings &rarr;
 Devices &amp; services; it's usually found automatically) with a local Protect user.</small></p></fieldset>"""
     msg = f"<p class='err'>{html.escape(error)}</p>" if error else ""
     if done:
         msg = "<div class='card'>Saved: " + html.escape("; ".join(done)) + ". <a href='/'>Back to the start page</a></div>"
     if remote_msg:
         msg = f"<div class='card'>Remote access: {html.escape(remote_msg)} <a href='#remote'>details</a></div>"
+    if protect_msg:
+        msg = f"<div class='card'>UniFi Protect: {html.escape(protect_msg)} <a href='#protect'>details</a></div>"
     if support_msg:
         msg = f"<div class='card'>Remote support: {html.escape(support_msg)} <a href='#support'>details</a></div>"
     body = f"""<h1>Site setup</h1>{msg}
@@ -543,9 +552,45 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
 <option value="main"{' selected' if upd['channel'] == 'main' else ''}>Every change on main (test boxes)</option></select></label></fieldset>
 <p><button>Save</button> &nbsp;<a href="/">Cancel</a></p></form>
 <p><small>Saving restarts Home Assistant (about a minute) when the location, time zone or sizes changed.</small></p>
+{protect_section(protect_msg)}
 {remote_section(remote_msg)}
 {support_section(support_msg)}"""
     return page("Site setup", body)
+
+
+def protect_section(msg=""):
+    """UniFi Protect cameras (protect.py): console address and API key, then which cameras the screen shows."""
+    d = protect.settings(STACK)
+    note = f"<div class='card'>{html.escape(msg)}</div>" if msg else ""
+    saved = "<small>An API key is saved; leave the field empty to keep it.</small>" if d["api_key"] else ""
+    cams_html = ""
+    if d["host"] and d["api_key"]:
+        try:
+            cams = protect.list_cameras(d["host"], d["api_key"])
+            picked = {c["id"] for c in d["cameras"]}
+            rows = "".join(
+                f"<label><input type='checkbox' name='cam_{html.escape(c['id'])}' value='1' style='width:auto'"
+                f"{' checked' if c['id'] in picked else ''}> {html.escape(c['name'])}"
+                f"<small> {'doorbell, ' if c['doorbell'] else ''}{html.escape(', '.join(c['smart']) or 'motion only')}"
+                f"{'' if c['state'] in ('', 'CONNECTED') else ', ' + html.escape(c['state'].lower())}</small></label>" for c in cams)
+            ev = ("events connected" if protect.EVENTS.connected else
+                  ("events not connected yet" + (f": {html.escape(protect.EVENTS.error)}" if protect.EVENTS.error else "")))
+            cams_html = f"""<form method="post" action="/protect/cameras"><fieldset><legend>Cameras on the screen ({ev})</legend>
+{rows or '<p>No cameras on this console.</p>'}
+<label><input type="checkbox" name="highlight_motion" value="1" style="width:auto"{' checked' if d['highlight_motion'] else ''}>
+ Also bring cameras to the front for plain motion (not only people, vehicles, animals, packages and the doorbell)</label>
+<p><button>Save cameras</button></p></fieldset></form>
+<form method="post" action="/protect/forget"><p><button>Forget this console</button></p></form>"""
+        except protect.ProtectError as e:
+            cams_html = f"<p class='err'>{html.escape(str(e))}</p>"
+    return f"""<h2 id="protect">UniFi Protect cameras (optional)</h2>{note}
+<form method="post" action="/protect/connect"><fieldset><legend>UniFi Protect console</legend>
+<p><small>Lists the cameras so you can pick them (their stream links are filled in for you), and brings a camera to the
+front of the screen when it sees a person, vehicle, animal or package, or the doorbell rings. Make an API key on the console:
+UniFi OS &rarr; Settings &rarr; Control Plane &rarr; Integrations &rarr; Create API Key.</small></p>
+<div class="row"><label>Console address {f"<input name='protect_host' value='{html.escape(d['host'])}' placeholder='192.168.1.1'>"}</label>
+<label>API key <input name="protect_key" type="password" autocomplete="off"></label></div>{saved}
+<p><button>Save and connect</button></p></fieldset></form>{cams_html}"""
 
 
 def run_quietly(cmd):
@@ -940,6 +985,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, advisor_page())
         elif url.path == "/display":  # ?layout=N pins a layout (burn-in protection, see display.py)
             self.send(200, display.PAGE)
+        elif self.path == "/display/events":
+            self.send(200, json.dumps(display.events(STACK)), "application/json")
         elif self.path == "/display/data":
             self.send(200, json.dumps(display.data(STACK, load_site())), "application/json")
         elif self.path == "/api/ha":
@@ -1042,6 +1089,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/tunnel/off":
             msgs = tunnel.disable(STACK, remove=self.form().get("remove") == "1") + apply_core_change()
             self.send(200, setup_page(load_site(), remote_msg="; ".join(msgs) + "."))
+        elif self.path in ("/protect/connect", "/protect/cameras", "/protect/forget"):
+            self.send(200, setup_page(load_site(), protect_msg=self.protect_post(self.path, self.form())))
         elif self.path == "/display/restart":
             run_quietly(["systemctl", "reset-failed", "solar-display.service"])
             run_quietly(["systemctl", "restart", "--no-block", "solar-display.service"])
@@ -1097,6 +1146,35 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send(404, "not found", "text/plain")
 
+    def protect_post(self, action, f):
+        d = protect.settings(STACK)
+        try:
+            if action == "/protect/connect":
+                host = protect.clean_host(f.get("protect_host"))
+                key = f.get("protect_key", "").strip() or (d["api_key"] if host == d["host"] else "")
+                if not key:
+                    return "the API key is needed"
+                cams = protect.list_cameras(host, key)
+                protect.save(STACK, {**d, "host": host, "api_key": key})
+                return f"connected: {len(cams)} camera(s). Tick the ones for the screen."
+            if action == "/protect/forget":
+                changed = protect.apply_cameras(STACK, [], [])
+                protect.save(STACK, dict(protect.DEFAULTS))
+                msgs = ["forgotten"]
+            else:
+                cams = protect.list_cameras(d["host"], d["api_key"])
+                picked = [c["id"] for c in cams if f.get(f"cam_{c['id']}") == "1"]
+                protect.save(STACK, {**protect.settings(STACK), "highlight_motion": f.get("highlight_motion") == "1"})
+                changed = protect.apply_cameras(STACK, picked, cams)
+                msgs = [f"{len(picked)} camera(s) on the screen"]
+        except (ValueError, protect.ProtectError) as e:
+            return f"not saved: {e}"
+        if changed:
+            r = run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", "go2rtc"])
+            msgs.append("cameras updated" if r.returncode == 0 else f"camera service restart failed: {r.stderr.strip()[-200:]}")
+        protect.listen(STACK)
+        return "; ".join(msgs) + "."
+
     def weather_push(self, q, kind):
         try:
             solar = float(q["solarradiation"]) if q.get("solarradiation") not in (None, "") else None
@@ -1118,6 +1196,7 @@ def main():
     ap.add_argument("--port", type=int, default=80)
     args = ap.parse_args()
     STACK = args.stack
+    protect.listen(STACK)          # UniFi Protect events for the wall display, if set up
     ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
 
 

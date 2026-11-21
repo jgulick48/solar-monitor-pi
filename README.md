@@ -88,7 +88,19 @@ via `wlr-randr`). The same page is at `http://<pi>/display` from other computers
 
 ### Cameras (UniFi Protect)
 
-Setup page, *Screen and cameras*: name each camera and paste its stream link. In UniFi Protect: open the camera
+Up to 16 cameras; two are on screen at a time and they take turns every 15 seconds (only the two on screen are
+played, so more cameras don't load the Pi).
+
+**From UniFi Protect** (setup page, *UniFi Protect cameras*): enter the console's address and an API key (UniFi OS
+-> Settings -> Control Plane -> Integrations -> Create API Key), tick the cameras for the screen and save. The box
+fills in their stream links itself (Protect's Integration API; it creates a *medium* stream where there is none) and
+keeps a connection to Protect's event stream: when a camera sees a **person, vehicle, animal or package** it comes to
+the front of the screen with an amber frame and a label, and a **doorbell ring** with a red one, until a minute after
+the event ends. Plain motion does the same only if *Also bring cameras to the front for plain motion* is ticked. The
+key is kept in `state/protect.json` (mode 600); the console's self-signed certificate isn't checked.
+
+**By stream link** (any RTSP/RTSPS H.264 camera, no events): setup page, *Screen and cameras*: name each camera and
+paste its stream link. In UniFi Protect: open the camera
 -> Settings -> Advanced -> RTSPS, turn on **Medium** quality (720p: sharp enough for a 960x540 tile and light on
 the Pi; the Pi 4 decodes H.264 in hardware) and copy the `rtsps://<console>:7441/<token>?enableSrtp` link.
 `go2rtc` reads the streams (RTSPS without checking Protect's self-signed certificate) and serves them to the
