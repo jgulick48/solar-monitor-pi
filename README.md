@@ -17,6 +17,7 @@ read, never changed.
 | Home Assistant | Inverter entities (MQTT discovery), the Solar dashboard, alerts to phones | `http://<pi>:8123` |
 | Advisor | Weekly analysis: batteries, panels, inverter or generator? | `http://<pi>/advisor` |
 | Backups | Nightly backup to a USB stick, and restore | `http://<pi>/backup` |
+| Battery health | Cell spread near full, temperatures, SOH, cycles, capacity check, BMS faults | `http://<pi>/battery` |
 | Wall display | Dashboard and up to two cameras on a screen plugged into the Pi's HDMI port | `http://<pi>/display` |
 | go2rtc | Turns the cameras' RTSP(S) streams into video the display's browser can play | localhost only |
 
@@ -129,6 +130,27 @@ days.
 restic runs in a container (`backup` service in `stack/compose.yaml`, profile `backup`), so boxes updated from older
 versions download it on the first backup.
 
+## Battery health
+
+The **Battery health** page (`http://<pi>/battery`) looks at the whole battery bank as the inverters hear it from the BMS
+(with several inverters, the highest and lowest cells of any of them):
+
+| Check | Good | Worth a look | Needs attention |
+|---|---|---|---|
+| Cell spread at 98% or more (per day, last 14 days) | under 50 mV | 50-100 mV | over 100 mV |
+| Days since a full charge (bounded by the history) | under 14 | 14-30 | over 30 |
+| Cell temperature (now and 24 h) | | | 0 °C or below, 45 °C or above |
+| State of health (BMS) | | | under 80% |
+| BMS fault / warning code (now and 24 h) | 0 | warning | fault |
+| Capacity estimate vs the size on the setup page | | under 80% or over 125% | |
+
+LiFePO4 cells sit near 3.3 V for most of the charge, so imbalance only shows near full, which is also where the BMS
+balances them. The capacity estimate is the energy taken out per 1% of charge on discharges of 30% or more, times 100: it
+follows the BMS's own charge counter, so it checks the BMS and the setup page's battery size rather than the cells
+themselves. Home Assistant gets the figures as sensors (*Site battery health*, *cell spread when full*, *state of health*,
+*cycles*, *cell temperature low/high*, *capacity estimate*), a *Battery needs attention* alert, and a Battery health
+section on the Solar dashboard. A BMS fault also shows on the wall display.
+
 ## Advisor
 
 The start page's **Advisor** answers "what would help this system most?" from the site's own history. It
@@ -221,6 +243,7 @@ Home Assistant, Grafana and the rest.
   `dashboards/solar.yaml` are kept current by `solar_setup.py` on every run, which also fills in the Energy
   dashboard once.
 - `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it.
+- `setup/battery.py` is the battery health check (computed on request from VictoriaMetrics, cached).
 - `setup/display.py` is the wall display (page, data, settings, go2rtc config, screen schedule);
   `setup/kiosk.sh` starts Chromium; `system/` has the kiosk PAM session and the HDMI hotplug rule.
 - `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the
