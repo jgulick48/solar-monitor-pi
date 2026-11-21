@@ -602,6 +602,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, display.PAGE)
         elif self.path == "/display/data":
             self.send(200, json.dumps(display.data(STACK, load_site())), "application/json")
+        elif self.path == "/api/ha":
+            self.send(200, json.dumps(display.ha_status(STACK, load_site())), "application/json")
         elif self.path == "/setup":
             self.send(200, setup_page(load_site()))
         elif self.path == "/api/status":

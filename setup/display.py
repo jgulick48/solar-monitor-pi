@@ -137,6 +137,9 @@ INSTANT = {
     "gen": "sum(lxp_p_gen)",
     "pv_today": "sum(lxp_e_pv_day)",
     "used_today": "sum(lxp_e_load_day) or sum(lxp_e_eps_day)",
+    "charged_today": "sum(lxp_e_chg_day)",
+    "discharged_today": "sum(lxp_e_dischg_day)",
+    "gen_today": "sum(lxp_e_gen_day)",
     "online": "sum(lxp_bridge_connected)",
     "fault": "max(lxp_fault_code)",
     "warning": "max(lxp_warning_code)",
@@ -232,15 +235,15 @@ def data(stack, site):
     alerts = []
     expected = len(ss.load_json(os.path.join(stack, "state", "inverters.json"), {}))
     if vals.get("age") is None or vals["age"] > 300:
-        alerts.append({"level": "warn", "text": "No inverter data for over 5 minutes: check the dongles' network."})
+        alerts.append({"id": "stale", "level": "warn", "text": "No inverter data for over 5 minutes: check the dongles' network."})
     elif expected and (vals.get("online") or 0) < expected:
-        alerts.append({"level": "warn", "text": f"{int(vals.get('online') or 0)} of {expected} inverter dongles connected."})
+        alerts.append({"id": "offline", "level": "warn", "text": f"{int(vals.get('online') or 0)} of {expected} inverter dongles connected."})
     if vals.get("fault"):
-        alerts.append({"level": "warn", "text": f"Inverter fault code {int(vals['fault'])}."})
+        alerts.append({"id": "fault", "level": "warn", "text": f"Inverter fault code {int(vals['fault'])}."})
     try:
         low = float(site.get("low_soc_alert") or 25)
         if vals.get("soc") is not None and vals["soc"] <= low:
-            alerts.append({"level": "warn", "text": f"Battery low: {vals['soc']:.0f}%."})
+            alerts.append({"id": "low_battery", "level": "warn", "text": f"Battery low: {vals['soc']:.0f}%."})
     except ValueError:
         pass
     advice = generator_advice(site, vals, now, tz) if site.get("generator") == "manual" else None
@@ -255,6 +258,48 @@ def data(stack, site):
         "screen_off": screen_off_now(d, now.replace(tzinfo=None)),
         "rev": int(os.path.getmtime(settings_path(stack))) if os.path.exists(settings_path(stack)) else 0,
         "time": now.strftime("%H:%M"), "date": now.strftime("%a %b %-d"),
+        "expected": expected,
+    }
+
+
+def _r(v, n=0):
+    return None if v is None else round(v, n) if n else int(round(v))
+
+
+def ha_status(stack, site):
+    """Site totals and alerts for Home Assistant (/api/ha; packages/solar_monitor.yaml reads it).
+    The same figures and alerts as the wall display, so the two never disagree."""
+    d = data(stack, site)
+    v, kwh = d["now"], d["battery_kwh"]
+    try:
+        floor = float(site.get("low_soc_alert") or 25)
+    except ValueError:
+        floor = 25.0
+    soc, load_w = v.get("soc"), v.get("load_avg_3d") or v.get("load_avg_24h")
+    stored = None if soc is None or kwh is None else soc / 100 * kwh
+    runtime = None
+    if stored is not None and load_w and load_w > 0:
+        runtime = max(0.0, (soc - floor) / 100 * kwh) / (load_w / 1000)
+    ids = {a["id"] for a in d["alerts"]}
+    adv = d["advice"] or {}
+    return {
+        "battery_level": _r(soc), "solar_power": _r(v.get("pv")), "house_load": _r(v.get("load")),
+        "battery_power": _r(v.get("battery")), "generator_power": _r(v.get("gen")),
+        "solar_today": _r(v.get("pv_today"), 2), "used_today": _r(v.get("used_today"), 2),
+        "charged_today": _r(v.get("charged_today"), 2), "discharged_today": _r(v.get("discharged_today"), 2),
+        "generator_today": _r(v.get("gen_today"), 2),
+        "battery_stored": _r(stored, 1), "battery_capacity": kwh, "battery_runtime": _r(runtime, 1),
+        "usual_load": _r(load_w), "low_battery_level": floor,
+        "dongles_connected": _r(v.get("online")), "dongles_expected": d["expected"],
+        "fault_code": _r(v.get("fault")) or 0, "warning_code": _r(v.get("warning")) or 0,
+        "data_age": _r(v.get("age")),
+        "data_stale": "stale" in ids, "dongle_offline": "offline" in ids, "inverter_fault": "fault" in ids,
+        "battery_low": "low_battery" in ids,
+        "alerts": [a["text"] for a in d["alerts"]],
+        "generator_mode": site.get("generator") or "none",
+        "advice": adv.get("level") or "none", "advice_text": adv.get("text") or "",
+        "advice_need_kwh": adv.get("need_kwh"), "advice_empty_at": adv.get("empty_at"), "sunset": adv.get("sunset"),
+        "generator_needed": adv.get("level") == "warn",
     }
 
 

@@ -14,7 +14,7 @@ read, never changed.
 | Mosquitto | MQTT broker between the bridge and Home Assistant | localhost only |
 | VictoriaMetrics | Long-term history (5 years) of every inverter value | localhost only |
 | Grafana | Dashboards, viewable without logging in | `http://<pi>:3000` |
-| Home Assistant | Inverter entities (MQTT discovery), dashboards, alerts | `http://<pi>:8123` |
+| Home Assistant | Inverter entities (MQTT discovery), the Solar dashboard, alerts to phones | `http://<pi>:8123` |
 | Advisor | Weekly analysis: batteries, panels, inverter or generator? | `http://<pi>/advisor` |
 | Wall display | Dashboard and up to two cameras on a screen plugged into the Pi's HDMI port | `http://<pi>/display` |
 | go2rtc | Turns the cameras' RTSP(S) streams into video the display's browser can play | localhost only |
@@ -72,6 +72,26 @@ the link is effectively a password). Any camera with an RTSP/RTSPS H.264 stream 
 
 For camera entities, motion and doorbell events in Home Assistant, add the **UniFi Protect** integration in
 Home Assistant (Settings -> Devices & services; it's usually discovered automatically) with a local Protect user.
+
+## Home Assistant: Solar dashboard and alerts
+
+![Solar dashboard in Home Assistant (live data, fresh install)](docs/ha-dashboard.png)
+
+Home Assistant comes with a **Solar** dashboard in the sidebar and alerts, from `packages/solar_monitor.yaml`:
+
+- **Site sensors** (`sensor.site_*`, `binary_sensor.site_*`): battery level, stored kWh and how long it lasts at the
+  usual use, solar, house, battery and generator power, today's energy, dongles connected, fault code, alerts and the
+  generator advice. They come from the box's `/api/ha`, the same totals and alerts as the wall display, added up over
+  all inverters, so they don't depend on the inverters' own entity names.
+- **Alerts**: battery low (5 min), inverter fault, dongle offline (10 min), no data (10 min) and, for a hand-started
+  generator, *start the generator* (mid-afternoon, again 30 minutes before sunset if it hasn't been started; cleared
+  when it runs). Each one shows in Home Assistant's notifications and on every phone signed in with the **Home
+  Assistant app** (the alert is withdrawn from the phone once it clears). They can be switched off on the dashboard.
+- **Energy dashboard**: solar and battery are filled in on the first start; changes made in Home Assistant are kept.
+  The generator isn't in it (Home Assistant has no off-grid generator source).
+
+The package and the dashboard are replaced on every update (and Home Assistant restarted when they change), so edit
+copies, not the originals: make your own dashboard in Settings -> Dashboards and your own automations.
 
 ## Advisor
 
@@ -161,6 +181,9 @@ Home Assistant, Grafana and the rest.
 - `setup/weather.py` finds and reads weather stations; `setup/collector.py` (`solar-collector.service`)
   stores station and Open-Meteo sunlight in VictoriaMetrics; `setup/advisor.py` (`solar-advisor.timer`)
   is the advisor.
+- `stack/homeassistant-seed/` is Home Assistant's first-run config; its `packages/solar_monitor.yaml` and
+  `dashboards/solar.yaml` are kept current by `solar_setup.py` on every run, which also fills in the Energy
+  dashboard once.
 - `setup/display.py` is the wall display (page, data, settings, go2rtc config, screen schedule);
   `setup/kiosk.sh` starts Chromium; `system/` has the kiosk PAM session and the HDMI hotplug rule.
 - `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the
@@ -186,14 +209,19 @@ python3 setup/solar_web.py --stack "$PWD/stack" --port 8088
 Tested on an amd64 Docker host against an EG4 18kPV dongle: discovery, bridge, broker, VictoriaMetrics,
 Grafana, Home Assistant (185 inverter entities by MQTT discovery) and the setup form all work.
 
+Solar dashboard and alerts: tested in Home Assistant 2026.11.2 against the 18kPV's live data: the package loads, all
+22 site entities and the 6 automations come up, the dashboard and Energy dashboard render, and the generator alert
+was raised and withdrawn.
+
 Wall display: tested with Google Chrome at 1920x1080 against test data and two go2rtc H.264 test streams
 (`python3 -m unittest discover -s tests`). The kiosk itself (cage + Chromium on the Pi, hardware video decoding,
 screen off hours) needs a real Pi and screen.
 
 To do:
 - First boot of the image on a real Raspberry Pi 4, with a screen and the UniFi Protect cameras.
-- Home Assistant dashboards and alerts (low battery, inverter faults, dongle offline), the solar forecast,
-  and the "start the generator before dark" check for sites with a manual generator.
+- The solar forecast (tomorrow's production) on the display, in Home Assistant and in the generator advice.
+- Alerts on a phone: tested in Home Assistant's own notifications; the push through the Home Assistant app still
+  needs a real phone.
 - EG4 6000XP: confirm the bridge's register map against a real 6000XP.
 - lxp-bridge-go: in read-only mode, 18 settings entities are announced as sensors with
   `entity_category: config`, which Home Assistant rejects (should be `diagnostic`).

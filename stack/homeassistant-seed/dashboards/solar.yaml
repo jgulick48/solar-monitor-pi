@@ -1,0 +1,156 @@
+# The Solar dashboard. Ships with the solar monitor and is replaced on every update.
+# To make your own, create a new dashboard in Settings -> Dashboards and copy cards from this file.
+title: Solar
+views:
+  - title: Solar
+    path: solar
+    icon: mdi:solar-power-variant
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Now
+          - type: markdown
+            grid_options: {columns: full}
+            content: >-
+              {% for a in state_attr('sensor.site_alerts', 'alerts') or [] %}
+              <ha-alert alert-type="warning">{{ a }}</ha-alert>
+              {% endfor %}
+            visibility:
+              - condition: numeric_state
+                entity: sensor.site_alerts
+                above: 0
+          - type: markdown
+            grid_options: {columns: full}
+            content: >-
+              <ha-alert alert-type="{{ 'warning' if is_state('sensor.site_generator_advice', 'warn') else 'success' }}">
+              {{ state_attr('sensor.site_generator_advice', 'advice_text') }}</ha-alert>
+            visibility:
+              - condition: state
+                entity: sensor.site_generator_advice
+                state_not: none
+              - condition: state
+                entity: sensor.site_generator_advice
+                state_not: info
+          - type: gauge
+            entity: sensor.site_battery_level
+            name: Battery
+            grid_options: {columns: full}
+            min: 0
+            max: 100
+            needle: false
+            severity: {green: 50, yellow: 25, red: 0}
+          - type: tile
+            entity: sensor.site_battery_stored
+            name: Stored
+          - type: tile
+            entity: sensor.site_battery_runtime
+            name: Lasts about
+          - type: tile
+            entity: sensor.site_solar_power
+            name: Solar
+            color: amber
+          - type: tile
+            entity: sensor.site_house_load
+            name: House
+            color: blue
+          - type: tile
+            entity: sensor.site_battery_power
+            name: Battery (+ charging)
+            color: green
+          - type: tile
+            entity: sensor.site_generator_power
+            name: Generator
+            color: purple
+            visibility:
+              - condition: state
+                entity: sensor.site_generator_advice
+                attribute: generator_mode
+                state_not: none
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Today
+          - type: tile
+            entity: sensor.site_solar_today
+            name: Solar made
+            color: amber
+          - type: tile
+            entity: sensor.site_used_today
+            name: House used
+            color: blue
+          - type: tile
+            entity: sensor.site_battery_charged_today
+            name: Charged
+            color: green
+          - type: tile
+            entity: sensor.site_battery_discharged_today
+            name: Discharged
+            color: green
+          - type: tile
+            entity: sensor.site_generator_today
+            name: Generator
+            color: purple
+          - type: tile
+            entity: sensor.site_dongles_connected
+            name: Dongles
+          - type: heading
+            heading: Last 14 days
+          - type: statistics-graph
+            grid_options: {columns: full}
+            chart_type: bar
+            period: day
+            days_to_show: 14
+            stat_types: [change]
+            entities:
+              - entity: sensor.site_solar_today
+                name: Solar
+              - entity: sensor.site_used_today
+                name: House
+              - entity: sensor.site_generator_today
+                name: Generator
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Last 24 hours
+          - type: history-graph
+            grid_options: {columns: full}
+            hours_to_show: 24
+            entities:
+              - entity: sensor.site_solar_power
+                name: Solar
+              - entity: sensor.site_house_load
+                name: House
+              - entity: sensor.site_generator_power
+                name: Generator
+          - type: history-graph
+            grid_options: {columns: full}
+            hours_to_show: 24
+            entities:
+              - entity: sensor.site_battery_level
+                name: Battery
+          - type: heading
+            heading: Alerts
+          - type: entities
+            grid_options: {columns: full}
+            show_header_toggle: false
+            entities:
+              - entity: automation.solar_battery_low
+                name: Battery low
+              - entity: automation.solar_inverter_fault
+                name: Inverter fault
+              - entity: automation.solar_dongle_offline
+                name: Dongle offline
+              - entity: automation.solar_no_data
+                name: No data
+              - entity: automation.solar_start_the_generator
+                name: Start the generator
+          - type: markdown
+            grid_options: {columns: full}
+            content: >-
+              Alerts show up in Home Assistant's notifications and on every phone with the
+              Home Assistant app signed in to this box. Switch one off here to stop it.
