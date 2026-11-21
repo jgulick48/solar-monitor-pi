@@ -42,7 +42,7 @@ import solar_setup as ss  # noqa: E402
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
 DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": []}
-MAX_CAMERAS = 2
+MAX_CAMERAS = 16   # all of them rotate through the two places on screen
 KIOSK_USER = "solar-display"
 
 
@@ -95,6 +95,19 @@ def save(stack, d):
         lines[-1] = "streams: {}"
     os.makedirs(os.path.join(stack, "go2rtc"), exist_ok=True)
     return ss.write_if_changed(os.path.join(stack, "go2rtc", "go2rtc.yaml"), "\n".join(lines) + "\n", 0o600)
+
+
+def events(stack):
+    """Cameras with a detection now (UniFi Protect), keyed by the display's camera ids (cam1...)."""
+    import protect
+    protect.listen(stack)                 # (re)starts the event listener if the settings changed
+    d = load(stack)
+    active = protect.EVENTS.active(protect.settings(stack).get("highlight_motion", False))
+    out = {}
+    for i, c in enumerate(d["cameras"], 1):
+        if c.get("protect_id") in active:
+            out[f"cam{i}"] = active[c["protect_id"]]
+    return {"active": out, "connected": protect.EVENTS.connected}
 
 
 def screen_off_now(d, now=None):
@@ -525,6 +538,10 @@ font-family:system-ui,"DejaVu Sans",sans-serif;overflow:hidden;cursor:none}
 solar-cam{display:block;width:100%;height:100%;background:#000}
 solar-cam video{width:100%;height:100%;object-fit:cover;display:block}
 .cam .lbl{position:absolute;z-index:2;left:14px;top:10px;font-size:calc(var(--u)*1.5);font-weight:600;text-shadow:0 1px 4px #000}
+.cam{transition:box-shadow .3s}.cam.hot{box-shadow:inset 0 0 0 calc(var(--u)*.35) var(--warn)}
+.cam.ring{box-shadow:inset 0 0 0 calc(var(--u)*.5) var(--bad)}
+.cam .badge{position:absolute;z-index:2;right:14px;top:10px;font-size:calc(var(--u)*1.4);font-weight:700;color:#000;
+background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot .badge{display:block}.cam.ring .badge{background:var(--bad);color:#fff}
 .cam .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:calc(var(--u)*1.4)}
 #info{display:flex;flex-direction:column;padding:calc(var(--u)*1.6) calc(var(--u)*1.8);gap:calc(var(--u)*1.1);min-width:0;height:100vh;overflow:hidden}
 #top{display:flex;justify-content:space-between;align-items:baseline}
@@ -580,7 +597,7 @@ solar-cam video{width:100%;height:100%;object-fit:cover;display:block}
 </div></div><div id="blank"></div>
 <script>
 const $=id=>document.getElementById(id);
-let rev=null, camsBuilt="";
+let rev=null;
 function kw(w){if(w==null)return"--";const a=Math.abs(w);return a>=1000?(w/1000).toFixed(a>=10000?0:1)+" kW":Math.round(w)+" W"}
 function setTile(id,v,s,color){const t=$(id);t.querySelector(".v").textContent=v;t.querySelector(".s").textContent=s||"";if(color)t.querySelector(".v").style.color=color}
 // Cameras: go2rtc's player (video-rtc.js) without controls, over MSE. go2rtc only listens on
@@ -597,23 +614,57 @@ async function camElement(id){
   el.src=`ws://127.0.0.1:1984/api/ws?src=${encodeURIComponent(id)}`;
   return el;
 }
+// Cameras: up to two on screen at a time, rotating every 15 s through all of them. A camera with a
+// detection (UniFi Protect events, /display/events) comes to the front with a coloured frame and a label
+// and stays there until a minute after the last event; a doorbell ring wins. Only cameras on screen play.
+const ROTATE_S=15;
+let camList=[], camKey="", rot=0, lastRot=0, events={}, slots=[];
 async function buildCams(cams){
-  const key=JSON.stringify(cams); if(key===camsBuilt)return; camsBuilt=key;
-  const box=$("cams"); box.innerHTML="";
+  const key=JSON.stringify(cams); if(key===camKey)return; camKey=key; camList=cams;
+  const box=$("cams"); for(const s of slots)dropPlayer(s); box.innerHTML=""; slots=[];
   $("wrap").classList.toggle("nocam",!cams.length); layoutNow=null; if(typeof applyLayout==="function")applyLayout();
-  box.style.gridTemplateRows=cams.length>1?"50vh 50vh":"100vh";
-  const host=location.hostname;
-  for(const c of cams){
+  const n=Math.min(2,cams.length);
+  box.style.gridTemplateRows=n>1?"50vh 50vh":"100vh";
+  for(let i=0;i<n;i++){
     const d=document.createElement("div"); d.className="cam";
-    const local=host==="127.0.0.1"||host==="localhost";
-    const m=document.createElement("div");m.className="msg";d.appendChild(m);
-    if(local){try{d.appendChild(await camElement(c.id))}
-      catch(e){m.textContent="Camera service not running";camsBuilt="";}}
-    else m.textContent="Cameras show on the box's own screen";
-    const l=document.createElement("div");l.className="lbl";l.textContent=c.name;d.appendChild(l);
-    box.insertBefore(d,null);
+    d.innerHTML='<div class="msg"></div><div class="lbl"></div><div class="badge"></div>';
+    box.appendChild(d); slots.push({el:d,cam:null,player:null});
+  }
+  showCams();
+}
+function dropPlayer(s){ if(s.player){ try{s.player.ondisconnect()}catch(e){} s.player.remove(); s.player=null; } }
+function pickCams(){
+  const n=slots.length; if(!n)return[];
+  const hot=camList.filter(c=>events[c.id]).sort((a,b)=>(events[b.id].level-events[a.id].level)||(events[b.id].since-events[a.id].since));
+  const chosen=hot.slice(0,n);
+  const rest=camList.filter(c=>!chosen.includes(c));
+  for(let i=0;chosen.length<n&&i<rest.length;i++)chosen.push(rest[(rot+i)%rest.length]);
+  return chosen;
+}
+async function showCams(){
+  const want=pickCams(), local=location.hostname==="127.0.0.1"||location.hostname==="localhost";
+  for(let i=0;i<slots.length;i++){
+    const s=slots[i], c=want[i]; if(!c)continue;
+    const ev=events[c.id];
+    s.el.classList.toggle("hot",!!ev); s.el.classList.toggle("ring",!!ev&&ev.level>=3);
+    s.el.querySelector(".badge").textContent=ev?ev.label:"";
+    s.el.querySelector(".lbl").textContent=c.name;
+    if(s.cam===c.id)continue;
+    dropPlayer(s); s.cam=c.id; const m=s.el.querySelector(".msg"); m.textContent="";
+    if(!local){m.textContent="Cameras show on the box's own screen";continue}
+    try{ s.player=await camElement(c.id); s.el.insertBefore(s.player,s.el.firstChild); }
+    catch(e){ m.textContent="Camera service not running"; }
   }
 }
+async function pollEvents(){
+  if(!camList.length)return;
+  try{ const r=await fetch("/display/events",{cache:"no-store"}); const d=await r.json();
+    const before=JSON.stringify(events); events=d.active||{};
+    if(JSON.stringify(events)!==before)showCams();
+  }catch(e){}
+}
+setInterval(pollEvents,1500);
+setInterval(()=>{ if(camList.length>slots.length&&!camList.some(c=>events[c.id])){rot=(rot+slots.length)%camList.length;showCams();} },ROTATE_S*1000);
 function line(pts,t0,t1,max,color,w){if(!pts.length||!max)return"";
   const d=pts.map((p,i)=>(i?"L":"M")+((p[0]-t0)/(t1-t0)*1000).toFixed(1)+","+(290-p[1]/max*270).toFixed(1)).join("");
   return `<path d="${d}" fill="none" stroke="${color}" stroke-width="${w}" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`}
