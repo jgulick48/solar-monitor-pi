@@ -66,7 +66,7 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
   side gets the cameras on top and the figures below. The setup page shows the screen found and the mode used.
 - **Clock**: 12-hour (4:41 PM) or 24-hour, set on the setup page (by default 12-hour with US units); the same format is
   used in the generator advice and the daily summary.
-- **Sounds**: short chimes through the screen's speakers (HDMI) when a UniFi Protect camera sees something: doorbell
+- **Sounds**: short chimes through the screen's speakers (HDMI) when a UniFi Protect camera sees something (a car horn for vehicles): doorbell
   ring and person by default, vehicle, animal and package optional, with a volume and *not during the screen-off
   hours*. *Play a test sound* on the setup page checks it. The kiosk points its sound at the HDMI port the screen is
   on (`~solar-display/.asoundrc`, Pi 4: HDMI-A-1 = vc4hdmi0); the screen or TV needs speakers.

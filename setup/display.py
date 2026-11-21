@@ -676,13 +676,25 @@ async function showCams(){
 }
 // Sounds through the screen's speakers (HDMI): short chimes made with Web Audio, so there are no sound files.
 // A camera's event plays once, when it starts; doorbell rings and people by default (setup page).
-const CHIMES={doorbell:[[659,0,1.3],[523,.5,1.6]],person:[[784,0,.5],[1047,.17,.7]],vehicle:[[392,0,.45],[392,.28,.6]],
+const CHIMES={doorbell:[[659,0,1.3],[523,.5,1.6]],person:[[784,0,.5],[1047,.17,.7]],vehicle:"horn",
   animal:[[880,0,.6]],package:[[988,0,.35],[1175,.14,.35],[1319,.28,.6]]};
 let actx=null, played={}, lastTest=null, soundCfg={sounds:{},volume:70,quiet:true,off:false};
+// A car horn: two square waves a major third apart (about 400 and 500 Hz, slightly detuned, like a real
+// two-trumpet horn) through a low-pass filter, "beep-beep".
+function horn(vol,t){
+  const f=actx.createBiquadFilter(); f.type="lowpass"; f.frequency.value=1800; f.Q.value=.7; f.connect(actx.destination);
+  for(const [at,dur] of [[0,.22],[.32,.45]]){
+    const g=actx.createGain(); g.connect(f);
+    g.gain.setValueAtTime(0,t+at); g.gain.linearRampToValueAtTime(vol*.5,t+at+.015);
+    g.gain.setValueAtTime(vol*.5,t+at+dur-.03); g.gain.linearRampToValueAtTime(0,t+at+dur);
+    for(const hz of [404,508]){ const o=actx.createOscillator(); o.type="square"; o.frequency.value=hz; o.connect(g); o.start(t+at); o.stop(t+at+dur+.02); }
+  }
+}
 function chime(kind){
   const notes=CHIMES[kind]; if(!notes)return;
   try{ actx=actx||new AudioContext(); if(actx.state==="suspended")actx.resume(); }catch(e){return}
   const vol=Math.max(0,Math.min(1,(soundCfg.volume||0)/100))*.6, t=actx.currentTime+.05;
+  if(notes==="horn")return horn(vol,t);
   for(const [f,at,dur] of notes){
     const o=actx.createOscillator(), g=actx.createGain(); o.type="sine"; o.frequency.value=f;
     g.gain.setValueAtTime(0,t+at); g.gain.linearRampToValueAtTime(vol,t+at+.02); g.gain.exponentialRampToValueAtTime(.0001,t+at+dur);

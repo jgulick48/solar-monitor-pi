@@ -114,7 +114,7 @@ class Screen(unittest.TestCase):
             self.assertIn("CARD=vc4hdmi0", open(os.path.join(home, ".asoundrc")).read())
 
     def test_page_has_chimes(self):
-        for needle in ("CHIMES={doorbell", "new AudioContext()", "d.test_sound", "soundCfg.quiet&&soundCfg.off"):
+        for needle in ("CHIMES={doorbell", "vehicle:\"horn\"", "function horn(", "new AudioContext()", "d.test_sound", "soundCfg.quiet&&soundCfg.off"):
             self.assertIn(needle, display.PAGE)
 
     def test_page_uses_the_scale_unit(self):
