@@ -689,9 +689,20 @@ const CHIMES={doorbell:[[659,0,1.3],[523,.5,1.6]],person:[[784,0,.5],[1047,.17,.
   animal:[[880,0,.6]],package:[[988,0,.35],[1175,.14,.35],[1319,.28,.6]]};
 let actx=null, played={}, lastTest=null, lastSpeak=null, soundCfg={sounds:{},volume:70,quiet:true,off:false,speak:false,mode:"after"};
 // Spoken announcement (Piper on the box, /display/say): after the chime has rung out, or instead of it.
-function say(url, afterKind){
-  const wait=soundCfg.mode==="only"||!afterKind?0:(afterKind==="doorbell"?2100:900);
-  setTimeout(()=>{ const a=new Audio(url); a.volume=Math.max(0,Math.min(1,(soundCfg.volume||0)/100)); a.play().catch(()=>{}); },wait);
+// Played through the same Web Audio context as the chimes: the Pi's HDMI sound device takes one stream at a
+// time (no mixing), and once a chime has played Chromium keeps it open, so a separate <audio> element was
+// silently dropped (heard on the test Pi: dings, no speech).
+async function say(url, afterKind){
+  const wait=soundCfg.mode==="only"||!afterKind?0:(afterKind==="doorbell"?2.1:.9);
+  try{
+    actx=actx||new AudioContext(); if(actx.state==="suspended")await actx.resume();
+    const r=await fetch(url,{cache:"force-cache"}); if(!r.ok)return;
+    const buf=await actx.decodeAudioData(await r.arrayBuffer());
+    const src=actx.createBufferSource(), g=actx.createGain();
+    g.gain.value=Math.max(0,Math.min(1,(soundCfg.volume||0)/100));
+    src.buffer=buf; src.connect(g).connect(actx.destination);
+    src.start(Math.max(actx.currentTime,(window.__chimeAt||0)+wait));
+  }catch(e){}
 }
 // A car horn: two square waves a major third apart (about 400 and 500 Hz, slightly detuned, like a real
 // two-trumpet horn) through a low-pass filter, "beep-beep".
@@ -708,6 +719,7 @@ function chime(kind){
   const notes=CHIMES[kind]; if(!notes)return;
   try{ actx=actx||new AudioContext(); if(actx.state==="suspended")actx.resume(); }catch(e){return}
   const vol=Math.max(0,Math.min(1,(soundCfg.volume||0)/100))*.6, t=actx.currentTime+.05;
+  window.__chimeAt=t;
   if(notes==="horn")return horn(vol,t);
   for(const [f,at,dur] of notes){
     const o=actx.createOscillator(), g=actx.createGain(); o.type="sine"; o.frequency.value=f;
