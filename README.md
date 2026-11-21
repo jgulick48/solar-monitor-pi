@@ -68,7 +68,9 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
   used in the generator advice and the daily summary.
 - **Sounds**: short chimes through the screen's speakers (HDMI) when a UniFi Protect camera sees something (a car horn for vehicles): doorbell
   ring and person by default, vehicle, animal and package optional, with a volume and *not during the screen-off
-  hours*. *Play a test sound* on the setup page checks it. The kiosk points its sound at the HDMI port the screen is
+  hours*. *Play a test sound* on the setup page checks it. Repeats are limited: the same alert (same camera, same
+  kind) at most once a minute by default, any two sounds at least 5 seconds apart, and the doorbell always rings
+  (all adjustable); the camera still comes to the front of the screen. The kiosk points its sound at the HDMI port the screen is
   on (`~solar-display/.asoundrc`, Pi 4: HDMI-A-1 = vc4hdmi0); the screen or TV needs speakers.
 - **Spoken announcements** (optional, like UniFi's Alarm Manager): after the chime, or instead of it, Piper says what a
   camera saw, "Person at the Front door" / "Someone's at the Front door" (wording editable, `{object}` and `{camera}`),

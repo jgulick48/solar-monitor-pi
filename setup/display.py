@@ -41,11 +41,17 @@ import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
+COOLDOWNS = [(0, "every time"), (30, "30 seconds"), (60, "1 minute"), (120, "2 minutes"), (300, "5 minutes"), (600, "10 minutes"),
+             (1800, "30 minutes")]
+GAPS = [(0, "no limit"), (5, "5 seconds"), (10, "10 seconds"), (30, "30 seconds"), (60, "1 minute")]
 SOUND_KINDS = [("doorbell", "Doorbell", True), ("person", "Person", True), ("vehicle", "Vehicle", False),
                ("animal", "Animal", False), ("package", "Package", False)]
 DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
             "sounds": {k: on for k, _, on in SOUND_KINDS}, "volume": 70, "sound_quiet": True,
             # spoken announcements (tts.py): off by default; "after" the chime, or "only" speech
+            # how often sounds may play: the same alert (camera + kind) is repeated at most every sound_cooldown s,
+            # and two sounds are at least sound_gap s apart; doorbell rings always (the highlight isn't limited)
+            "sound_cooldown": 60, "sound_gap": 5, "doorbell_always": True,
             "speak": False, "speak_mode": "after", "speak_template": "{object} at the {camera}",
             "speak_doorbell": "Someone's at the {camera}", "voice": "en_US-lessac-medium"}
 MAX_CAMERAS = 16   # all of them rotate through the two places on screen
@@ -376,6 +382,8 @@ def data(stack, site):
         "time": hm(now, site), "date": now.strftime("%a %b %-d"),
         "sounds": d.get("sounds") or {}, "volume": d.get("volume", 70), "sound_quiet": d.get("sound_quiet", True),
         "speak": d.get("speak", False), "speak_mode": d.get("speak_mode", "after"),
+        "sound_cooldown": d.get("sound_cooldown", 60), "sound_gap": d.get("sound_gap", 5),
+        "doorbell_always": d.get("doorbell_always", True),
         "expected": expected, "forecast": forecast_summary(fc, now, tz),
     }
 
@@ -687,7 +695,8 @@ async function showCams(){
 // A camera's event plays once, when it starts; doorbell rings and people by default (setup page).
 const CHIMES={doorbell:[[659,0,1.3],[523,.5,1.6]],person:[[784,0,.5],[1047,.17,.7]],vehicle:"horn",
   animal:[[880,0,.6]],package:[[988,0,.35],[1175,.14,.35],[1319,.28,.6]]};
-let actx=null, played={}, lastTest=null, lastSpeak=null, soundCfg={sounds:{},volume:70,quiet:true,off:false,speak:false,mode:"after"};
+let lastSoundCam={}, lastSound=0;
+let actx=null, played={}, lastTest=null, lastSpeak=null, soundCfg={sounds:{},volume:70,quiet:true,off:false,speak:false,mode:"after",cooldown:60,gap:5,doorbellAlways:true};
 // Spoken announcement (Piper on the box, /display/say): after the chime has rung out, or instead of it.
 // Played through the same Web Audio context as the chimes: the Pi's HDMI sound device takes one stream at a
 // time (no mixing), and once a chime has played Chromium keeps it open, so a separate <audio> element was
@@ -738,6 +747,11 @@ async function pollEvents(){
     for(const [cam,ev] of Object.entries(d.active||{})){
       const key=cam+"@"+ev.since; if(played[key])continue; played[key]=1;
       const kind=soundFor(ev); if(!kind)continue;
+      // rate limit (setup page): same camera / any camera; a doorbell ring always gets through if so set
+      const nowS=Date.now()/1000, ring=kind==="doorbell"&&soundCfg.doorbellAlways;
+      const rep=cam+"|"+kind;     // a repeat = the same alert: same camera, same kind
+      if(!ring&&(nowS-(lastSoundCam[rep]||0)<soundCfg.cooldown||nowS-lastSound<soundCfg.gap))continue;
+      lastSoundCam[rep]=nowS; lastSound=nowS;
       if(!(soundCfg.speak&&soundCfg.mode==="only"))chime(kind);
       if(soundCfg.speak)say("/display/say?cam="+encodeURIComponent(cam)+"&label="+encodeURIComponent(ev.label),kind);
     }
@@ -761,7 +775,8 @@ async function tick(){
   let d;try{const r=await fetch("/display/data",{cache:"no-store"});d=await r.json()}catch(e){$("upd").textContent="Waiting for the monitor...";return}
   if(rev!==null&&d.rev!==rev){location.reload();return} rev=d.rev;
   $("blank").style.display=d.screen_off?"block":"none";
-  soundCfg={sounds:d.sounds||{},volume:d.volume,quiet:d.sound_quiet,off:!!d.screen_off,speak:!!d.speak,mode:d.speak_mode||"after"};
+  soundCfg={sounds:d.sounds||{},volume:d.volume,quiet:d.sound_quiet,off:!!d.screen_off,speak:!!d.speak,mode:d.speak_mode||"after",
+    cooldown:+(d.sound_cooldown??60),gap:+(d.sound_gap??5),doorbellAlways:d.doorbell_always!==false};
   $("name").textContent=d.name;$("clock").textContent=d.time;$("date").textContent=d.date;
   buildCams(d.cameras);
   const n=d.now||{};

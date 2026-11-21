@@ -118,6 +118,11 @@ class Screen(unittest.TestCase):
                        "actx.decodeAudioData", "createBufferSource"):
             self.assertIn(needle, display.PAGE)
 
+    def test_sound_rate_limit(self):
+        self.assertIn('const rep=cam+"|"+kind;', display.PAGE)
+        self.assertEqual(display.DEFAULTS["sound_cooldown"], 60)
+        self.assertTrue(display.DEFAULTS["doorbell_always"])
+
     def test_speech_uses_web_audio_not_an_audio_element(self):
         self.assertNotIn("new Audio(", display.PAGE)        # one output stream: the HDMI device doesn't mix
 
