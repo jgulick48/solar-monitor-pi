@@ -421,7 +421,12 @@ Home Assistant, Grafana and the rest.
 - `stack/homeassistant-seed/` is Home Assistant's first-run config; its `packages/solar_monitor.yaml` and
   `dashboards/solar.yaml` are kept current by `solar_setup.py` on every run, which also fills in the Energy
   dashboard once.
-- `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it.
+- `setup/modules/` holds the optional features, one package each with a `MODULE = Module(...)` manifest: its
+  settings (`state/modules/<id>.json`, moved over from the old file on the first run after an update), its pages,
+  start-page card and Home Assistant fields. The core in `setup/modules/__init__.py` calls only the enabled ones.
+  Backups are the first; the other optional features move there one release at a time.
+- `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it; `setup/modules/backup/`
+  is its page and settings.
 - `setup/support.py` turns remote support on and off (tunnel, SSH key, sudo, SSH) and switches it off when its time is up.
 - `setup/battery.py` is the battery health check (computed on request from VictoriaMetrics, cached).
 

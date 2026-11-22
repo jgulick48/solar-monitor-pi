@@ -15,7 +15,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "setup"))
 import backup  # noqa: E402
-import display  # noqa: E402
+import modules  # noqa: E402
+from modules import backup as backup_module  # noqa: E402
 
 # A Pi booted from a USB SSD (sda, root on sda2) with a USB stick (sdb) and an SD card reader.
 LSBLK = {"blockdevices": [
@@ -47,15 +48,15 @@ class Backup(unittest.TestCase):
         stack = tempfile.mkdtemp()
         os.makedirs(os.path.join(stack, "state"))
         now = time.time()
-        self.assertEqual(display.backup_fields(stack, now)["backup_configured"], False)
+        self.assertEqual(backup_module.ha_fields(stack, None, now)["backup_configured"], False)
         backup.save_settings(stack, {"uuid": "62A1-77F0", "history": True})
-        self.assertFalse(display.backup_fields(stack, now)["backup_overdue"])            # just chosen
-        self.assertTrue(display.backup_fields(stack, now + 3 * 86400)["backup_overdue"])  # never worked since
+        self.assertFalse(backup_module.ha_fields(stack, None, now)["backup_overdue"])            # just chosen
+        self.assertTrue(backup_module.ha_fields(stack, None, now + 3 * 86400)["backup_overdue"])  # never worked since
         backup.record(stack, result="ok", last_ok=int(now))
-        f = display.backup_fields(stack, now + 86400)
+        f = backup_module.ha_fields(stack, None, now + 86400)
         self.assertFalse(f["backup_overdue"])
         self.assertTrue(f["backup_last_ok"].endswith("+00:00"))
-        self.assertTrue(display.backup_fields(stack, now + 2.5 * 86400)["backup_overdue"])
+        self.assertTrue(backup_module.ha_fields(stack, None, now + 2.5 * 86400)["backup_overdue"])
 
     def test_page_and_settings(self):
         os.environ["SOLAR_COMPOSE"] = "true"
@@ -78,7 +79,9 @@ class Backup(unittest.TestCase):
         e.exception.close()
         page = post("/backup/settings", {"uuid": "62A1-77F0", "history": "1"}).read().decode()
         self.assertIn("Restore from the stick", page)
-        self.assertEqual(backup.settings(stack), {"uuid": "62A1-77F0", "history": True})
+        cfg = backup.settings(stack)
+        self.assertEqual((cfg["uuid"], cfg["history"]), ("62A1-77F0", True))
+        self.assertTrue(os.path.exists(modules.path(stack, "backup")))
         with self.assertRaises(urllib.error.HTTPError) as e:
             post("/backup/restore", {}).read()                     # needs the confirmation tick
         e.exception.close()

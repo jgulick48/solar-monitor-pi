@@ -649,11 +649,16 @@ def ha_status(stack, site):
         "battery_high_at": (d.get("battery_high") or {}).get("at"),
         "battery_full_at": (d.get("battery_high") or {}).get("full_at"),
         **_summary_fields(stack, site),
-        **backup_fields(stack),
+        **_module_fields(stack, site),
         **_battery_fields(stack, site),
         **genlog.ha_fields(stack, site),
         **_box_fields(stack),
     }
+
+
+def _module_fields(stack, site):
+    import modules  # here: the modules' fields (backup, ...) only for /api/ha
+    return modules.ha_fields(stack, site)
 
 
 def _box_fields(stack):
@@ -667,21 +672,6 @@ def _battery_fields(stack, site):
         return battery.ha_fields(stack, site)
     except Exception:  # noqa: BLE001 - never let the health check break the main figures
         return battery.ha_fields_empty()
-
-
-def backup_fields(stack, now=None):
-    """Backup state for HA: overdue once a chosen stick has had no good backup for 2 days."""
-    now = now or time.time()
-    cfg = ss.load_json(os.path.join(stack, "state", "backup.json"), {})
-    st = ss.load_json(os.path.join(stack, "state", "backup-status.json"), {})
-    last = st.get("last_ok")
-    since = last or (os.path.getmtime(os.path.join(stack, "state", "backup.json")) if cfg.get("uuid") else None)
-    return {
-        "backup_configured": bool(cfg.get("uuid")),
-        "backup_last_ok": dt.datetime.fromtimestamp(last, dt.timezone.utc).isoformat() if last else None,
-        "backup_overdue": bool(cfg.get("uuid")) and since is not None and now - since > 2 * 86400,
-        "backup_message": st.get("message") or "",
-    }
 
 
 def _summary_fields(stack, site):
