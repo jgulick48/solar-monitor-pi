@@ -88,16 +88,18 @@ class TTS(unittest.TestCase):
         self.assertEqual(tts.status(port=unused)["ok"], False)                # nobody listening: not running
 
     def test_profile_and_voice_in_env(self):
+        import modules
         import solar_setup as ss
         with tempfile.TemporaryDirectory() as stack:
             os.makedirs(os.path.join(stack, "state"))
-            self.assertNotIn("tts", ss.env_profiles(stack))
+            self.assertNotIn("tts", ss.env_profiles(stack))                    # voice is off on a new box
+        with tempfile.TemporaryDirectory() as stack:                           # a box that had speech on (display.json)
+            os.makedirs(os.path.join(stack, "state"))
             json.dump({"speak": True, "voice": "en_US-ryan-medium"}, open(os.path.join(stack, "state", "display.json"), "w"))
             self.assertIn("tts", ss.env_profiles(stack))
             self.assertEqual(ss.env_extra(stack), ["TTS_VOICE=en_US-ryan-medium"])
-            json.dump({"speak": True, "voice": "x; rm -rf /"}, open(os.path.join(stack, "state", "display.json"), "w"))
+            modules.save(stack, "voice", {"voice": "x; rm -rf /", "mode": "after"})
             self.assertEqual(ss.env_extra(stack), [])
-
 
 if __name__ == "__main__":
     unittest.main()
@@ -139,8 +141,15 @@ class Progress(unittest.TestCase):
             self.assertEqual(got, [(1, 3), (2, 3), (3, 3)])
 
     def test_bar_html(self):
-        import solar_web
-        h = solar_web.speech_progress_html({"active": True, "step": "Downloading the voice", "pct": 42, "detail": "26 MB of about 63 MB", "error": ""})
-        self.assertIn("<progress max='100' value='42'", h)
-        self.assertIn("/speech/progress", h)
-        self.assertIn("stopped: no network", solar_web.speech_progress_html({"active": False, "error": "no network", "step": "", "pct": None, "detail": ""}))
+        from modules import voice
+        saved = dict(tts.PROGRESS)
+        try:
+            tts.PROGRESS.update({"active": True, "step": "Downloading the voice", "pct": 42, "detail": "26 MB of about 63 MB", "error": ""})
+            h = voice.status_html("/nonexistent")
+            self.assertIn("<progress max='100' value='42'", h)
+            self.assertIn("/speech/progress", h)
+            tts.PROGRESS.update({"active": False, "error": "no network", "step": "", "pct": None, "detail": ""})
+            self.assertIn("stopped: no network", voice.status_html("/nonexistent"))
+        finally:
+            tts.PROGRESS.clear()
+            tts.PROGRESS.update(saved)

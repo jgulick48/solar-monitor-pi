@@ -36,6 +36,8 @@ class Response:
     body: str = ""
     location: Optional[str] = None      # set: a 303 redirect there
     setup_msg: Optional[str] = None     # set: the setup page, with this message in the module's section
+    done: Optional[list] = None         # set: the setup page with these as "Saved: ..." (like the main Save)
+    ctype: Optional[str] = None         # set: body is sent as it is (JSON, text), with this Content-Type
 
 
 @dataclasses.dataclass(frozen=True)
@@ -50,6 +52,7 @@ class Module:
     version: int = 1
     migrate: Optional[Callable] = None  # (stack, old settings or None, old version) -> settings
     on_disable: Optional[Callable] = None  # (stack): stop whatever it runs before it's turned off
+    on_enable: Optional[Callable] = None   # (stack): start what it runs once it's turned on
     ha_fields: Optional[Callable] = None  # (stack, site) -> {"<id>_...": value} for /api/ha
     ha_core: Optional[Callable] = None  # (stack) -> {key: value} added to Home Assistant's core.yaml
     nav: Optional[tuple] = None         # (href, label, page title): a page linked in the web pages' header
@@ -65,6 +68,8 @@ class Module:
     every: dict = dataclasses.field(default_factory=dict)   # seconds -> fn(stack) (a list of messages to log, or anything), in the collector;
     #                                       or (fn, retry seconds) to try again sooner after a failure
     compose_profiles: Optional[Callable] = None  # (stack) -> Compose profiles (optional services) to run now
+    env: Optional[Callable] = None      # (stack) -> ["NAME=value", ...] for the stack's .env (its services' settings)
+    display_events: Optional[Callable] = None  # (stack) -> fields added to the wall display's fast poll (/display/events)
 
 
 def log(*a):
@@ -137,11 +142,19 @@ def save(stack, module_id, values):
 
 
 def set_enabled(stack, module_id, on):
+    """Turn a module on or off: stop what it runs first (on_disable), update .env (its services), then start what
+    it runs (on_enable)."""
     cur = load(stack, module_id)
     m = get(module_id)
-    if cur["enabled"] and not on and m.on_disable:
+    if cur["enabled"] == bool(on):
+        return
+    if not on and m.on_disable:
         m.on_disable(stack)
     _write(stack, module_id, {**cur, "enabled": bool(on)})
+    if m.compose_profiles or m.env:
+        ss.write_env(stack, ss.ensure_secrets(stack))
+    if on and m.on_enable:
+        m.on_enable(stack)
 
 
 def _write(stack, module_id, d):
@@ -250,6 +263,20 @@ def compose_profiles(stack):
     out = []
     for _, profiles in _each(stack, "compose_profiles"):
         out += [p for p in profiles if p not in out]
+    return out
+
+
+def env_lines(stack):
+    out = []
+    for _, lines in _each(stack, "env"):
+        out += [ln for ln in lines if ln not in out]
+    return out
+
+
+def display_events(stack):
+    out = {}
+    for _, d in _each(stack, "display_events"):
+        out.update(d)
     return out
 
 

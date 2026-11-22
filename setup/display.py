@@ -50,12 +50,11 @@ SOUND_KINDS = [("doorbell", "Doorbell", True), ("person", "Person", True), ("veh
                ("animal", "Animal", False), ("package", "Package", False)]
 DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
             "sounds": {k: on for k, _, on in SOUND_KINDS}, "volume": 70, "sound_quiet": True,
-            # spoken announcements (tts.py): off by default; "after" the chime, or "only" speech
+            # what voice announcements (the voice module) say for a camera event
             # how often sounds may play: the same alert (camera + kind) is repeated at most every sound_cooldown s,
             # and two sounds are at least sound_gap s apart; doorbell rings always (the highlight isn't limited)
             "sound_cooldown": 60, "sound_gap": 5, "doorbell_always": True,
-            "speak": False, "speak_mode": "after", "speak_template": "{object} at the {camera}",
-            "speak_doorbell": "Someone's at the {camera}", "voice": "en_US-lessac-medium"}
+            "speak_template": "{object} at the {camera}", "speak_doorbell": "Someone's at the {camera}"}
 MAX_CAMERAS = 16   # all of them rotate through the two places on screen
 KIOSK_USER = "solar-display"
 
@@ -124,8 +123,9 @@ def events(stack):
             out[f"cam{i}"] = active[c["protect_id"]]
     sp.note_events(d, out, {f"cam{i}": c.get("name") or f"Camera {i}" for i, c in enumerate(d["cameras"], 1)})
     on, why = sp.wanted(d)
+    import modules  # e.g. the voice module's announcements ("say")
     return {"active": out, "connected": protect.EVENTS.connected, "test_sound": TEST_SOUND["at"],
-            "test_speak": TEST_SOUND.get("speak", 0), "screen_on": on, "screen_why": why, "quiet_hours": quiet_hours(d)}
+            "screen_on": on, "screen_why": why, "quiet_hours": quiet_hours(d), "say": [], **modules.display_events(stack)}
 
 
 def quiet_hours(d, now=None):
@@ -140,7 +140,7 @@ def power_state(stack):
     return {"on": ev["screen_on"], "why": ev["screen_why"], "cec": bool(load(stack).get("cec", True))}
 
 
-TEST_SOUND = {"at": 0, "speak": 0}   # the setup page's test buttons: the screen plays a chime / an announcement when these change
+TEST_SOUND = {"at": 0}   # the setup page's test button: the screen plays a chime when this changes
 
 
 def stream_codec(cam_id, secs=6, base="http://127.0.0.1:1984"):
@@ -469,7 +469,7 @@ def data(stack, site):
                    _modules_rev(stack)),
         "time": hm(now, site), "date": now.strftime("%a %b %-d"),
         "sounds": d.get("sounds") or {}, "volume": d.get("volume", 70), "sound_quiet": d.get("sound_quiet", True),
-        "speak": d.get("speak", False), "speak_mode": d.get("speak_mode", "after"),
+        "speak": False, "speak_mode": "after",           # the voice module (when it's on)
         "sound_cooldown": d.get("sound_cooldown", 60), "sound_gap": d.get("sound_gap", 5),
         "doorbell_always": d.get("doorbell_always", True),
         "expected": expected, "forecast": forecast_summary(fc, now, tz), "battery_high": high,
@@ -869,7 +869,7 @@ async function showCams(){
 const CHIMES={doorbell:[[659,0,1.3],[523,.5,1.6]],person:[[784,0,.5],[1047,.17,.7]],vehicle:"horn",
   animal:[[880,0,.6]],package:[[988,0,.35],[1175,.14,.35],[1319,.28,.6]]};
 let lastSoundCam={}, lastSound=0;
-let actx=null, played={}, lastTest=null, lastSpeak=null, soundCfg={sounds:{},volume:70,quiet:true,off:false,speak:false,mode:"after",cooldown:60,gap:5,doorbellAlways:true};
+let actx=null, played={}, lastTest=null, lastSay=null, soundCfg={sounds:{},volume:70,quiet:true,off:false,speak:false,mode:"after",cooldown:60,gap:5,doorbellAlways:true};
 // Spoken announcement (Piper on the box, /display/say): after the chime has rung out, or instead of it.
 // Played through the same Web Audio context as the chimes: the Pi's HDMI sound device takes one stream at a
 // time (no mixing), and once a chime has played Chromium keeps it open, so a separate <audio> element was
@@ -919,7 +919,13 @@ async function pollEvents(){
     if("screen_on" in d){ $("blank").style.display=d.screen_on?"none":"block"; soundCfg.off=!!d.quiet_hours;
       if(screenDark!==!d.screen_on){ screenDark=!d.screen_on; showCams(); } }
     if(lastTest===null)lastTest=d.test_sound; else if(d.test_sound!==lastTest){lastTest=d.test_sound; chime("doorbell");}
-    if(lastSpeak===null)lastSpeak=d.test_speak; else if(d.test_speak!==lastSpeak){lastSpeak=d.test_speak; say("/display/say?test=1",null);}
+    // announcements from the voice module (a test, or another feature's alert): new ones only, not during quiet hours
+    const q=d.say||[];
+    if(lastSay===null)lastSay=Math.max(0,...q.map(a=>a.id));
+    for(const a of q){ if(a.id<=lastSay)continue; lastSay=a.id;
+      if(!soundCfg.speak||(soundCfg.quiet&&soundCfg.off))continue;
+      if(a.chime&&soundCfg.mode!=="only")chime(a.chime);
+      say("/display/say?id="+a.id,a.chime&&soundCfg.mode!=="only"?a.chime:null); }
     for(const [cam,ev] of Object.entries(d.active||{})){
       const key=cam+"@"+ev.since; if(played[key])continue; played[key]=1;
       const kind=soundFor(ev); if(!kind)continue;
