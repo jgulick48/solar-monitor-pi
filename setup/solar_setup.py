@@ -223,6 +223,36 @@ GEN_ENERGY_DAY = ("((sum(lxp_e_gen_day * (max_over_time(lxp_v_gen[1d]) > bool 50
                   " + (sum(lxp_e_to_user_day) or vector(0)))")
 
 
+def forget_dongle(stack, datalog):
+    """Remove a dongle that is no longer found (a moved box, a replaced dongle, a test simulator): from inverters.json
+    and the bridge config, and its retained MQTT messages, so Home Assistant drops its device. Returns messages;
+    raises ValueError for an unknown dongle or one that is still there."""
+    state_path = os.path.join(stack, "state", "inverters.json")
+    inverters = load_json(state_path, {})
+    if datalog not in inverters:
+        raise ValueError(f"no dongle {datalog}")
+    if inverters[datalog].get("present"):
+        raise ValueError(f"{datalog} was found in the last scan; only dongles that are gone can be forgotten")
+    del inverters[datalog]
+    write_if_changed(state_path, json.dumps(inverters, indent=2) + "\n", 0o644)
+    sec = ensure_secrets(stack)
+    msgs = [f"{datalog} forgotten"]
+    if write_bridge_config(stack, inverters, sec):
+        r = subprocess.run(compose_cmd(stack) + ["restart", "bridge"], capture_output=True, text=True)
+        msgs.append("bridge restarted" if r.returncode == 0 else f"bridge restart failed: {r.stderr.strip()[-200:]}")
+    # its retained messages (Home Assistant discovery and last values): an empty retained message removes each
+    mq = compose_cmd(stack) + ["exec", "-T", "mosquitto"]
+    auth = ["-u", "homeassistant", "-P", sec["mqtt_homeassistant"]]
+    r = subprocess.run(mq + ["mosquitto_sub", *auth, "-t", "#", "--retained-only", "-W", "4", "-F", "%t"],
+                       capture_output=True, text=True, timeout=60)
+    topics = sorted({t for t in r.stdout.splitlines() if datalog.lower() in t.lower()})
+    for t in topics:
+        subprocess.run(mq + ["mosquitto_pub", *auth, "-t", t, "-r", "-n"], capture_output=True, timeout=30)
+    if topics:
+        msgs.append(f"{len(topics)} Home Assistant entries removed")
+    return msgs
+
+
 def ensure_secrets(stack):
     path = os.path.join(stack, "state", "secrets.json")
     s = load_json(path, {})

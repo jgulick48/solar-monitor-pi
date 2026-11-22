@@ -173,7 +173,7 @@ class Display(unittest.TestCase):
         asked = []
         o = (protect.stream_url, protect.stream_tokens, protect.list_cameras)
         protect.stream_url = lambda host, key, cid, quality="medium": asked.append(quality) or f"rtsps://192.0.2.1:7441/{cid}{quality}?enableSrtp"
-        protect.stream_tokens = lambda host, key, cid: set()
+        protect.stream_tokens = lambda host, key, cid: {f"{cid}low"}     # what Protect hands out now
         protect.list_cameras = lambda host, key: [{"id": "aaa", "name": "Driveway"}]
         try:
             self.assertTrue(protect.refresh_quality(self.stack))
@@ -182,6 +182,35 @@ class Display(unittest.TestCase):
             protect.stream_url, protect.stream_tokens, protect.list_cameras = o
         self.assertEqual(asked, ["low"])
         self.assertEqual(display.load(self.stack)["cameras"][0]["url"], "rtsps://192.0.2.1:7441/aaalow?enableSrtp")
+
+    def test_stale_links_are_refreshed(self):
+        display.save(self.stack, {**display.DEFAULTS, "cameras": []})
+        protect.save(self.stack, {**protect.DEFAULTS, "host": "192.0.2.1", "api_key": "k", "quality": "medium",
+                                  "cameras": [{"id": "aaa", "name": "Front Yard"}], "applied_quality": "medium"})
+        o = (protect.stream_url, protect.stream_tokens, protect.list_cameras)
+        issued = {"aaa": "OLD"}
+        protect.stream_url = lambda host, key, cid, quality="medium": f"rtsps://192.0.2.1:7441/{issued[cid]}?enableSrtp"
+        protect.stream_tokens = lambda host, key, cid: {issued[cid]}
+        protect.list_cameras = lambda host, key: [{"id": "aaa", "name": "Front Yard"}]
+        try:
+            protect.apply_cameras(self.stack, ["aaa"], protect.list_cameras("", ""))
+            self.assertEqual(protect.stale_links(self.stack), [])
+            self.assertFalse(protect.refresh_quality(self.stack))
+            issued["aaa"] = "NEW"                                       # Protect hands out another link
+            self.assertEqual(protect.stale_links(self.stack), ["Front Yard"])
+            self.assertTrue(protect.refresh_quality(self.stack))
+        finally:
+            protect.stream_url, protect.stream_tokens, protect.list_cameras = o
+        self.assertIn("/NEW?", display.load(self.stack)["cameras"][0]["url"])
+
+    def test_h265_camera_explained(self):
+        display.save(self.stack, {**display.DEFAULTS, "cameras": [{"name": "Driveway", "url": "rtsp://a/1"}, {"name": "Front Yard", "url": "rtsp://a/2"}]})
+        with open(os.path.join(self.stack, "state", "camera-check.json"), "w") as f:
+            json.dump({"cam1": {"name": "Driveway", "codec": "H264"}, "cam2": {"name": "Front Yard", "codec": "H265"}}, f)
+        probs = display.camera_problems(self.stack)
+        self.assertEqual(list(probs), ["cam2"])
+        self.assertIn("Enhanced Encoding", probs["cam2"])
+        self.assertIn("if(c.problem&&/H\\.265/.test(c.problem))", display.PAGE)
 
     def test_page_stops_video_when_dark(self):
         self.assertIn("if(screenDark){ dropPlayer(s); s.cam=null; continue; }", display.PAGE)

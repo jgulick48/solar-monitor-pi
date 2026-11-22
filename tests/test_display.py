@@ -131,7 +131,7 @@ class Display(unittest.TestCase):
                              "cameras": [{"name": "Drive", "url": "rtsps://h:7441/TOK"}]})
         d = display.data(stack, SITE)
         self.assertEqual(d["now"]["soc"], 62)
-        self.assertEqual(d["cameras"], [{"id": "cam1", "name": "Drive"}])
+        self.assertEqual(d["cameras"], [{"id": "cam1", "name": "Drive", "problem": ""}])
         self.assertNotIn("TOK", json.dumps(d))       # the stream token never reaches the page
         self.assertEqual(d["alerts"], [])
         self.assertEqual(len(d["series"]["pv"]), 145)

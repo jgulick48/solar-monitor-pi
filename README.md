@@ -99,6 +99,14 @@ It runs Chromium in kiosk mode inside `cage` (a one-app Wayland compositor; no d
 the kiosk software is installed and a screen is connected; plugging a screen in starts it (udev rule). The browser's
 profile lives in RAM. The same page is at `http://<pi>/display` from other computers, without the cameras.
 
+**Camera checks.** The box re-fetches UniFi Protect's stream links at startup and every hour when Protect has changed
+them (an old link can connect and send nothing), and checks each camera's video codec. The screen plays H.264 only: a
+camera sending H.265 (Protect's *Enhanced Encoding*) shows a note in its place instead of a black box, and the setup
+page says so; turn Enhanced Encoding off for that camera in Protect.
+
+**Dongles that are gone** (a replaced dongle, a box moved to another site, test simulators) can be removed with
+*Forget* on the start page: from the monitor, the bridge and Home Assistant.
+
 **Camera load.** Playing the camera video is nearly all of the box's CPU work (test Pi 4: 41% of its four
 cores with two medium-quality UniFi Protect streams, 27% with low, 5% with no video). The Protect section's *Camera
 picture* is *Automatic* by default: low on a Pi 4, medium on a Pi 5 (boxes that update switch by themselves). The
