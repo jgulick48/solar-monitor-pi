@@ -129,6 +129,10 @@ class Display(unittest.TestCase):
         self.assertIn("before dark", a["text"])
         a = display.generator_advice(SITE, {"soc": 95, "load_avg_3d": 800}, eve, DENVER)
         self.assertEqual(a["level"], "ok")
+        # 15:00 to sunrise ~06:53 is ~15.9 h at 800 W = 12.7 kWh = 41% of 30.72 kWh: about 54% at sunrise
+        self.assertEqual(a["sunrise_soc"], 54)
+        self.assertIn("about 54% at sunrise (6:5", a["text"])
+        self.assertIn("AM),", a["text"].replace("\u00a0", " "))
         late = dt.datetime(2026, 11, 21, 20, 0, tzinfo=DENVER)
         self.assertIn("now", display.generator_advice(SITE, {"soc": 40, "load_avg_3d": 800}, late, DENVER)["text"])
         self.assertIsNone(display.generator_advice(SITE, {"soc": None}, eve, DENVER))

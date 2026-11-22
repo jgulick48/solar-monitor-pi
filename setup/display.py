@@ -383,10 +383,12 @@ def generator_advice(site, now_vals, now, tz, fc=None):
     usable = (soc - floor) / 100 * kwh                # kWh above the alert level
     headroom = (100 - floor) / 100 * kwh
     load_kw = load_w / 1000
-    empty_at, lowest = None, usable
+    empty_at, lowest, at_rise = None, usable, None
     if fsum and forecast_kw(fc, next_set.timestamp() - 3600) is not None:
         e, t, step = usable, now, dt.timedelta(minutes=15)
         while t < next_set:
+            if at_rise is None and t >= next_rise:
+                at_rise = e
             pv = forecast_kw(fc, t.timestamp()) or 0.0
             e = min(e + (pv - load_kw) * 0.25, headroom)
             if e < 0 and empty_at is None:
@@ -401,8 +403,12 @@ def generator_advice(site, now_vals, now, tz, fc=None):
         if now + dt.timedelta(hours=hours_left) < relief:
             empty_at = now + dt.timedelta(hours=hours_left)
         need = max(0.0, (relief - now).total_seconds() / 3600 * load_kw - max(usable, 0))
+    if at_rise is None:                               # overnight there's no solar: the usual use until sunrise
+        at_rise = usable - max(0.0, (next_rise - now).total_seconds() / 3600) * load_kw
+    rise_soc = round(min(100.0, max(0.0, floor + at_rise / kwh * 100)))
     base = {"sunset": sset.strftime("%H:%M"), "empty_at": empty_at and _hhmm(empty_at, now, site),
-            "need_kwh": round(need, 1), "forecast_tomorrow_kwh": fsum and fsum["tomorrow"]}
+            "need_kwh": round(need, 1), "forecast_tomorrow_kwh": fsum and fsum["tomorrow"],
+            "sunrise": hm(next_rise, site), "sunrise_soc": rise_soc}
     when = "now" if now >= sset - dt.timedelta(minutes=30) or now < rise else f"before dark ({hm(sset, site)})"
     if empty_at is not None and empty_at < next_rise + dt.timedelta(hours=2):
         return dict(base, level="warn", text=(f"Start the generator {when}: at the usual use the battery reaches "
@@ -413,8 +419,9 @@ def generator_advice(site, now_vals, now, tz, fc=None):
                                               f"{fsum['tomorrow']:.0f} kWh of solar expected), so at the usual use the "
                                               f"battery reaches {floor:.0f}% about {_hhmm(empty_at, now, site)}. "
                                               f"About {need:.1f} kWh more is needed."))
-    return dict(base, level="ok", text=f"No generator needed tonight: the battery should stay above {floor:.0f}% "
-                                         f"until the sun is back (sunset {hm(sset, site)}).{tomorrow_txt}")
+    nb = lambda t: hm(t, site).replace(" ", NBSP)  # noqa: E731 - keeps "6:51 AM" on one line on the wall display
+    return dict(base, level="ok", text=f"No generator needed tonight: about {rise_soc}% at sunrise ({nb(next_rise)}), "
+                                         f"above {floor:.0f}% until the sun is back. Sunset {nb(sset)}.{tomorrow_txt}")
 
 
 def data(stack, site):
@@ -642,6 +649,7 @@ def ha_status(stack, site):
         "generator_mode": site.get("generator") or "none",
         "advice": adv.get("level") or "none", "advice_text": adv.get("text") or "",
         "advice_need_kwh": adv.get("need_kwh"), "advice_empty_at": adv.get("empty_at"), "sunset": adv.get("sunset"),
+        "battery_at_sunrise": adv.get("sunrise_soc"), "sunrise": adv.get("sunrise"),
         "generator_needed": adv.get("level") == "warn",
         "forecast_today": (d["forecast"] or {}).get("today"), "forecast_remaining": (d["forecast"] or {}).get("remaining"),
         "forecast_tomorrow": (d["forecast"] or {}).get("tomorrow"),
