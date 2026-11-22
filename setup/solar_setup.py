@@ -340,8 +340,8 @@ def host_timezone():
 def env_profiles(stack):
     """Optional compose services that are turned on: cloudflared for remote access (tunnel.py) and
     cloudflared-support for remote support (support.py)."""
-    on = lambda name: load_json(os.path.join(stack, "state", name), {}).get("enabled")  # noqa: E731
-    profiles = [p for p, f in (("tunnel", "tunnel.json"), ("support", "support.json")) if on(f)]
+    import modules  # remote access and remote support say when their services run
+    profiles = modules.compose_profiles(stack)
     if load_json(os.path.join(stack, "state", "display.json"), {}).get("speak"):
         profiles.append("tts")          # Piper for spoken camera announcements (tts.py)
     return profiles

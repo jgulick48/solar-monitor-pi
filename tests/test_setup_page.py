@@ -46,7 +46,7 @@ class SetupPage(unittest.TestCase):
         self.assertIn('getElementById("err-field")', page)
 
     def test_section_messages(self):
-        page = solar_web.setup_page(solar_web.load_site(), remote_msg="Not saved: the account ID is the 32 letters.")
+        page = solar_web.setup_page(solar_web.load_site(), module_msgs={"tunnel": "Not saved: the account ID is the 32 letters."})
         self.assertIn("class='toast err'", page)
         self.assertIn("id=notice class='card notice err'", page)       # in the Remote access section
         self.assertIn('getElementById("notice")', page)

@@ -27,7 +27,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
-import support  # noqa: E402
+import modules  # noqa: E402
 import weather  # noqa: E402
 import wx  # noqa: E402
 
@@ -136,6 +136,7 @@ def main():
     last_om = 0.0
     last_gen = 0.0
     last_wx = last_alerts = 0.0
+    hooks = {}
     while True:
         try:
             station_sample(args.stack)
@@ -174,11 +175,7 @@ def main():
             except Exception as e:  # noqa: BLE001
                 log("generator log update failed:", e)
             last_gen = time.time()
-        try:
-            for m in support.check(args.stack):   # remote support: switch off when its time is up
-                log("remote support:", m)
-        except Exception as e:  # noqa: BLE001
-            log("remote support check failed:", e)
+        modules.run_due(args.stack, hooks)          # the enabled modules' own schedules (remote support: every minute)
         if args.once:
             return
         time.sleep(60)

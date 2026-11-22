@@ -16,7 +16,7 @@ the owner pastes both and picks when support switches itself off. While it is on
 
 Turning it off, by hand or when the time is up (checked by the collector every minute), undoes all of
 it: the tunnel stops, the key and the sudo rule go, and SSH is stopped again if support started it.
-Settings: state/support.json and the run token in state/support.env (both mode 600).
+Settings: state/modules/support.json and the run token in state/support.env (both mode 600).
 """
 import base64
 import json
@@ -53,7 +53,8 @@ def p(rel):
 
 
 def settings_path(stack):
-    return os.path.join(stack, "state", "support.json")
+    import modules
+    return modules.path(stack, "support")
 
 
 def env_path(stack):
@@ -61,11 +62,14 @@ def env_path(stack):
 
 
 def settings(stack):
-    return {**DEFAULTS, **ss.load_json(settings_path(stack), {})}
+    """Kept by the support module (state/modules/support.json)."""
+    import modules
+    return {**DEFAULTS, **modules.settings(stack, "support")}
 
 
 def save(stack, d):
-    ss.write_if_changed(settings_path(stack), json.dumps(d, indent=2) + "\n", 0o600)
+    import modules
+    modules.save(stack, "support", d)
 
 
 def home():

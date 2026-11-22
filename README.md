@@ -282,7 +282,7 @@ Home Assistant is stopped: since 2026.11 Home Assistant ignores `http:` in YAML)
   otherwise claim it. Turn on two-factor authentication in your Home Assistant profile.
 - It never overwrites a DNS record it didn't make; pick another name if `<name>.<domain>` is taken.
 - **Turn remote access off** stops `cloudflared` and, unless unticked, deletes the tunnel and its DNS record at Cloudflare.
-- The API token and the tunnel's run token are kept in `state/tunnel.json` and `state/tunnel.env` (mode 600) and are
+- The API token and the tunnel's run token are kept in `state/modules/tunnel.json` and `state/tunnel.env` (mode 600) and are
   included in the USB backups.
 
 ## Remote support (optional)
@@ -325,7 +325,7 @@ whole time. While it is on the box:
   (`/etc/ssh/sshd_config.d/solar-support.conf`). If the owner had turned SSH on themselves, it is left as it is.
 
 Turning it off, by hand or when its time is up (the collector checks every minute, and re-applies it after a reboot while
-it is on), removes all of that again. Settings: `state/support.json` and `state/support.env` (mode 600).
+it is on), removes all of that again. Settings: `state/modules/support.json` and `state/support.env` (mode 600).
 
 Connecting (helper): `ssh -o ProxyCommand="cloudflared access ssh --hostname %h" solar@<ssh hostname>`; add
 `--service-token-id <id> --service-token-secret <secret>` to the `cloudflared` command for a non-interactive login.
@@ -423,14 +423,17 @@ Home Assistant, Grafana and the rest.
   dashboard once.
 - `setup/modules/` holds the optional features, one package each with a `MODULE = Module(...)` manifest: its
   settings (`state/modules/<id>.json`, moved over from the old file on the first run after an update), its pages,
-  start-page card and Home Assistant fields. The core in `setup/modules/__init__.py` calls only the enabled ones.
-  Backups are the first; the other optional features move there one release at a time.
+  setup-page section, start-page card or banner, Home Assistant fields, collector hooks and Compose profiles. The
+  core in `setup/modules/__init__.py` calls only the enabled ones. So far: backups, remote access and remote support;
+  the other optional features move there one release at a time.
 - `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it; `setup/modules/backup/`
   is its page and settings.
-- `setup/support.py` turns remote support on and off (tunnel, SSH key, sudo, SSH) and switches it off when its time is up.
+- `setup/support.py` turns remote support on and off (tunnel, SSH key, sudo, SSH) and switches it off when its time is up;
+  `setup/modules/support/` is its setup-page section, banner and the collector's once-a-minute check.
 - `setup/battery.py` is the battery health check (computed on request from VictoriaMetrics, cached).
 
-- `setup/tunnel.py` sets up remote access through a Cloudflare Tunnel (Cloudflare API calls, `cloudflared` service).
+- `setup/tunnel.py` sets up remote access through a Cloudflare Tunnel (Cloudflare API calls, `cloudflared` service);
+  `setup/modules/tunnel/` is its setup-page section, start-page card and Home Assistant's `external_url`.
 - `setup/display.py` is the wall display (page, data, settings, go2rtc config, screen schedule);
   `setup/kiosk.sh` starts Chromium; `system/` has the kiosk PAM session and the HDMI hotplug rule.
 - `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the

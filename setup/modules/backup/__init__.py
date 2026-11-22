@@ -19,7 +19,7 @@ def migrate(stack, old, version):
     if old is None:                      # first time: take over state/backup.json
         f = os.path.join(stack, *LEGACY)
         legacy = ss.load_json(f, {})
-        out = {"enabled": True, **{k: legacy[k] for k in ("uuid", "history") if k in legacy}}
+        out = {k: legacy[k] for k in ("uuid", "history") if k in legacy}
         if legacy.get("uuid"):
             out["chosen_at"] = int(os.path.getmtime(f))   # the overdue check counted from the file's last change
         return out
