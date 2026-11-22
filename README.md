@@ -447,7 +447,8 @@ Home Assistant, Grafana and the rest.
 
 - `setup/tunnel.py` sets up remote access through a Cloudflare Tunnel (Cloudflare API calls, `cloudflared` service);
   `setup/modules/tunnel/` is its setup-page section, start-page card and Home Assistant's `external_url`.
-- `setup/display.py` is the wall display (page, data, settings, screen schedule); `setup/cameras.py` its cameras
+- `setup/display.py` is the wall display (data, settings, screen schedule) and `setup/display.html` its page (HTML,
+  CSS and script, served as it is at `/display`); `setup/cameras.py` its cameras
   (go2rtc config, Protect detections, hourly upkeep) and `setup/modules/cameras/` their setup page;
   `setup/kiosk.sh` starts Chromium; `system/` has the kiosk PAM session and the HDMI hotplug rule.
 - `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the

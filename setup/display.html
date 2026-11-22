@@ -1,0 +1,378 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Solar display</title><link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+/* --u: the layout's unit, 1% of the width on a 16:9 screen; on other shapes the tighter of width and height,
+   so the same layout fits 4:3, 16:10, 21:9 and small screens (the screen mode itself comes from the TV's EDID, see screen_mode). */
+:root{--u:min(1vw,1.7778vh);--bg:#0b0d10;--panel:#14181d;--fg:#f2f4f6;--muted:#8a96a3;--line:#252b33;
+--solar:#f5b301;--load:#4aa3ff;--batt:#2ecc71;--gen:#c77dff;--warn:#ff8c42;--bad:#ff4d4d}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+font-family:system-ui,"DejaVu Sans",sans-serif;overflow:hidden;cursor:none}
+#wrap{display:grid;grid-template-columns:50vw 50vw;height:100vh}
+#wrap.nocam{grid-template-columns:0 100vw}
+#cams{display:grid;grid-template-rows:50vh 50vh;background:#000}
+.cam{position:relative;border-bottom:2px solid var(--bg);overflow:hidden}
+solar-cam{display:block;width:100%;height:100%;background:#000}
+solar-cam video{width:100%;height:100%;object-fit:cover;display:block}
+.cam .lbl{position:absolute;z-index:2;left:14px;top:10px;font-size:calc(var(--u)*1.5);font-weight:600;text-shadow:0 1px 4px #000}
+.cam{transition:box-shadow .3s}.cam.hot{box-shadow:inset 0 0 0 calc(var(--u)*.35) var(--warn)}
+.cam.ring{box-shadow:inset 0 0 0 calc(var(--u)*.5) var(--bad)}
+.cam .badge{position:absolute;z-index:2;right:14px;top:10px;font-size:calc(var(--u)*1.4);font-weight:700;color:#000;
+background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot .badge{display:block}.cam.ring .badge{background:var(--bad);color:#fff}
+.cam .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:calc(var(--u)*1.4);padding:0 8%;text-align:center}
+#info{display:flex;flex-direction:column;padding:calc(var(--u)*1.6) calc(var(--u)*1.8);gap:calc(var(--u)*1.1);min-width:0;height:100vh;overflow:hidden}
+#top{display:flex;justify-content:space-between;align-items:baseline}
+#name{font-size:calc(var(--u)*2);font-weight:600}#clock{font-size:calc(var(--u)*2.6);font-variant-numeric:tabular-nums}
+#date{color:var(--muted);font-size:calc(var(--u)*1.1);text-align:right}
+#tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:calc(var(--u)*1)}
+.nocam #tiles{grid-template-columns:repeat(5,1fr)}
+.tile{background:var(--panel);border-radius:14px;padding:calc(var(--u)*1) calc(var(--u)*1.2);min-width:0}
+.tile .k{color:var(--muted);font-size:calc(var(--u)*1.05)}.tile .v{font-size:calc(var(--u)*3.3);font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.tile .s{color:var(--muted);font-size:calc(var(--u)*1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nocam .tile .v{font-size:calc(var(--u)*2.6)}
+#soc .v{font-size:calc(var(--u)*4.6)}#socbar{height:calc(var(--u)*.8);border-radius:calc(var(--u)*.4);background:var(--line);margin-top:calc(var(--u)*.5);overflow:hidden}
+#socfill{height:100%;background:var(--batt);width:0}
+#soc{grid-row:span 2}.nocam #soc{grid-row:auto}
+#wx{display:none;background:var(--panel);border-radius:14px;padding:calc(var(--u)*.8) calc(var(--u)*1.1);gap:calc(var(--u)*.6);flex-direction:column}
+#wx.on{display:flex}
+#wxdots{display:none;justify-content:flex-end;gap:calc(var(--u)*.35);margin-top:calc(var(--u)*-.3)}#wxdots.on{display:flex}
+#wxdots b{width:calc(var(--u)*.45);height:calc(var(--u)*.45);border-radius:50%;background:var(--line)}#wxdots b.on{background:var(--muted)}
+#wxtop{display:flex;gap:calc(var(--u)*1.4);align-items:center;min-width:0}
+#wxnow{display:flex;align-items:center;gap:calc(var(--u)*.8);flex:0 1 auto;min-width:0;max-width:64%}
+#wxnow .t{font-size:calc(var(--u)*3.6);font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+#wxnow .d{font-size:calc(var(--u)*1.05);color:var(--muted);line-height:1.35;min-width:0}
+#wxnow .d b{color:var(--fg);font-weight:600}#wxnow .d i{font-style:normal;white-space:nowrap}
+#wrap:not(.nocam) #wxnow .t{font-size:calc(var(--u)*3)}#wrap:not(.nocam) #wxnow .wi{width:calc(var(--u)*3.2);height:calc(var(--u)*3.2)}
+.wi{width:calc(var(--u)*4.2);height:calc(var(--u)*4.2);flex:none}.wi.s{width:calc(var(--u)*2.2);height:calc(var(--u)*2.2)}
+.wa{width:calc(var(--u)*1.1);height:calc(var(--u)*1.1);vertical-align:-.15em;fill:var(--fg)}
+#wxdays,#wxhours{display:grid;gap:calc(var(--u)*.4);flex:1;min-width:0}
+#wxdays{grid-template-columns:repeat(var(--days,5),1fr)}#wxhours{grid-template-columns:repeat(var(--hours,6),1fr);border-top:1px solid var(--line);padding-top:calc(var(--u)*.5)}
+/* beside the cameras (half the width) there's room for now + the days; the hours show without cameras or on a portrait screen */
+#wrap:not(.nocam) #wxhours,#wx.tight #wxhours{display:none !important}
+.wxon .tile{padding:calc(var(--u)*.7) calc(var(--u)*1)}.wxon .tile .v{font-size:calc(var(--u)*2.7)}.wxon #soc .v{font-size:calc(var(--u)*3.8)}
+.wxon.nocam .tile .v{font-size:calc(var(--u)*2.3)}
+.wc{display:flex;flex-direction:column;align-items:center;font-size:calc(var(--u)*.95);color:var(--muted);line-height:1.3;min-width:0;white-space:nowrap;overflow:hidden}
+.wc .h{color:var(--fg);font-weight:600;font-size:calc(var(--u)*1.1)}.wc .r{color:var(--load)}
+#chart{flex:1;background:var(--panel);border-radius:14px;padding:calc(var(--u)*.8) calc(var(--u)*1);min-height:calc(var(--u)*7);display:flex;flex-direction:column}
+#chart .k{color:var(--muted);font-size:calc(var(--u)*1);display:flex;gap:calc(var(--u)*1.4)}
+#chart svg{flex:1;width:100%;min-height:0}
+.dot{display:inline-block;width:calc(var(--u)*.8);height:calc(var(--u)*.8);border-radius:50%;margin-right:calc(var(--u)*.35);vertical-align:middle}
+#notes{display:flex;flex-direction:column;gap:calc(var(--u)*.6)}
+.note{border-radius:12px;padding:calc(var(--u)*.8) calc(var(--u)*1.1);font-size:calc(var(--u)*1.25);background:var(--panel);border-left:calc(var(--u)*.5) solid var(--muted)}
+.note.warn{border-left-color:var(--warn);background:#2a1d12}.note.bad{border-left-color:var(--bad);background:#2e1414}.note.ok{border-left-color:var(--batt)}
+#foot{color:var(--muted);font-size:calc(var(--u)*.9);display:flex;justify-content:space-between}
+#blank{position:fixed;inset:0;background:#000;display:none;z-index:9}
+/* Burn-in protection (see the script): layouts rotate every 20 minutes and the page drifts a few pixels */
+#wrap{transition:opacity .6s,transform 2s}#wrap.fade{opacity:0}
+#wrap.swap #cams{order:2}#wrap.swap{grid-template-columns:50vw 50vw}#wrap.swap.nocam{grid-template-columns:100vw 0}
+#wrap.flip #info{flex-direction:column-reverse}#wrap.flip #top{flex-direction:row-reverse}#wrap.flip #date{text-align:left}
+#wrap.rtl #tiles{direction:rtl}#wrap.rtl #tiles .tile{direction:ltr}
+/* A screen on its side: cameras side by side on top, the figures below */
+@media (orientation:portrait){:root{--u:min(1.9vw,1.15vh)}
+#wrap,#wrap.swap,#wrap.nocam,#wrap.swap.nocam{grid-template-columns:100vw;grid-template-rows:34vh 66vh}
+#wrap.nocam{grid-template-rows:0 100vh}#wrap.swap{grid-template-rows:66vh 34vh}#wrap.swap.nocam{grid-template-rows:100vh 0}
+#wrap.nocam #tiles{grid-template-columns:repeat(3,1fr)}#wrap.nocam #soc{grid-row:span 2}
+#cams{grid-template-rows:100% !important;grid-auto-flow:column;grid-auto-columns:1fr;height:100%;min-height:0}
+#info{height:100%}#wrap:not(.nocam) #wxhours{display:grid}}
+</style></head><body>
+<div id="wrap" class="nocam"><div id="cams"></div>
+<div id="info">
+ <div id="top"><div id="name">Solar</div><div><div id="clock">--:--</div><div id="date"></div></div></div>
+ <div id="tiles">
+  <div class="tile" id="soc"><div class="k">Battery</div><div class="v">--</div><div id="socbar"><div id="socfill"></div></div><div class="s"></div><div class="s" id="runtime" style="margin-top:calc(var(--u)*.6);white-space:normal"></div><div class="s" id="sochigh" style="margin-top:calc(var(--u)*.6);white-space:normal"></div></div>
+  <div class="tile" id="pv"><div class="k">Solar</div><div class="v" style="color:var(--solar)">--</div><div class="s"></div></div>
+  <div class="tile" id="load"><div class="k">House</div><div class="v" style="color:var(--load)">--</div><div class="s"></div></div>
+  <div class="tile" id="bat"><div class="k">Battery power</div><div class="v">--</div><div class="s"></div></div>
+  <div class="tile" id="gen"><div class="k">Generator</div><div class="v" style="color:var(--gen)">--</div><div class="s"></div></div>
+ </div>
+ <div id="wx"><div id="wxtop"><div id="wxnow"></div><div id="wxdays"></div></div><div id="wxdots"></div><div id="wxhours"></div></div>
+ <div id="chart"><div class="k"><span><span class="dot" style="background:var(--solar)"></span>Solar</span>
+  <span><span class="dot" style="background:var(--load)"></span>House</span>
+  <span><span class="dot" style="background:var(--batt)"></span>Battery %</span><span style="margin-left:auto">last 24 hours</span></div>
+  <svg id="svg" viewBox="0 0 1000 300" preserveAspectRatio="none"></svg></div>
+ <div id="notes"></div>
+ <div id="foot"><span id="upd"></span><span>solar-monitor</span></div>
+</div></div><div id="blank"></div>
+<script>
+const $=id=>document.getElementById(id);
+let rev=null;
+function kw(w){if(w==null)return"--";const a=Math.abs(w);return a>=1000?(w/1000).toFixed(a>=10000?0:1)+" kW":Math.round(w)+" W"}
+function setTile(id,v,s,color){const t=$(id);t.querySelector(".v").textContent=v;t.querySelector(".s").textContent=s||"";if(color)t.querySelector(".v").style.color=color}
+// Cameras: go2rtc's player (video-rtc.js) without controls, over MSE. go2rtc only listens on
+// 127.0.0.1, so the pictures are shown on the box's own screen and nowhere else.
+let camClass=null;
+async function camElement(id){
+  if(!camClass){
+    const {VideoRTC}=await import("http://127.0.0.1:1984/video-rtc.js");
+    camClass=class extends VideoRTC{oninit(){super.oninit();this.video.controls=false;this.video.muted=true;}};
+    customElements.define("solar-cam",camClass);
+  }
+  const el=document.createElement("solar-cam");
+  el.mode="mse";el.media="video";el.background=true;el.visibilityCheck=false;
+  el.src=`ws://127.0.0.1:1984/api/ws?src=${encodeURIComponent(id)}`;
+  return el;
+}
+// Cameras: up to two on screen at a time, rotating every 15 s through all of them. A camera with a
+// detection (UniFi Protect events, /display/events) comes to the front with a coloured frame and a label
+// and stays there until a minute after the last event; a doorbell ring wins. Only cameras on screen play.
+const ROTATE_S=15;
+let camList=[], camKey="", rot=0, lastRot=0, events={}, slots=[];
+async function buildCams(cams){
+  const key=JSON.stringify(cams); if(key===camKey)return; camKey=key; camList=cams;
+  const box=$("cams"); for(const s of slots)dropPlayer(s); box.innerHTML=""; slots=[];
+  $("wrap").classList.toggle("nocam",!cams.length); layoutNow=null; if(typeof applyLayout==="function")applyLayout();
+  const n=Math.min(2,cams.length);
+  box.style.gridTemplateRows=n>1?"50vh 50vh":"100vh";
+  for(let i=0;i<n;i++){
+    const d=document.createElement("div"); d.className="cam";
+    d.innerHTML='<div class="msg"></div><div class="lbl"></div><div class="badge"></div>';
+    box.appendChild(d); slots.push({el:d,cam:null,player:null});
+  }
+  showCams();
+}
+function dropPlayer(s){ if(s.player){ try{s.player.ondisconnect()}catch(e){} s.player.remove(); s.player=null; } }
+function pickCams(){
+  const n=slots.length; if(!n)return[];
+  const hot=camList.filter(c=>events[c.id]).sort((a,b)=>(events[b.id].level-events[a.id].level)||(events[b.id].since-events[a.id].since));
+  // never the same camera twice on screen: not the same entry, and not two entries with the same name
+  // (a camera added by its stream link and again from UniFi Protect)
+  const same=(a,b)=>a===b||a.name.trim().toLowerCase()===b.name.trim().toLowerCase();
+  const chosen=[];
+  for(const c of hot){ if(chosen.length<n&&!chosen.some(x=>same(x,c)))chosen.push(c); }
+  const rest=camList.filter(c=>!chosen.some(x=>same(x,c)));
+  for(let i=0;chosen.length<n&&i<rest.length;i++){ const c=rest[(rot+i)%rest.length]; if(!chosen.some(x=>same(x,c)))chosen.push(c); }
+  return chosen;
+}
+let screenDark=false;   // screen off (schedule, nobody in the room): no video, which is nearly all of the box's CPU load
+async function showCams(){
+  const want=pickCams(), local=location.hostname==="127.0.0.1"||location.hostname==="localhost";
+  for(let i=0;i<slots.length;i++){
+    const s=slots[i], c=want[i]; if(!c)continue;
+    const ev=events[c.id];
+    s.el.classList.toggle("hot",!!ev); s.el.classList.toggle("ring",!!ev&&ev.level>=3);
+    s.el.querySelector(".badge").textContent=ev?ev.label:"";
+    s.el.querySelector(".lbl").textContent=c.name;
+    if(screenDark){ dropPlayer(s); s.cam=null; continue; }
+    if(s.cam===c.id)continue;
+    dropPlayer(s); s.cam=c.id; const m=s.el.querySelector(".msg"); m.textContent="";
+    if(!local){m.textContent="Cameras show on the box's own screen";continue}
+    if(c.problem&&/H\.265/.test(c.problem)){m.textContent=c.problem;continue}   // can't play it: say why instead of a black box
+    try{ s.player=await camElement(c.id); s.el.insertBefore(s.player,s.el.firstChild); }
+    catch(e){ m.textContent="Camera service not running"; }
+  }
+}
+// Sounds through the screen's speakers (HDMI): short chimes made with Web Audio, so there are no sound files.
+// A camera's event plays once, when it starts; doorbell rings and people by default (setup page).
+const CHIMES={doorbell:[[659,0,1.3],[523,.5,1.6]],person:[[784,0,.5],[1047,.17,.7]],vehicle:"horn",
+  animal:[[880,0,.6]],package:[[988,0,.35],[1175,.14,.35],[1319,.28,.6]]};
+let lastSoundCam={}, lastSound=0;
+let actx=null, played={}, lastTest=null, lastSay=null, soundCfg={sounds:{},volume:70,quiet:true,off:false,speak:false,mode:"after",cooldown:60,gap:5,doorbellAlways:true};
+// Spoken announcement (Piper on the box, /display/say): after the chime has rung out, or instead of it.
+// Played through the same Web Audio context as the chimes: the Pi's HDMI sound device takes one stream at a
+// time (no mixing), and once a chime has played Chromium keeps it open, so a separate <audio> element was
+// silently dropped (heard on the test Pi: dings, no speech).
+async function say(url, afterKind){
+  const wait=soundCfg.mode==="only"||!afterKind?0:(afterKind==="doorbell"?2.1:.9);
+  try{
+    actx=actx||new AudioContext(); if(actx.state==="suspended")await actx.resume();
+    const r=await fetch(url,{cache:"force-cache"}); if(!r.ok)return;
+    const buf=await actx.decodeAudioData(await r.arrayBuffer());
+    const src=actx.createBufferSource(), g=actx.createGain();
+    g.gain.value=Math.max(0,Math.min(1,(soundCfg.volume||0)/100));
+    src.buffer=buf; src.connect(g).connect(actx.destination);
+    src.start(Math.max(actx.currentTime,(window.__chimeAt||0)+wait));
+  }catch(e){}
+}
+// A car horn: two square waves a major third apart (about 400 and 500 Hz, slightly detuned, like a real
+// two-trumpet horn) through a low-pass filter, "beep-beep".
+function horn(vol,t){
+  const f=actx.createBiquadFilter(); f.type="lowpass"; f.frequency.value=1800; f.Q.value=.7; f.connect(actx.destination);
+  for(const [at,dur] of [[0,.22],[.32,.45]]){
+    const g=actx.createGain(); g.connect(f);
+    g.gain.setValueAtTime(0,t+at); g.gain.linearRampToValueAtTime(vol*.5,t+at+.015);
+    g.gain.setValueAtTime(vol*.5,t+at+dur-.03); g.gain.linearRampToValueAtTime(0,t+at+dur);
+    for(const hz of [404,508]){ const o=actx.createOscillator(); o.type="square"; o.frequency.value=hz; o.connect(g); o.start(t+at); o.stop(t+at+dur+.02); }
+  }
+}
+function chime(kind){
+  const notes=CHIMES[kind]; if(!notes)return;
+  try{ actx=actx||new AudioContext(); if(actx.state==="suspended")actx.resume(); }catch(e){return}
+  const vol=Math.max(0,Math.min(1,(soundCfg.volume||0)/100))*.6, t=actx.currentTime+.05;
+  window.__chimeAt=t;
+  if(notes==="horn")return horn(vol,t);
+  for(const [f,at,dur] of notes){
+    const o=actx.createOscillator(), g=actx.createGain(); o.type="sine"; o.frequency.value=f;
+    g.gain.setValueAtTime(0,t+at); g.gain.linearRampToValueAtTime(vol,t+at+.02); g.gain.exponentialRampToValueAtTime(.0001,t+at+dur);
+    o.connect(g).connect(actx.destination); o.start(t+at); o.stop(t+at+dur+.05);
+  }
+}
+function soundFor(ev){
+  const kind={Doorbell:"doorbell",Person:"person",Vehicle:"vehicle",Animal:"animal",Package:"package"}[ev.label];
+  if(!kind||!soundCfg.sounds[kind]||(soundCfg.quiet&&soundCfg.off))return null; return kind;
+}
+async function pollEvents(){
+  try{ const r=await fetch("/display/events",{cache:"no-store"}); const d=await r.json();
+    // screen on/off (schedule, someone in the room, a camera waking it) follows within a poll
+    if("screen_on" in d){ $("blank").style.display=d.screen_on?"none":"block"; soundCfg.off=!!d.quiet_hours;
+      if(screenDark!==!d.screen_on){ screenDark=!d.screen_on; showCams(); } }
+    if(lastTest===null)lastTest=d.test_sound; else if(d.test_sound!==lastTest){lastTest=d.test_sound; chime("doorbell");}
+    // announcements from the voice module (a test, or another feature's alert): new ones only, not during quiet hours
+    const q=d.say||[];
+    if(lastSay===null)lastSay=Math.max(0,...q.map(a=>a.id));
+    for(const a of q){ if(a.id<=lastSay)continue; lastSay=a.id;
+      if(!soundCfg.speak||(soundCfg.quiet&&soundCfg.off))continue;
+      if(a.chime&&soundCfg.mode!=="only")chime(a.chime);
+      say("/display/say?id="+a.id,a.chime&&soundCfg.mode!=="only"?a.chime:null); }
+    for(const [cam,ev] of Object.entries(d.active||{})){
+      const key=cam+"@"+ev.since; if(played[key])continue; played[key]=1;
+      const kind=soundFor(ev); if(!kind)continue;
+      // rate limit (setup page): same camera / any camera; a doorbell ring always gets through if so set
+      const nowS=Date.now()/1000, ring=kind==="doorbell"&&soundCfg.doorbellAlways;
+      const rep=cam+"|"+kind;     // a repeat = the same alert: same camera, same kind
+      if(!ring&&(nowS-(lastSoundCam[rep]||0)<soundCfg.cooldown||nowS-lastSound<soundCfg.gap))continue;
+      lastSoundCam[rep]=nowS; lastSound=nowS;
+      if(!(soundCfg.speak&&soundCfg.mode==="only"))chime(kind);
+      if(soundCfg.speak)say("/display/say?cam="+encodeURIComponent(cam)+"&label="+encodeURIComponent(ev.label),kind);
+    }
+    const before=JSON.stringify(events); events=d.active||{};
+    if(JSON.stringify(events)!==before)showCams();
+  }catch(e){}
+}
+setInterval(pollEvents,1500);
+setInterval(()=>{ if(camList.length>slots.length&&!camList.some(c=>events[c.id])){rot=(rot+slots.length)%camList.length;showCams();} },ROTATE_S*1000);
+function line(pts,t0,t1,max,color,w){if(!pts.length||!max)return"";
+  const d=pts.map((p,i)=>(i?"L":"M")+((p[0]-t0)/(t1-t0)*1000).toFixed(1)+","+(290-p[1]/max*270).toFixed(1)).join("");
+  return `<path d="${d}" fill="none" stroke="${color}" stroke-width="${w}" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`}
+function chart(s){
+  const all=[...(s.pv||[]),...(s.load||[])];if(!all.length){$("svg").innerHTML="";return}
+  const t1=Math.floor(Date.now()/1000), t0=t1-86400;
+  const max=Math.max(1000,...all.map(p=>p[1]))*1.05;
+  let g="";for(let i=1;i<4;i++)g+=`<line x1="0" x2="1000" y1="${290-i*67.5}" y2="${290-i*67.5}" stroke="#252b33" vector-effect="non-scaling-stroke"/>`;
+  $("svg").innerHTML=g+line(s.pv||[],t0,t1,max,"#f5b301",3)+line(s.load||[],t0,t1,max,"#4aa3ff",3)+line((s.soc||[]).map(p=>[p[0],Math.min(100,p[1])]),t0,t1,100,"#2ecc71",2);
+}
+// Weather (wx.py): simple drawn icons (the kiosk has no colour emoji font) and wind arrows
+const SUN='<circle cx="12" cy="12" r="4.5" fill="#f5b301"/><g stroke="#f5b301" stroke-width="1.8" stroke-linecap="round"><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g>';
+const MOON='<path d="M15.5 3.5a8.5 8.5 0 1 0 5 13.5A7 7 0 0 1 15.5 3.5z" fill="#cdd6e0"/>';
+const CLOUD=(c,dy=0)=>`<path transform="translate(0 ${dy})" d="M7 19h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 11.5 3.75 3.75 0 0 0 7 19z" fill="${c}"/>`;
+const DROPS='<g stroke="#4aa3ff" stroke-width="1.8" stroke-linecap="round"><path d="M8 20.5l-1 2.3M12 20.5l-1 2.3M16 20.5l-1 2.3"/></g>';
+const FLAKES='<g fill="#e8f1ff"><circle cx="8" cy="21.5" r="1.2"/><circle cx="12" cy="22.5" r="1.2"/><circle cx="16" cy="21.5" r="1.2"/></g>';
+const ICONS={clear:d=>d?SUN:MOON,
+  partly:d=>`<g transform="translate(-3 -3) scale(.75)">${d?SUN:MOON}</g>`+CLOUD("#aab4bf",1),
+  cloud:()=>CLOUD("#aab4bf"),fog:()=>'<g stroke="#aab4bf" stroke-width="2" stroke-linecap="round"><path d="M4 9h16M2 13h18M5 17h15"/></g>',
+  rain:()=>CLOUD("#8a96a3",-3)+DROPS,snow:()=>CLOUD("#aab4bf",-3)+FLAKES,sleet:()=>CLOUD("#8a96a3",-3)+'<g stroke="#4aa3ff" stroke-width="1.8" stroke-linecap="round"><path d="M8 20.5l-1 2.3M16 20.5l-1 2.3"/></g><circle cx="12" cy="22" r="1.2" fill="#e8f1ff"/>',
+  thunder:()=>CLOUD("#6d7884",-3)+'<path d="M12.5 15l-3 5h2.5l-1.5 4 4.5-6h-2.6l1.6-3z" fill="#f5b301"/>'};
+function wicon(k,day,cls){return `<svg class="wi ${cls||""}" viewBox="0 0 24 24">${(ICONS[k]||ICONS.cloud)(day!==false)}</svg>`}
+// arrow pointing the way the wind blows (it comes FROM the direction given)
+function warrow(deg){return deg==null?"":`<svg class="wa" viewBox="0 0 10 10"><path transform="rotate(${(+deg+180)%360} 5 5)" d="M5 0.5L8.5 9 5 7 1.5 9z"/></svg>`}
+// forecast days: when fewer fit than the setting asks for, page through them (wxPage advances every wx_page s)
+let wxPage=0,wxTimer=null,wxLast=null,wxCfg={days:7,page:8};
+function weather(w,cfg){
+  if(cfg)wxCfg=cfg; wxLast=w;
+  if(!wxTimer&&wxCfg.page>0)wxTimer=setInterval(()=>{wxPage++;if(wxLast)weather(wxLast)},wxCfg.page*1000);
+  const box=$("wx");
+  $("wrap").classList.toggle("wxon",!!w);
+  if(!w){box.classList.remove("on");return}
+  box.classList.add("on");
+  // as many day and hour columns as fit (about 5.5 and 5 layout units each)
+  const lu=parseFloat(getComputedStyle($("upd")).fontSize)/.9||12;
+  const n=w.now,u=w.units,t=v=>v==null?"--":v+"°";
+  // each phrase kept together (<i>); lines break only between them
+  const ph=x=>x?`<i>${x}</i>`:"", sep=" &middot; ";
+  const lines=[
+    ph(`<b>${n.text||""}</b>${n.source==="station"?" &middot; station":""}`),
+    n.wind!=null?ph(`Wind <b>${n.wind_dir!=null?warrow(n.wind_dir)+" ":""}${n.compass||""} ${n.wind}</b>`+
+      (n.gust!=null?`, gusts <b>${n.gust}</b>`:"")+` ${u.wind}`):"",
+    n.gust_max!=null?ph(n.gust_max_src==="forecast"?`Gusts to <b>${n.gust_max} ${u.wind}</b> today (forecast)`:
+      `Max gust <b>${n.gust_max} ${u.wind}</b>${n.gust_max_time?" at "+n.gust_max_time:" today"}`):"",
+    [n.feels!=null&&n.feels!==n.temp?ph(`Feels <b>${t(n.feels)}</b>`):"",n.humidity!=null?ph(`Humidity <b>${Math.round(n.humidity)}%</b>`):""].filter(Boolean).join(sep),
+    n.rain_day!=null?ph(`Rain today <b>${n.rain_day} ${u.rain}</b>${n.rain_rate?` (${n.rain_rate} ${u.rain}/h)`:""}`):""];
+  $("wxnow").innerHTML=wicon(n.icon,n.day)+`<div class="t">${t(n.temp)}</div><div class="d">${lines.filter(Boolean).join("<br>")}</div>`;
+  // a rain-chance line only when one of the columns has a chance worth showing
+  const pop=(list,x)=>list.some(v=>v.pop!=null&&v.pop>=10)?`<span class="r">${x.pop!=null&&x.pop>=10?x.pop+"%":"&nbsp;"}</span>`:"";
+  const fits=el=>[...el.children].every(c=>c.scrollWidth<=c.clientWidth+1);
+  const total=Math.min(w.days.length,Math.max(2,+wxCfg.days||7));
+  let dn=Math.max(2,Math.min(total,Math.floor(($("wxtop").clientWidth-$("wxnow").offsetWidth)/(lu*6))));
+  for(;;){ box.style.setProperty("--days",dn); drawDays(dn); if(dn<=2||fits($("wxdays")))break; dn--; }
+  const pages=wxCfg.page>0?Math.ceil(total/dn):1;
+  $("wxdots").classList.toggle("on",pages>1);
+  $("wxdots").innerHTML=pages>1?Array.from({length:pages},(_,i)=>`<b class="${i===wxPage%pages?"on":""}"></b>`).join(""):"";
+  let hn=Math.max(4,Math.min(12,Math.floor(box.clientWidth/(lu*5.5))));
+  for(;;){ drawHours(hn); if(hn<=4||fits($("wxhours"))||getComputedStyle($("wxhours")).display==="none")break; hn--; }
+  function drawDays(dn){
+  const pages=wxCfg.page>0?Math.ceil(total/dn):1, start=Math.min((wxPage%pages)*dn,total-dn);
+  const days=w.days.slice(start,start+dn);
+  $("wxdays").innerHTML=days.map(d=>`<div class="wc"><span>${d.name}</span>${wicon(d.icon,true,"s")}<span class="h">${t(d.hi)} <span style="color:var(--muted);font-weight:400">${t(d.lo)}</span></span>`+
+    pop(days,d)+`<span>${d.wind!=null?warrow(d.deg)+" "+d.wind+(d.gust>d.wind?"&ndash;"+d.gust:""):""}</span></div>`).join("");
+  }
+  function drawHours(hn){
+  const step=hn>=12?1:2;
+  box.style.setProperty("--hours",Math.min(hn,Math.floor(12/step)));
+  const hrs=w.hours.filter((h,i)=>i%step===step-1).slice(0,Math.min(hn,Math.floor(12/step)));
+  $("wxhours").innerHTML=hrs.map(h=>`<div class="wc"><span>${h.label}</span>${wicon(h.icon,h.day,"s")}<span class="h">${t(h.temp)}</span>`+
+    pop(hrs,h)+`<span>${h.wind!=null?warrow(h.deg)+" "+h.wind+(h.gust>h.wind?"&ndash;"+h.gust:""):""}</span></div>`).join("");
+  }
+}
+async function tick(){
+  let d;try{const r=await fetch("/display/data",{cache:"no-store"});d=await r.json()}catch(e){$("upd").textContent="Waiting for the monitor...";return}
+  if(rev!==null&&d.rev!==rev){location.reload();return} rev=d.rev;
+  $("blank").style.display=d.screen_off?"block":"none";
+  soundCfg={sounds:d.sounds||{},volume:d.volume,quiet:d.sound_quiet,off:!!d.quiet_hours,speak:!!d.speak,mode:d.speak_mode||"after",
+    cooldown:+(d.sound_cooldown??60),gap:+(d.sound_gap??5),doorbellAlways:d.doorbell_always!==false};
+  $("name").textContent=d.name;$("clock").textContent=d.time;$("date").textContent=d.date;
+  buildCams(d.cameras);
+  const n=d.now||{};
+  const soc=n.soc; $("soc").querySelector(".v").textContent=soc==null?"--":Math.round(soc)+"%";
+  $("socfill").style.width=(soc||0)+"%";
+  const low=parseFloat(d.low_soc||25);
+  $("socfill").style.background=soc==null?"var(--line)":soc<=low?"var(--bad)":soc<=low+15?"var(--warn)":"var(--batt)";
+  const kwhLeft=(soc!=null&&d.battery_kwh)?(soc/100*d.battery_kwh).toFixed(1)+" kWh stored":"";
+  $("soc").querySelector(".s").textContent=kwhLeft;
+  const use=n.load_avg_3d||n.load_avg_24h;
+  if(soc!=null&&d.battery_kwh&&use>0){const h=Math.max(0,(soc-low)/100*d.battery_kwh)/(use/1000);
+    $("runtime").textContent=`About ${h<1?Math.round(h*60)+" min":h.toFixed(h<10?1:0)+" h"} to ${low}% at the usual ${kw(use)} use`;}
+  else $("runtime").textContent="";
+  $("sochigh").textContent=d.battery_high?d.battery_high.text:"";
+  const fc=d.forecast;
+  setTile("pv",kw(n.pv),(n.pv_today!=null?n.pv_today.toFixed(1)+" kWh today":"")+(fc?`, ${fc.tomorrow.toFixed(0)} tomorrow`:""));
+  setTile("load",kw(n.load),n.used_today!=null?n.used_today.toFixed(1)+" kWh today":"");
+  const b=n.battery; setTile("bat",kw(b==null?null:Math.abs(b)),b==null?"":b>50?"charging":b<-50?"discharging":"idle",
+    b==null?null:b>50?"var(--batt)":b<-50?"var(--warn)":"var(--fg)");
+  $("gen").style.display=(d.generator==="none"&&!(n.gen>0))?"none":"";
+  setTile("gen",(n.gen||0)>50?kw(n.gen):"Off",(n.gen||0)>50?"charging the battery":(d.generator==="manual"?"started by hand":""));
+  chart(d.series||{});
+  weather(d.weather,{days:d.wx_days,page:d.wx_page});
+  const notes=[...(d.alerts||[])]; if(d.advice)notes.push(d.advice);
+  for(const a of (d.weather&&d.weather.alerts)||[]){         // National Weather Service alerts
+    const until=a.ends?new Date(a.ends):null;
+    notes.unshift({level:/Extreme|Severe/.test(a.severity)?"bad":"warn",
+      text:a.event+(until&&!isNaN(until)?" until "+until.toLocaleString([], {weekday:"short",hour:"numeric",minute:"2-digit"}):"")});
+  }
+  $("notes").innerHTML="";for(const a of notes){const e=document.createElement("div");e.className="note "+(a.level||"");e.textContent=a.text;$("notes").appendChild(e)}
+  const age=n.age; $("upd").textContent=age==null?"No inverter data":"Inverter data "+(age<90?"live":Math.round(age/60)+" min old");
+  // too much for the screen (long notes, a small screen): the hourly weather row goes first
+  $("wx").classList.remove("tight");
+  if($("info").scrollHeight>$("info").clientHeight+2)$("wx").classList.add("tight");
+}
+// Burn-in protection. Every 20 minutes one of four layouts, picked from the clock (so a reload keeps it):
+// cameras left or right (without cameras: tiles in order or reversed) x info panel top-down or flipped.
+// Every minute the whole page moves a few pixels along a small circle. ?layout=0..3 pins a layout.
+const LAYOUT_MIN=20, pinned=new URLSearchParams(location.search).get("layout");
+let layoutNow=null;
+function applyLayout(){
+  const n=pinned!==null?(+pinned%4):Math.floor(Date.now()/60000/LAYOUT_MIN)%4;
+  const w=$("wrap"), nocam=w.classList.contains("nocam");
+  const want={swap:!nocam&&(n&1)===1, rtl:nocam&&(n&1)===1, flip:(n&2)===2};
+  const key=nocam+":"+n; if(key===layoutNow)return;
+  const first=layoutNow===null; layoutNow=key;
+  const set=()=>{for(const c in want)w.classList.toggle(c,want[c])};
+  if(first){set();return}
+  w.classList.add("fade");setTimeout(()=>{set();w.classList.remove("fade")},700);
+}
+function drift(){
+  if(pinned!==null)return;
+  const a=(Date.now()/60000)%60/60*2*Math.PI;
+  $("wrap").style.transform=`translate(${(Math.cos(a)*6).toFixed(1)}px,${(Math.sin(a)*6).toFixed(1)}px)`;
+}
+tick().then(applyLayout);setInterval(tick,10000);
+setInterval(()=>{applyLayout();drift()},60000);drift();
+setTimeout(()=>location.reload(),6*3600*1000);
+</script></body></html>
