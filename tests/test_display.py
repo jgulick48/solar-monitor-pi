@@ -4,6 +4,7 @@ import datetime as dt
 import http.server
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -31,6 +32,7 @@ class FakeVM(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         u = urllib.parse.urlsplit(self.path)
         q = urllib.parse.parse_qs(u.query)["query"][0]
+        q = re.sub(r"last_over_time\((lxp_[a-z0-9_]+(?:\{[^}]*\})?)\[5m\]\)", r"\1", q)   # the 5-minute hold (solar_setup.hold)
         if u.path.endswith("query_range"):
             a = urllib.parse.parse_qs(u.query)
             pts = [[t, "1000"] for t in range(int(a["start"][0]), int(a["end"][0]) + 1, int(a["step"][0]))]
@@ -61,7 +63,7 @@ class Display(unittest.TestCase):
         # on its GEN registers -> 0 W; generator on its AC input -> counted; 18kPV GEN port with voltage -> counted)
         import advisor
         import genlog
-        self.assertEqual(display.INSTANT["gen"], ss.GEN_POWER)
+        self.assertEqual(display.INSTANT["gen"], ss.hold(ss.GEN_POWER))
         self.assertEqual(genlog.QUERIES["inverter"], ss.GEN_POWER)
         for needle in ("lxp_v_gen > bool 50", "lxp_p_gen < 25000", "lxp_v_ac_r > bool 50"):
             self.assertIn(needle, ss.GEN_POWER)
@@ -72,10 +74,21 @@ class Display(unittest.TestCase):
         # checked against VictoriaMetrics v1.156: one BMS -17.1 A + one 0 while discharging 855 W -> about 0, not 855 W
         import advisor
         import genlog
-        self.assertEqual(display.INSTANT["ext_charge"], ss.EXT_CHARGE)
+        self.assertEqual(display.INSTANT["ext_charge"], ss.hold(ss.EXT_CHARGE))
         self.assertEqual(genlog.QUERIES["charger"], ss.EXT_CHARGE)
         self.assertIn("min(lxp_batt_current_bms) < 0", ss.BMS_POWER)
         self.assertNotIn("max(lxp_batt_current_bms) * max(lxp_v_bat)", open(advisor.__file__).read())
+
+    def test_live_queries_hold_last_value_5_minutes(self):
+        # a dongle dropping off for a moment: its readings go stale at once; hold them for up to 5 minutes
+        self.assertEqual(ss.hold("sum(lxp_p_pv)"), "sum(last_over_time(lxp_p_pv[5m]))")
+        self.assertEqual(ss.hold('max(lxp_soc{deploymentID="x"})'), 'max(last_over_time(lxp_soc{deploymentID="x"}[5m]))')
+        self.assertEqual(ss.hold("max_over_time(lxp_v_gen[1d])"), "max_over_time(lxp_v_gen[1d])")   # already a range
+        self.assertIn("last_over_time(lxp_p_pv[5m])", display.INSTANT["pv"])
+        self.assertIn("last_over_time(lxp_e_pv_day[5m])", display.INSTANT["pv_today"])
+        self.assertIn("last_over_time(lxp_p_pv[5m])", display.RANGE["pv"])
+        self.assertEqual(display.INSTANT["online"], "sum(lxp_bridge_connected)")      # stays live: a gone dongle shows
+        self.assertNotIn("last_over_time", display.INSTANT["age"])
 
     def test_hhmm_and_off_hours(self):
         self.assertEqual(display.parse_hhmm("6:05"), "06:05")

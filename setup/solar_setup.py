@@ -25,6 +25,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import secrets
 import shutil
 import socket
@@ -210,6 +211,20 @@ def load_json(path, default):
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return default
+
+
+# Hold each inverter reading at its last value for up to 5 minutes. When a dongle drops off for a moment the bridge
+# stops exporting its readings and VictoriaMetrics marks them stale at once, so sums over the inverters (solar,
+# load, battery, today's totals) dipped by that inverter's share until it was back (seen on site). Applied to the
+# live queries (wall display, Home Assistant, start page); a dongle gone longer than that stops counting.
+HOLD = "5m"
+_SELECTOR = re.compile(r"\b(lxp_[a-z0-9_]+)(\{[^}]*\})?(?![\[{(a-z0-9_]|\s*\[)")
+
+
+def hold(expr, window=HOLD):
+    """expr with every bare inverter selector (lxp_*) wrapped in last_over_time(...[window]); selectors that
+    already have a range ([1d]) are left alone."""
+    return _SELECTOR.sub(lambda m: f"last_over_time({m.group(1)}{m.group(2) or ''}[{window}])", expr)
 
 
 # Generator power from the inverters (W) and today's generator energy (kWh), for the display, the generator log and the

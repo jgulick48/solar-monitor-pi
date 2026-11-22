@@ -254,6 +254,10 @@ INSTANT = {
     "load_avg_3d": "avg_over_time((sum(lxp_p_load) or sum(lxp_p_eps))[3d:10m])",
 }
 RANGE = {"pv": "sum(lxp_p_pv)", "load": "sum(lxp_p_load) or sum(lxp_p_eps)", "soc": "max(lxp_soc)"}
+# a dongle dropping off for a moment doesn't make the totals dip (solar_setup.hold); the connection count and the
+# data age stay live, so a dongle that's gone still shows as gone
+INSTANT = {k: (q if k in ("online", "age") else ss.hold(q)) for k, q in INSTANT.items()}
+RANGE = {k: ss.hold(q) for k, q in RANGE.items()}
 _cache = {}
 _cache_lock = threading.Lock()
 
