@@ -183,7 +183,7 @@ def _remove(path):
         return False
 
 
-def _set_keys(keys):
+def _set_keys(keys, begin=MARK_BEGIN, end=MARK_END):
     """Replace the marked block in ~solar/.ssh/authorized_keys (keys = '' removes it). Other keys stay."""
     ak = os.path.join(home(), ".ssh", "authorized_keys")
     try:
@@ -192,16 +192,16 @@ def _set_keys(keys):
         lines = []
     out, skip = [], False
     for line in lines:
-        if line == MARK_BEGIN:
+        if line == begin:
             skip = True
-        elif line == MARK_END:
+        elif line == end:
             skip = False
         elif not skip:
             out.append(line)
     while out and out[-1] == "":
         out.pop()
     if keys:
-        out += [MARK_BEGIN, *keys.split("\n"), MARK_END]
+        out += [begin, *keys.split("\n"), end]
     if not out and not os.path.exists(ak):
         return
     os.makedirs(os.path.dirname(ak), mode=0o700, exist_ok=True)
@@ -255,9 +255,14 @@ def apply_off(stack, d):
     _remove(p(SUDOERS))
     if d.get("started_ssh"):
         _remove(p(SSHD_DROPIN))
-        run(["systemctl", "stop", "ssh"])
+        import sshaccess
+        if sshaccess.is_on(stack):    # SSH access from the network is on too: SSH stays, without the localhost limit
+            run(["systemctl", "restart", "ssh"])
+            msgs.append("SSH left on for SSH access")
+        else:
+            run(["systemctl", "stop", "ssh"])
+            msgs.append("SSH stopped")
         d["started_ssh"] = False
-        msgs.append("SSH stopped")
     return msgs
 
 

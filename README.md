@@ -370,7 +370,14 @@ Tested against the ranch's year of data: the advisor's monthly figures match a h
 ## Logging in to the Pi itself
 
 Not needed for normal use. The image has an admin account `solar` with no password and SSH turned off.
-To get a shell, power off, put the SSD in a computer and create two files on the `bootfs` partition:
+
+**With an SSH key (easiest):** setup page → *SSH access*: paste the public key of each computer that may log in
+(`~/.ssh/id_ed25519.pub`) and choose *Turn SSH access on*. Then `ssh solar@<the box's address>` works from this
+network, with those keys only (passwords stay off; nothing is opened on the router). *Administrator rights* (on by
+default) lets `solar` use sudo without a password, which updating or repairing the box needs. *Turn SSH access off*
+removes the keys again and stops SSH, unless it was already on before or remote support still uses it.
+
+**Without the setup page**, power off, put the SSD in a computer and create two files on the `bootfs` partition:
 an empty file named `ssh`, and `userconf.txt` containing `solar:<hash>` where the hash comes from
 `openssl passwd -6`. On the next boot SSH is on and `solar` has that password.
 
@@ -425,7 +432,7 @@ Home Assistant, Grafana and the rest.
   settings (`state/modules/<id>.json`, moved over from the old file on the first run after an update), its pages,
   setup-page section or fieldset, start-page card or banner, wall-display data, Home Assistant fields, collector
   hooks and Compose profiles. The core in `setup/modules/__init__.py` calls only the enabled ones; the setup page's
-  *Optional features* switches turn them on and off. So far: backups, remote access, remote support and weather;
+  *Optional features* switches turn them on and off. So far: backups, remote access, remote support, SSH access and weather;
   voice announcements, cameras and the generator move there next.
 - `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it; `setup/modules/backup/`
   is its page and settings.
