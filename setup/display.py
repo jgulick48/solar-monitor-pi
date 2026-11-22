@@ -237,14 +237,14 @@ INSTANT = {
     "pv": "sum(lxp_p_pv)",
     "load": "sum(lxp_p_load) or sum(lxp_p_eps)",
     "battery": "sum(lxp_p_charge) - sum(lxp_p_discharge)",
-    "gen": "sum(lxp_p_gen)",
+    "gen": ss.GEN_POWER,
     # charging the inverters didn't do: a generator on a DC charger (Chargeverter); see genlog.py
     "ext_charge": "max(lxp_batt_current_bms) * max(lxp_v_bat) - (sum(lxp_p_charge) - sum(lxp_p_discharge))",
     "pv_today": "sum(lxp_e_pv_day)",
     "used_today": "sum(lxp_e_load_day) or sum(lxp_e_eps_day)",
     "charged_today": "sum(lxp_e_chg_day)",
     "discharged_today": "sum(lxp_e_dischg_day)",
-    "gen_today": "sum(lxp_e_gen_day)",
+    "gen_today": ss.GEN_ENERGY_DAY,
     "online": "sum(lxp_bridge_connected)",
     "fault": "max(lxp_fault_code)",
     "bms_fault": "max(lxp_fault_code_bms)",
@@ -481,14 +481,14 @@ def day_stats(start, end):
     return {
         "solar": vm_at(f"max_over_time((sum(lxp_e_pv_day)){w})", end),
         "used": vm_at(f"max_over_time((sum(lxp_e_load_day) or sum(lxp_e_eps_day)){w})", end),
-        "gen_kwh": _add(vm_at(f"max_over_time((sum(lxp_e_gen_day)){w})", end),
+        "gen_kwh": _add(vm_at(f"max_over_time(({ss.GEN_ENERGY_DAY}){w})", end),
                         (lambda f: None if f is None else f * secs / 3600 / 1000)(
                             vm_at(f"avg_over_time((clamp_min({EXT}, 0) * ({EXT} > bool 500)){w})", end))),
         "low_soc": vm_at(f"min_over_time((max(lxp_soc)){w})", end),
         "gen_hours": (lambda f: None if f is None else f * secs / 3600)(
-            vm_at(f"avg_over_time(clamp_max((sum(lxp_p_gen) > bool 200) + ({EXT} > bool 500), 1){w})", end)
+            vm_at(f"avg_over_time(clamp_max(({ss.GEN_POWER} > bool 200) + ({EXT} > bool 500), 1){w})", end)
             if vm_at(f"count_over_time((max(lxp_batt_current_bms)){w})", end)
-            else vm_at(f"avg_over_time((sum(lxp_p_gen) > bool 200){w})", end)),
+            else vm_at(f"avg_over_time(({ss.GEN_POWER} > bool 200){w})", end)),
     }
 
 

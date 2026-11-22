@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Generate the Grafana dashboards in stack/grafana/dashboards/ (run after editing)."""
 import json, os
+# same as setup/solar_setup.py GEN_POWER: the GEN port only with voltage (the 6000XP's registers hold other data), plus the AC input
+GEN_POWER = ("((sum((lxp_p_gen < 25000) * (lxp_v_gen > bool 50)) or vector(0))"
+             " + (sum(lxp_p_to_user * (lxp_v_ac_r > bool 50)) or vector(0)))")
 OUT = os.path.join(os.path.dirname(__file__), "..", "stack", "grafana", "dashboards")
 DS = {"type": "prometheus", "uid": "victoriametrics"}
 _id = [0]
@@ -44,7 +47,7 @@ P.append(row("History", 10))
 P += [
     ts("Power", [tgt("sum(lxp_p_pv)", "Solar", "A"), tgt("sum(lxp_p_load) or sum(lxp_p_eps)", "House load", "B"),
                  tgt("sum(lxp_p_charge) - sum(lxp_p_discharge)", "Battery (+ charging)", "C"),
-                 tgt("sum(lxp_p_gen)", "Generator input", "D")], "watt", 0, 11, w=16, h=9),
+                 tgt(GEN_POWER, "Generator input", "D")], "watt", 0, 11, w=16, h=9),
     ts("Battery state of charge", [tgt("max(lxp_soc)", "SoC", "A")], "percent", 16, 11, w=8, h=9, decimals=0),
     ts("Daily solar and use", [tgt("max_over_time(sum(lxp_e_pv_day)[1d:5m])", "Solar", "A"),
                                tgt("max_over_time((sum(lxp_e_load_day) or sum(lxp_e_eps_day))[1d:5m])", "Used", "B")], "kwatth", 0, 20, w=24, h=8),

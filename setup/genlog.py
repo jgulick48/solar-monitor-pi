@@ -36,7 +36,7 @@ import solar_setup as ss  # noqa: E402
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
 STEP = 60
 QUERIES = {
-    "inverter": "sum(lxp_p_gen)",
+    "inverter": ss.GEN_POWER,          # GEN port (with voltage) or AC input: see solar_setup.GEN_POWER
     "charger": "max(lxp_batt_current_bms) * max(lxp_v_bat) - (sum(lxp_p_charge) - sum(lxp_p_discharge))",
 }
 ON_W = {"inverter": 200, "charger": 500}

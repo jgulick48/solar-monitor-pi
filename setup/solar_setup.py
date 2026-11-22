@@ -212,6 +212,17 @@ def load_json(path, default):
         return default
 
 
+# Generator power from the inverters (W) and today's generator energy (kWh), for the display, the generator log and the
+# advisor. The GEN port counts only while it has generator voltage, and below 25 kW: on the EG4 6000XP those registers
+# hold other data (seen on site: 55-64 kW, 51.2 kWh today and a dry contact "on" with 0 V and no generator). Plus the AC
+# input while it has voltage: an off-grid box has nothing but a generator on it, and the 6000XP's generator connects
+# there. The GEN port's energy counter only counts if the port had voltage in the last day.
+GEN_POWER = ("((sum((lxp_p_gen < 25000) * (lxp_v_gen > bool 50)) or vector(0))"
+             " + (sum(lxp_p_to_user * (lxp_v_ac_r > bool 50)) or vector(0)))")
+GEN_ENERGY_DAY = ("((sum(lxp_e_gen_day * (max_over_time(lxp_v_gen[1d]) > bool 50)) or vector(0))"
+                  " + (sum(lxp_e_to_user_day) or vector(0)))")
+
+
 def forget_dongle(stack, datalog):
     """Remove a dongle that is no longer found (a moved box, a replaced dongle, a test simulator): from inverters.json
     and the bridge config, and its retained MQTT messages, so Home Assistant drops its device. Returns messages;
