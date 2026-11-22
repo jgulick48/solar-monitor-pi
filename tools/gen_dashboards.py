@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Generate the Grafana dashboards in stack/grafana/dashboards/ (run after editing)."""
 import json, os
+# same as setup/solar_setup.py LOAD_ENERGY_DAY: per inverter the larger of the load and EPS day counters (the 6000XP's load counter is 0)
+LOAD_ENERGY_DAY = "sum((lxp_e_load_day > lxp_e_eps_day) or lxp_e_eps_day or lxp_e_load_day)"
 # same as setup/solar_setup.py GEN_POWER: the GEN port only with voltage (the 6000XP's registers hold other data), plus the AC input
 GEN_POWER = ("((sum((lxp_p_gen < 25000) * (lxp_v_gen > bool 50)) or vector(0))"
              " + (sum(lxp_p_to_user * (lxp_v_ac_r > bool 50)) or vector(0)))")
@@ -39,7 +41,7 @@ P += [
 P.append(row("Today", 5))
 P += [
     stat("Solar today", "sum(lxp_e_pv_day)", "kwatth", 0, 6, w=6),
-    stat("Used today", "sum(lxp_e_load_day) or sum(lxp_e_eps_day)", "kwatth", 6, 6, w=6),
+    stat("Used today", LOAD_ENERGY_DAY, "kwatth", 6, 6, w=6),
     stat("Battery charged today", "sum(lxp_e_chg_day)", "kwatth", 12, 6, w=6),
     stat("Battery discharged today", "sum(lxp_e_dischg_day)", "kwatth", 18, 6, w=6),
 ]
@@ -50,7 +52,7 @@ P += [
                  tgt(GEN_POWER, "Generator input", "D")], "watt", 0, 11, w=16, h=9),
     ts("Battery state of charge", [tgt("max(lxp_soc)", "SoC", "A")], "percent", 16, 11, w=8, h=9, decimals=0),
     ts("Daily solar and use", [tgt("max_over_time(sum(lxp_e_pv_day)[1d:5m])", "Solar", "A"),
-                               tgt("max_over_time((sum(lxp_e_load_day) or sum(lxp_e_eps_day))[1d:5m])", "Used", "B")], "kwatth", 0, 20, w=24, h=8),
+                               tgt(f"max_over_time(({LOAD_ENERGY_DAY})[1d:5m])", "Used", "B")], "kwatth", 0, 20, w=24, h=8),
 ]
 P.append(row("Per inverter", 28))
 P += [

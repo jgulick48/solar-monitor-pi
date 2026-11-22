@@ -427,7 +427,7 @@
       "type": "prometheus",
       "uid": "victoriametrics"
      },
-     "expr": "sum(lxp_e_load_day) or sum(lxp_e_eps_day)",
+     "expr": "sum((lxp_e_load_day > lxp_e_eps_day) or lxp_e_eps_day or lxp_e_load_day)",
      "legendFormat": "",
      "refId": "A"
     }
@@ -727,7 +727,7 @@
       "type": "prometheus",
       "uid": "victoriametrics"
      },
-     "expr": "max_over_time((sum(lxp_e_load_day) or sum(lxp_e_eps_day))[1d:5m])",
+     "expr": "max_over_time((sum((lxp_e_load_day > lxp_e_eps_day) or lxp_e_eps_day or lxp_e_load_day))[1d:5m])",
      "legendFormat": "Used",
      "refId": "B"
     }
