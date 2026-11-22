@@ -940,7 +940,8 @@ def battery_card(site):
         return ""
     bits = [f"cells {b['spread_top_mv']} mV apart when full" if b["spread_top_mv"] is not None else None,
             f"SOH {b['soh']:.0f}%" if b["soh"] is not None else None,
-            f"{b['cycles']:.0f} cycles" if b["cycles"] is not None else None]
+            f"{b['cycles']:.0f} cycles" if b["cycles"] is not None else None,
+            f"BMS on {', '.join(b['bms_inverters'])}" if b["bms_inverters"] and b["other_inverters"] else None]
     return (f"<div class='card{' warn' if b['level'] == 'warn' else ''}'><b>Battery health</b>: {LEVEL_WORD[b['level']]}"
             f"{(': ' + ', '.join(x for x in bits if x)) if any(bits) else ''} &nbsp;<a href='/battery'>details</a></div>")
 
@@ -961,6 +962,7 @@ def battery_page(site):
     body = f"""<h1>Battery health</h1>
 <div class="card{' warn' if b['level'] == 'warn' else ''}"><b>Overall</b>: {LEVEL_WORD[b['level']]}<ul>{finds}</ul></div>
 <table>
+<tr><td>BMS data from</td><td>{html.escape(battery.bms_line(b))}</td></tr>
 <tr><td>Cells now</td><td>{f(b['min_cell_v'], '{:.3f}', ' V')} to {f(b['max_cell_v'], '{:.3f}', ' V')} ({f(b['spread_now_mv'], '{}', ' mV')} apart; only meaningful near full)</td></tr>
 <tr><td>Spread when last full</td><td>{f(b['spread_top_mv'], '{}', ' mV')} {('(' + b['spread_top_day'] + ')') if b['spread_top_day'] else ''}; good under 50, watch 50-100, over 100 drifting</td></tr>
 <tr><td>Last full charge</td><td>{full}</td></tr>
@@ -974,7 +976,8 @@ def battery_page(site):
 <p><small>LiFePO4 cells all sit near 3.3 V for most of the charge, so a weak or unbalanced cell only shows near full,
 where the BMS balances them. The capacity estimate is the energy taken out per 1% of charge on long discharges, times 100:
 it follows the BMS's own charge count, so it checks the BMS against the size entered on the setup page rather than
-measuring the cells. The figures are for the whole bank (the highest and lowest cells of all batteries).</small></p>
+measuring the cells. The figures are for the whole bank (the highest and lowest cells of all batteries), from the inverter
+connected to the battery's BMS: in a parallel system the other inverters report zeros, which are left out.</small></p>
 <p><a href="/">Back</a></p>"""
     return page("Battery health", body)
 

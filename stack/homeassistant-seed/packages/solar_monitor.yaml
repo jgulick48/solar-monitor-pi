@@ -149,7 +149,7 @@ rest:
         # ok, note, warn or unknown
         value_template: "{{ value_json.battery_health }}"
         icon: mdi:battery-heart-variant
-        json_attributes: [battery_health_text, battery_spread_top_day, battery_last_full, bms_fault_code, bms_warning_code]
+        json_attributes: [battery_health_text, battery_spread_top_day, battery_last_full, bms_fault_code, bms_warning_code, battery_bms_inverter]
       - name: Site battery cell spread when full
         unique_id: site_battery_spread_top
         value_template: "{{ value_json.battery_spread_top }}"

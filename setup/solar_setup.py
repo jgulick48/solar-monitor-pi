@@ -227,6 +227,18 @@ def hold(expr, window=HOLD):
     return _SELECTOR.sub(lambda m: f"last_over_time({m.group(1)}{m.group(2) or ''}[{window}])", expr)
 
 
+# The battery's BMS data (cell voltages and temperatures, SOH, cycles, BMS faults, rated capacity) comes from the
+# inverter(s) connected to the BMS. In a parallel system the others report 0 for all of it (seen on site: 0 V and
+# 0 degrees from the second 6000XP made the coldest cell "0 C" and the cell spread 3.3 V). A unit counts as
+# BMS-connected when it reports a cell voltage.
+BMS_UNITS = "(max by (deploymentID) (lxp_max_cell_volt) > 0)"
+
+
+def from_bms(selector):
+    """selector limited to the BMS-connected inverter(s)."""
+    return f"({selector} and on (deploymentID) {BMS_UNITS})"
+
+
 # House energy today (kWh): per inverter the larger of its load and EPS (backup output) day counters. Hybrids count the
 # whole load (including what a generator passes through) in e_load_day; the EG4 6000XP reports e_load_day as 0 and
 # the house's energy only in e_eps_day, so "load or eps" showed 0.0 kWh there (seen on site). Either counter alone works.
