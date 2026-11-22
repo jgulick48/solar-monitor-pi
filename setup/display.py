@@ -41,13 +41,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import genlog  # noqa: E402
 import screenpower as sp  # noqa: E402
 import solar_setup as ss  # noqa: E402
+from cameras import MAX_CAMERAS, SOUND_KINDS  # noqa: E402,F401 - camera settings live in display.json
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
-COOLDOWNS = [(0, "every time"), (30, "30 seconds"), (60, "1 minute"), (120, "2 minutes"), (300, "5 minutes"), (600, "10 minutes"),
-             (1800, "30 minutes")]
-GAPS = [(0, "no limit"), (5, "5 seconds"), (10, "10 seconds"), (30, "30 seconds"), (60, "1 minute")]
-SOUND_KINDS = [("doorbell", "Doorbell", True), ("person", "Person", True), ("vehicle", "Vehicle", False),
-               ("animal", "Animal", False), ("package", "Package", False)]
 DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
             "sounds": {k: on for k, _, on in SOUND_KINDS}, "volume": 70, "sound_quiet": True,
             # what voice announcements (the voice module) say for a camera event
@@ -55,7 +51,6 @@ DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
             # and two sounds are at least sound_gap s apart; doorbell rings always (the highlight isn't limited)
             "sound_cooldown": 60, "sound_gap": 5, "doorbell_always": True,
             "speak_template": "{object} at the {camera}", "speak_doorbell": "Someone's at the {camera}"}
-MAX_CAMERAS = 16   # all of them rotate through the two places on screen
 KIOSK_USER = "solar-display"
 
 
@@ -74,18 +69,6 @@ def load(stack):
     return d
 
 
-def go2rtc_source(url):
-    """Camera link -> go2rtc source. UniFi Protect gives rtsps://host:7441/TOKEN?enableSrtp with a
-    self-signed certificate; go2rtc's rtspx:// is RTSPS without the certificate check."""
-    u = urllib.parse.urlsplit(url.strip())
-    if u.scheme not in ("rtsp", "rtsps", "rtspx") or not u.hostname:
-        raise ValueError("a camera link must start with rtsp:// or rtsps:// and include the camera's address")
-    if u.scheme == "rtsps":
-        q = "&".join(p for p in u.query.split("&") if p and p.lower() != "enablesrtp")
-        u = u._replace(scheme="rtspx", query=q)
-    return urllib.parse.urlunsplit(u)
-
-
 def parse_hhmm(s):
     s = (s or "").strip()
     if not s:
@@ -98,34 +81,20 @@ def parse_hhmm(s):
 
 
 def save(stack, d):
-    """Write display.json and go2rtc's config. Returns True if the camera config changed."""
+    """Write display.json and go2rtc's config (cameras.py). Returns True if the camera config changed."""
+    import cameras
     ss.write_if_changed(settings_path(stack), json.dumps(d, indent=2) + "\n", 0o600)
-    lines = ["# Written by the solar monitor setup page (cameras for the HDMI display); edits are overwritten.",
-             "api:", "  listen: \"127.0.0.1:1984\"", "  origin: \"*\"",
-             "rtsp:", "  listen: \"\"", "webrtc:", "  listen: \"\"", "log:", "  level: warn", "streams:"]
-    for i, c in enumerate(d["cameras"], start=1):
-        lines.append(f"  cam{i}: {json.dumps(go2rtc_source(c['url']))}")
-    if not d["cameras"]:
-        lines[-1] = "streams: {}"
-    os.makedirs(os.path.join(stack, "go2rtc"), exist_ok=True)
-    return ss.write_if_changed(os.path.join(stack, "go2rtc", "go2rtc.yaml"), "\n".join(lines) + "\n", 0o600)
+    return cameras.write_go2rtc(stack, d["cameras"])
 
 
 def events(stack):
-    """Cameras with a detection now (UniFi Protect), keyed by the display's camera ids (cam1...)."""
-    import protect
-    protect.listen(stack)                 # (re)starts the event listener if the settings changed
+    """For the screen's fast poll (and the power service): whether the screen should be on, quiet hours, the test
+    chime, and what the modules add: the cameras module's detections ("active"), the voice module's announcements."""
+    import modules
     d = load(stack)
-    active = protect.EVENTS.active(protect.settings(stack).get("highlight_motion", False))
-    out = {}
-    for i, c in enumerate(d["cameras"], 1):
-        if c.get("protect_id") in active:
-            out[f"cam{i}"] = active[c["protect_id"]]
-    sp.note_events(d, out, {f"cam{i}": c.get("name") or f"Camera {i}" for i, c in enumerate(d["cameras"], 1)})
+    ev = {"active": {}, "connected": False, "say": [], **modules.display_events(stack)}   # cameras note their wake-ups first
     on, why = sp.wanted(d)
-    import modules  # e.g. the voice module's announcements ("say")
-    return {"active": out, "connected": protect.EVENTS.connected, "test_sound": TEST_SOUND["at"],
-            "screen_on": on, "screen_why": why, "quiet_hours": quiet_hours(d), "say": [], **modules.display_events(stack)}
+    return {**ev, "test_sound": TEST_SOUND["at"], "screen_on": on, "screen_why": why, "quiet_hours": quiet_hours(d)}
 
 
 def quiet_hours(d, now=None):
@@ -141,63 +110,6 @@ def power_state(stack):
 
 
 TEST_SOUND = {"at": 0}   # the setup page's test button: the screen plays a chime when this changes
-
-
-def stream_codec(cam_id, secs=6, base="http://127.0.0.1:1984"):
-    """The video codec go2rtc gets from one of the screen's cameras ("H264", "H265"...), or "" if no video arrived.
-    Pulls the stream for a few seconds so go2rtc connects, and reads what the camera sent."""
-    def pull():
-        try:
-            with urllib.request.urlopen(f"{base}/api/stream.mp4?src={urllib.parse.quote(cam_id)}", timeout=secs + 2) as r:
-                end = time.time() + secs
-                while time.time() < end and r.read(16384):
-                    pass
-        except OSError:
-            pass
-    t = threading.Thread(target=pull, daemon=True)
-    t.start()
-    codec = ""
-    for _ in range(secs * 2):
-        time.sleep(0.5)
-        try:
-            with urllib.request.urlopen(f"{base}/api/streams?src={urllib.parse.quote(cam_id)}", timeout=3) as r:
-                s = json.load(r)
-        except (OSError, ValueError):
-            continue
-        for p in s.get("producers") or []:
-            for m in p.get("medias") or []:
-                if m.startswith("video"):
-                    codec = m.split(",")[-1].strip().split("/")[0].upper()
-        if codec:
-            break
-    t.join(secs + 3)
-    return codec
-
-
-def check_cameras(stack):
-    """Each camera's codec, kept in state/camera-check.json for the screen and the setup page. The screen's Chromium
-    plays H.264 only: a camera sending H.265 (UniFi Protect's Enhanced Encoding) stays black (seen on site)."""
-    out = {}
-    for i, c in enumerate(load(stack)["cameras"], 1):
-        out[f"cam{i}"] = {"name": c.get("name") or f"Camera {i}", "codec": stream_codec(f"cam{i}"), "at": int(time.time())}
-    ss.write_if_changed(os.path.join(stack, "state", "camera-check.json"), json.dumps(out, indent=2) + "\n", 0o644)
-    return out
-
-
-def camera_problems(stack):
-    """{camN: text} for cameras the screen can't show, from the last check."""
-    chk = ss.load_json(os.path.join(stack, "state", "camera-check.json"), {})
-    names = {f"cam{i}": c.get("name") for i, c in enumerate(load(stack)["cameras"], 1)}
-    out = {}
-    for cam, r in chk.items():
-        if names.get(cam) != r.get("name"):
-            continue                                  # cameras changed since the check
-        if r.get("codec") in ("H265", "HEVC"):
-            out[cam] = (f"{r['name']} sends H.265 video, which this screen can't play. In UniFi Protect, open the camera's "
-                        "settings and turn off Enhanced Encoding.")
-        elif r.get("codec") == "":
-            out[cam] = f"{r['name']} sent no video when checked."
-    return out
 
 
 def screen_off_now(d, now=None):
@@ -462,16 +374,14 @@ def data(stack, site):
     return {
         "name": site.get("name") or "Solar", "now": vals, "series": series, "alerts": alerts, "advice": advice,
         "battery_kwh": kwh, "generator": site.get("generator"), "low_soc": site.get("low_soc_alert"),
-        "cameras": [{"id": f"cam{i}", "name": c.get("name") or f"Camera {i}", "problem": camera_problems(stack).get(f"cam{i}", "")}
-                    for i, c in enumerate(d["cameras"], 1)],
+        "cameras": [],                                   # the cameras module (when it's on)
         "screen_off": screen_off_now(d, now.replace(tzinfo=None)), "quiet_hours": quiet_hours(d, now.replace(tzinfo=None)),
         "rev": max(int(os.path.getmtime(settings_path(stack))) if os.path.exists(settings_path(stack)) else 0,
                    _modules_rev(stack)),
         "time": hm(now, site), "date": now.strftime("%a %b %-d"),
-        "sounds": d.get("sounds") or {}, "volume": d.get("volume", 70), "sound_quiet": d.get("sound_quiet", True),
+        "volume": d.get("volume", 70), "sound_quiet": d.get("sound_quiet", True),
+        "sounds": {}, "sound_cooldown": 60, "sound_gap": 5, "doorbell_always": True,   # the cameras module
         "speak": False, "speak_mode": "after",           # the voice module (when it's on)
-        "sound_cooldown": d.get("sound_cooldown", 60), "sound_gap": d.get("sound_gap", 5),
-        "doorbell_always": d.get("doorbell_always", True),
         "expected": expected, "forecast": forecast_summary(fc, now, tz), "battery_high": high,
         "weather": None, "wx_days": 7, "wx_page": 8,    # weather: the weather module (when it's on)
         **_module_display(stack, site, now),
