@@ -26,7 +26,7 @@ SITE = {"name": "Test", "latitude": "39.74", "longitude": "-104.99", "time_zone"
 class FakeVM(http.server.BaseHTTPRequestHandler):
     values = {"max(lxp_soc)": 62, "sum(lxp_p_pv)": 3400, "sum(lxp_p_load) or sum(lxp_p_eps)": 900,
               "sum(lxp_p_charge) - sum(lxp_p_discharge)": 2300, ss.GEN_POWER: 0, "sum(lxp_e_pv_day)": 12.3,
-              "sum(lxp_e_load_day) or sum(lxp_e_eps_day)": 8.1, "sum(lxp_bridge_connected)": 2,
+              ss.LOAD_ENERGY_DAY: 8.1, "sum(lxp_bridge_connected)": 2,
               "max(lxp_fault_code)": 0, "max(lxp_warning_code)": 0, "time() - max(timestamp(lxp_soc))": 12}
 
     def do_GET(self):
@@ -78,6 +78,11 @@ class Display(unittest.TestCase):
         self.assertEqual(genlog.QUERIES["charger"], ss.EXT_CHARGE)
         self.assertIn("min(lxp_batt_current_bms) < 0", ss.BMS_POWER)
         self.assertNotIn("max(lxp_batt_current_bms) * max(lxp_v_bat)", open(advisor.__file__).read())
+
+    def test_house_energy_uses_eps_when_the_load_counter_is_zero(self):
+        # checked against VictoriaMetrics v1.156: 6000XP x2 (load 0, eps 7.1 + 6.6) -> 13.7; 18kPV (load 20, eps 15) -> 20
+        self.assertEqual(display.INSTANT["used_today"], ss.hold(ss.LOAD_ENERGY_DAY))
+        self.assertIn("lxp_e_load_day > lxp_e_eps_day", ss.LOAD_ENERGY_DAY)
 
     def test_live_queries_hold_last_value_5_minutes(self):
         # a dongle dropping off for a moment: its readings go stale at once; hold them for up to 5 minutes

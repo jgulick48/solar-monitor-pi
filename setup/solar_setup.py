@@ -239,6 +239,12 @@ def from_bms(selector):
     return f"({selector} and on (deploymentID) {BMS_UNITS})"
 
 
+# House energy today (kWh): per inverter the larger of its load and EPS (backup output) day counters. Hybrids count the
+# whole load (including what a generator passes through) in e_load_day; the EG4 6000XP reports e_load_day as 0 and
+# the house's energy only in e_eps_day, so "load or eps" showed 0.0 kWh there (seen on site). Either counter alone works.
+LOAD_ENERGY_DAY = "sum((lxp_e_load_day > lxp_e_eps_day) or lxp_e_eps_day or lxp_e_load_day)"
+
+
 # Generator power from the inverters (W) and today's generator energy (kWh), for the display, the generator log and the
 # advisor. The GEN port counts only while it has generator voltage, and below 25 kW: on the EG4 6000XP those registers
 # hold other data (seen on site: 55-64 kW, 51.2 kWh today and a dry contact "on" with 0 V and no generator). Plus the AC
