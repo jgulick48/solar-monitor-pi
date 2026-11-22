@@ -222,5 +222,15 @@ class Modules(unittest.TestCase):
         modules.form_check(self.stack, {"module_demo_shown": "1", "modules_form": "1"})   # being turned off: not checked
 
 
+    def test_hooks_may_return_anything(self):
+        """wx.fetch_forecast returns True and fetch_alerts a count: neither is a failure (v0.2.30 retried every 5 min)."""
+        self.add(Module(id="demo", title="Demo", default_enabled=True,
+                        every={1800: (lambda stack: True, 300), 600: (lambda stack: 3), 60: (lambda stack: None)}))
+        last = {}
+        modules.run_due(self.stack, last, now=10_000)
+        self.assertEqual({k: v for k, v in last.items() if k[0] == "demo"},
+                         {("demo", 1800): 10_000, ("demo", 600): 10_000, ("demo", 60): 10_000})
+
+
 if __name__ == "__main__":
     unittest.main()

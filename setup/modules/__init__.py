@@ -62,7 +62,7 @@ class Module:
     form_save: Optional[Callable] = None      # (stack, form) -> messages: save its fields from the main form
     display_data: Optional[Callable] = None   # (stack, site, now) -> fields added to the wall display's data
     routes: dict = dataclasses.field(default_factory=dict)  # ("GET" | "POST", path) -> fn(stack, form) -> Response
-    every: dict = dataclasses.field(default_factory=dict)   # seconds -> fn(stack) -> messages to log, in the collector;
+    every: dict = dataclasses.field(default_factory=dict)   # seconds -> fn(stack) (a list of messages to log, or anything), in the collector;
     #                                       or (fn, retry seconds) to try again sooner after a failure
     compose_profiles: Optional[Callable] = None  # (stack) -> Compose profiles (optional services) to run now
 
@@ -274,11 +274,14 @@ def run_due(stack, last, now=None):
                 continue
             last[key] = now
             try:
-                for msg in fn(stack) or ():
-                    log(f"{m.title}: {msg}")
+                result = fn(stack)
             except Exception as e:  # noqa: BLE001 - keep collecting
                 log(f"{m.title}: failed:", e)
                 last[key] = now - secs + retry
+                continue
+            if isinstance(result, (list, tuple)):       # messages to log; anything else (a count, True) is ignored
+                for msg in result:
+                    log(f"{m.title}: {msg}")
 
 
 def display_data(stack, site, now):
