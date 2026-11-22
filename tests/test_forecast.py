@@ -93,3 +93,47 @@ class Forecast(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BatteryHigh(unittest.TestCase):
+    """display.battery_high: today's estimated highest battery level (SITE: 30 kWh battery)."""
+
+    def high(self, soc, peaks, hour, load=800, so_far=None, minute=0):
+        now = dt.datetime(2026, 11, 21, hour, minute, tzinfo=DENVER)
+        return display.battery_high(SITE, {"soc": soc, "load_avg_3d": load}, now, DENVER, fake_forecast(peaks, now), so_far)
+
+    def test_sunny_morning_fills(self):
+        h = self.high(40, [8, 8, 8], 8)
+        self.assertEqual(h["pct"], 100)
+        self.assertTrue(h["text"].startswith("Full about\u00a0"))
+        self.assertIsNotNone(h["full_at"])
+
+    def test_dull_day_peaks_below_full(self):
+        h = self.high(40, [1.5, 5, 5], 8)
+        self.assertLess(h["pct"], 100)
+        self.assertGreater(h["pct"], 40)
+        self.assertIn(" at\u00a0", h["text"])
+        self.assertIsNone(h["full_at"])
+        # surplus: ~1.5 kW * 6.31 h-equivalent minus 0.8 kW while solar beats use, 95% stored -> a modest rise
+        self.assertLess(h["pct"], 70)
+
+    def test_falling_all_day(self):
+        h = self.high(60, [0.3, 5, 5], 9)
+        self.assertEqual(h["text"], "Not expected to charge higher today")
+        self.assertIsNone(h["at"])
+
+    def test_high_already_reached(self):
+        h = self.high(85, [5, 5, 5], 15, so_far=100)
+        self.assertEqual(h, {"pct": 100, "at": None, "full_at": None, "text": "High today 100%"})
+
+    def test_none_after_sunset_or_without_data(self):
+        self.assertIsNone(self.high(80, [5, 5, 5], 18))
+        now = dt.datetime(2026, 11, 21, 9, 0, tzinfo=DENVER)
+        self.assertIsNone(display.battery_high(SITE, {"soc": 50, "load_avg_3d": 800}, now, DENVER, None))
+        self.assertIsNone(display.battery_high(SITE, {"soc": 50}, now, DENVER, fake_forecast([5, 5, 5], now)))
+        self.assertIsNone(display.battery_high({k: v for k, v in SITE.items() if k != "battery_count"},
+                                               {"soc": 50, "load_avg_3d": 800}, now, DENVER, fake_forecast([5, 5, 5], now)))
+
+    def test_before_dawn_counts_the_whole_day(self):
+        h = self.high(35, [8, 8, 8], 5)
+        self.assertEqual(h["pct"], 100)

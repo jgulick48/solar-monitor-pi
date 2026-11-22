@@ -446,6 +446,10 @@ def data(stack, site):
         pass
     fc = load_forecast(stack)
     advice = generator_advice(site, vals, now, tz, fc) if site.get("generator") == "manual" else None
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    so_far = _cached(f"soc_high_{midnight.date()}", 300, lambda: vm_at(
+        f"max_over_time((max(lxp_soc))[{max(60, int((now - midnight).total_seconds()))}s])", now.timestamp()))
+    high = battery_high(site, vals, now, tz, fc, so_far)
     try:
         kwh = round(int(site["battery_count"]) * float(site["battery_kwh_each"]), 1)
     except (KeyError, TypeError, ValueError):
@@ -462,7 +466,7 @@ def data(stack, site):
         "speak": d.get("speak", False), "speak_mode": d.get("speak_mode", "after"),
         "sound_cooldown": d.get("sound_cooldown", 60), "sound_gap": d.get("sound_gap", 5),
         "doorbell_always": d.get("doorbell_always", True),
-        "expected": expected, "forecast": forecast_summary(fc, now, tz),
+        "expected": expected, "forecast": forecast_summary(fc, now, tz), "battery_high": high,
         "weather": wx.view(stack, site, now) if d.get("weather", True) else None,
     }
 
@@ -543,6 +547,61 @@ def daily_summary(stack, site, now, tz):
     return {"day": str(day), "complete": complete, "title": title, "text": text, "weekly": weekly}
 
 
+def _quarter(t):
+    """t rounded to the nearest 15 minutes (None stays None)."""
+    if t is None:
+        return None
+    t = t + dt.timedelta(minutes=7.5)
+    return t.replace(minute=t.minute // 15 * 15, second=0, microsecond=0)
+
+
+NBSP = "\u00a0"             # keeps "at 4:00 PM" on one line on the wall display
+CHARGE_EFFICIENCY = 0.95    # share of surplus solar that ends up stored
+
+
+def battery_high(site, now_vals, now, tz, fc, high_so_far=None):
+    """Today's estimated highest battery level: the battery simulated in 15-minute steps from now until
+    sunset, forecast solar against the usual use (the last 3 days' average), capped at full; combined
+    with the highest level already reached today. None after sunset, or without a forecast, the
+    battery size or the usual use.
+    {"pct": 0-100, "at": "2:15 PM" or None (already reached), "full_at": time it fills or None, "text": ...}"""
+    try:
+        lat, lon = float(site["latitude"]), float(site["longitude"])
+        kwh = int(site["battery_count"]) * float(site["battery_kwh_each"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    soc, load_w = now_vals.get("soc"), now_vals.get("load_avg_3d") or now_vals.get("load_avg_24h")
+    if not fc or soc is None or not load_w or load_w <= 0 or kwh <= 0:
+        return None
+    rise, sset = sun_times(lat, lon, now.date(), tz)
+    if rise is None or now >= sset or forecast_kw(fc, sset.timestamp() - 1800) is None:
+        return None
+    load_kw, step = load_w / 1000, dt.timedelta(minutes=15)
+    e = best = min(soc, 100) / 100 * kwh
+    best_t = full_t = None
+    t = now
+    while t < sset:
+        net = (forecast_kw(fc, t.timestamp()) or 0.0) - load_kw
+        e = min(max(e + net * 0.25 * (CHARGE_EFFICIENCY if net > 0 else 1.0), 0.0), kwh)
+        t += step
+        if e > best + 0.0005 * kwh:
+            best, best_t = e, t
+        if full_t is None and e >= 0.995 * kwh:
+            full_t = t
+    pct = best / kwh * 100
+    best_t, full_t = _quarter(best_t), _quarter(full_t)     # shown to the quarter hour: it's an estimate
+    if high_so_far is not None and high_so_far >= pct:   # the day's high is behind us
+        return {"pct": round(min(high_so_far, 100)), "at": None, "full_at": None,
+                "text": f"High today {min(high_so_far, 100):.0f}%"}
+    if best_t is None:
+        return {"pct": round(pct), "at": None, "full_at": None, "text": "Not expected to charge higher today"}
+    if full_t is not None:
+        return {"pct": 100, "at": hm(full_t, site), "full_at": hm(full_t, site),
+                "text": "Full about" + NBSP + hm(full_t, site).replace(" ", NBSP)}
+    return {"pct": round(pct), "at": hm(best_t, site), "full_at": None,
+            "text": f"High today about {pct:.0f}% at" + NBSP + hm(best_t, site).replace(" ", NBSP)}
+
+
 def _r(v, n=0):
     return None if v is None else round(v, n) if n else int(round(v))
 
@@ -583,6 +642,9 @@ def ha_status(stack, site):
         "generator_needed": adv.get("level") == "warn",
         "forecast_today": (d["forecast"] or {}).get("today"), "forecast_remaining": (d["forecast"] or {}).get("remaining"),
         "forecast_tomorrow": (d["forecast"] or {}).get("tomorrow"),
+        "battery_high_estimate": (d.get("battery_high") or {}).get("pct"),
+        "battery_high_at": (d.get("battery_high") or {}).get("at"),
+        "battery_full_at": (d.get("battery_high") or {}).get("full_at"),
         **_summary_fields(stack, site),
         **backup_fields(stack),
         **_battery_fields(stack, site),
@@ -710,7 +772,7 @@ background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot
 <div id="info">
  <div id="top"><div id="name">Solar</div><div><div id="clock">--:--</div><div id="date"></div></div></div>
  <div id="tiles">
-  <div class="tile" id="soc"><div class="k">Battery</div><div class="v">--</div><div id="socbar"><div id="socfill"></div></div><div class="s"></div><div class="s" id="runtime" style="margin-top:calc(var(--u)*.6);white-space:normal"></div></div>
+  <div class="tile" id="soc"><div class="k">Battery</div><div class="v">--</div><div id="socbar"><div id="socfill"></div></div><div class="s"></div><div class="s" id="runtime" style="margin-top:calc(var(--u)*.6);white-space:normal"></div><div class="s" id="sochigh" style="margin-top:calc(var(--u)*.6);white-space:normal"></div></div>
   <div class="tile" id="pv"><div class="k">Solar</div><div class="v" style="color:var(--solar)">--</div><div class="s"></div></div>
   <div class="tile" id="load"><div class="k">House</div><div class="v" style="color:var(--load)">--</div><div class="s"></div></div>
   <div class="tile" id="bat"><div class="k">Battery power</div><div class="v">--</div><div class="s"></div></div>
@@ -947,6 +1009,7 @@ async function tick(){
   if(soc!=null&&d.battery_kwh&&use>0){const h=Math.max(0,(soc-low)/100*d.battery_kwh)/(use/1000);
     $("runtime").textContent=`About ${h<1?Math.round(h*60)+" min":h.toFixed(h<10?1:0)+" h"} to ${low}% at the usual ${kw(use)} use`;}
   else $("runtime").textContent="";
+  $("sochigh").textContent=d.battery_high?d.battery_high.text:"";
   const fc=d.forecast;
   setTile("pv",kw(n.pv),(n.pv_today!=null?n.pv_today.toFixed(1)+" kWh today":"")+(fc?`, ${fc.tomorrow.toFixed(0)} tomorrow`:""));
   setTile("load",kw(n.load),n.used_today!=null?n.used_today.toFixed(1)+" kWh today":"");
