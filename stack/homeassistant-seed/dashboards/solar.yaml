@@ -146,6 +146,7 @@ views:
             content: >-
               <ha-alert alert-type="{{ {'warn': 'warning', 'note': 'info', 'ok': 'success'}.get(states('sensor.site_battery_health'), 'info') }}">
               {{ state_attr('sensor.site_battery_health', 'battery_health_text') or 'No battery health findings yet.' }}</ha-alert>
+              {% if state_attr('sensor.site_battery_health', 'battery_bms_inverter') %}<small>Battery data from inverter {{ state_attr('sensor.site_battery_health', 'battery_bms_inverter') }} (connected to the BMS).</small>{% endif %}
           - type: tile
             entity: sensor.site_battery_cell_spread_when_full
             name: Cell spread when full
