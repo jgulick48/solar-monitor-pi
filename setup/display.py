@@ -40,7 +40,6 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import genlog  # noqa: E402
 import screenpower as sp  # noqa: E402
-import wx  # noqa: E402
 import solar_setup as ss  # noqa: E402
 
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
@@ -55,9 +54,6 @@ DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
             # how often sounds may play: the same alert (camera + kind) is repeated at most every sound_cooldown s,
             # and two sounds are at least sound_gap s apart; doorbell rings always (the highlight isn't limited)
             "sound_cooldown": 60, "sound_gap": 5, "doorbell_always": True,
-            "weather": True,                 # weather (wx.py) in the panel with the solar figures
-            "wx_days": 7,                    # forecast days to show (2-7); more than fit are paged through
-            "wx_page": 8,                    # seconds per page of forecast days (0: show only what fits)
             "speak": False, "speak_mode": "after", "speak_template": "{object} at the {camera}",
             "speak_doorbell": "Someone's at the {camera}", "voice": "en_US-lessac-medium"}
 MAX_CAMERAS = 16   # all of them rotate through the two places on screen
@@ -469,15 +465,16 @@ def data(stack, site):
         "cameras": [{"id": f"cam{i}", "name": c.get("name") or f"Camera {i}", "problem": camera_problems(stack).get(f"cam{i}", "")}
                     for i, c in enumerate(d["cameras"], 1)],
         "screen_off": screen_off_now(d, now.replace(tzinfo=None)), "quiet_hours": quiet_hours(d, now.replace(tzinfo=None)),
-        "rev": int(os.path.getmtime(settings_path(stack))) if os.path.exists(settings_path(stack)) else 0,
+        "rev": max(int(os.path.getmtime(settings_path(stack))) if os.path.exists(settings_path(stack)) else 0,
+                   _modules_rev(stack)),
         "time": hm(now, site), "date": now.strftime("%a %b %-d"),
         "sounds": d.get("sounds") or {}, "volume": d.get("volume", 70), "sound_quiet": d.get("sound_quiet", True),
         "speak": d.get("speak", False), "speak_mode": d.get("speak_mode", "after"),
         "sound_cooldown": d.get("sound_cooldown", 60), "sound_gap": d.get("sound_gap", 5),
         "doorbell_always": d.get("doorbell_always", True),
         "expected": expected, "forecast": forecast_summary(fc, now, tz), "battery_high": high,
-        "weather": wx.view(stack, site, now) if d.get("weather", True) else None,
-        "wx_days": d.get("wx_days", 7), "wx_page": d.get("wx_page", 8),
+        "weather": None, "wx_days": 7, "wx_page": 8,    # weather: the weather module (when it's on)
+        **_module_display(stack, site, now),
     }
 
 
@@ -662,6 +659,16 @@ def ha_status(stack, site):
         **genlog.ha_fields(stack, site),
         **_box_fields(stack),
     }
+
+
+def _module_display(stack, site, now):
+    import modules  # here: keeps the module light for the kiosk
+    return modules.display_data(stack, site, now)
+
+
+def _modules_rev(stack):
+    import modules
+    return modules.settings_rev(stack)
 
 
 def _module_fields(stack, site):

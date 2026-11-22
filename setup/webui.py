@@ -16,3 +16,10 @@ def notice(kind, text, toast=False, link=None, anchor=True):
         return (f"<div class='toast {kind}' role='{'alert' if kind == 'err' else 'status'}'>{html.escape(text)}"
                 "<button type='button' class='x' aria-label='Close' onclick='this.parentNode.remove()'>&times;</button></div>")
     return f"<div {'id=notice ' if anchor else ''}class='card notice {kind}'>{html.escape(text)}{extra}</div>"
+
+
+class FieldError(ValueError):
+    """A setup form value that isn't right; .field is the input's name, so the page can point at it."""
+    def __init__(self, field, msg):
+        super().__init__(msg)
+        self.field = field

@@ -78,15 +78,43 @@ class SetupPage(unittest.TestCase):
         self.assertTrue(out.endswith("</select><span class='fielderr'>unknown time zone</span></label>"))
 
     def test_forecast_settings_shown_with_saved_values(self):
-        import json
         page = solar_web.setup_page(solar_web.load_site())
         self.assertIn("<option value='7' selected>7 days</option>", page)          # defaults
         self.assertIn("<option value='8' selected>8 seconds</option>", page)
-        with open(os.path.join(self.tmp.name, "state", "display.json"), "w") as f:
-            json.dump({"wx_days": 4, "wx_page": 0}, f)
+        solar_web.modules.save(self.tmp.name, "weather", {"days": 4, "page": 0})
         page = solar_web.setup_page(solar_web.load_site())
         self.assertIn("<option value='4' selected>4 days</option>", page)
         self.assertIn("<option value='0' selected>never (show only what fits)</option>", page)
+
+
+    def test_feature_switches(self):
+        page = solar_web.setup_page(solar_web.load_site())
+        for mid in ("backup", "tunnel", "support", "weather"):
+            self.assertIn(f"name='module_{mid}' value='1' style='width:auto' checked>", page)
+        self.assertLess(page.index("<legend>Optional features</legend>"), page.index("<legend>Location</legend>"))
+        self.assertIn("<legend>Weather on the screen</legend>", page)
+        self.assertIn('<h2 id="support">', page)
+        self.assertNotIn("display_weather", page)                       # the old checkbox is the switch now
+        # switch weather and remote support off: their parts go; the others stay
+        f = {"modules_form": "1", "module_backup": "1", "module_tunnel": "1", "module_weather_shown": "1",
+             "wx_days": "3", "wx_page": "12"}
+        msgs = solar_web.modules.form_apply(self.tmp.name, f)
+        self.assertEqual(msgs, ["remote support off", "weather off"])
+        page = solar_web.setup_page(solar_web.load_site())
+        self.assertNotIn("<legend>Weather on the screen</legend>", page)
+        self.assertNotIn('<h2 id="support">', page)
+        self.assertIn("name='module_weather' value='1' style='width:auto'>", page)   # its switch is still there, off
+        self.assertEqual(solar_web.modules.settings(self.tmp.name, "weather")["days"], 7)  # turned off: fields not saved
+        # back on: the fields come back with what was saved before
+        f = {"modules_form": "1", "module_backup": "1", "module_tunnel": "1", "module_support": "1", "module_weather": "1"}
+        self.assertEqual(solar_web.modules.form_apply(self.tmp.name, f), ["remote support on", "weather on"])
+        f.update(module_weather_shown="1", wx_days="3", wx_page="12")
+        self.assertEqual(solar_web.modules.form_apply(self.tmp.name, f), [])
+        self.assertEqual(solar_web.modules.settings(self.tmp.name, "weather"), {"days": 3, "page": 12})
+
+    def test_a_form_without_switches_changes_none(self):
+        self.assertEqual(solar_web.modules.form_apply(self.tmp.name, {"name": "x"}), [])
+        self.assertTrue(solar_web.modules.load(self.tmp.name, "weather")["enabled"])
 
 
 if __name__ == "__main__":

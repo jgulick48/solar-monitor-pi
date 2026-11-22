@@ -112,8 +112,8 @@ cores with two medium-quality UniFi Protect streams, 27% with low, 5% with no vi
 picture* is *Automatic* by default: low on a Pi 4, medium on a Pi 5 (boxes that update switch by themselves). The
 video stops while the screen is off. go2rtc runs on the host network, listening on 127.0.0.1 only.
 
-**Weather** shows in the same panel as the solar figures (setup page: *Show the weather with the solar figures*, on
-by default): now (temperature, conditions, feels-like, wind speed, gusts and direction, humidity, rain today), the next
+**Weather** shows in the same panel as the solar figures (setup page: *Optional features* → *Weather*, on by default;
+how many forecast days and how fast they page are under *Weather on the screen*): now (temperature, conditions, feels-like, wind speed, gusts and direction, humidity, rain today), the next
 days (high/low, rain chance, wind) and, where there's room, the next 12 hours. The forecast comes from Open-Meteo (free,
 no key; every 30 minutes); a weather station set up on the setup page (Ecowitt, Tempest, WeatherLink, or pushing to
 the box) supplies "now" with its own readings, wind included. In the US, National Weather Service alerts for the site
@@ -423,9 +423,10 @@ Home Assistant, Grafana and the rest.
   dashboard once.
 - `setup/modules/` holds the optional features, one package each with a `MODULE = Module(...)` manifest: its
   settings (`state/modules/<id>.json`, moved over from the old file on the first run after an update), its pages,
-  setup-page section, start-page card or banner, Home Assistant fields, collector hooks and Compose profiles. The
-  core in `setup/modules/__init__.py` calls only the enabled ones. So far: backups, remote access and remote support;
-  the other optional features move there one release at a time.
+  setup-page section or fieldset, start-page card or banner, wall-display data, Home Assistant fields, collector
+  hooks and Compose profiles. The core in `setup/modules/__init__.py` calls only the enabled ones; the setup page's
+  *Optional features* switches turn them on and off. So far: backups, remote access, remote support and weather;
+  voice announcements, cameras and the generator move there next.
 - `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it; `setup/modules/backup/`
   is its page and settings.
 - `setup/support.py` turns remote support on and off (tunnel, SSH key, sudo, SSH) and switches it off when its time is up;

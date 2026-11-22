@@ -12,6 +12,7 @@ kept them before it was a module (and detect(stack), if given, says whether it s
 updates keeps everything. When a module's version goes up, migrate(stack, old, old_version) brings them up to date.
 """
 import dataclasses
+import html
 import importlib
 import json
 import os
@@ -22,6 +23,7 @@ from typing import Callable, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import solar_setup as ss  # noqa: E402
+from webui import FieldError  # noqa: E402,F401 - for modules: a form value that isn't right
 
 RESERVED = ("version", "enabled", "settings")
 
@@ -40,6 +42,7 @@ class Response:
 class Module:
     id: str
     title: str
+    description: str = ""               # one line beside its switch on the setup page
     order: int = 100                    # place among the modules (header links, cards, setup sections)
     default_enabled: bool = False
     detect: Optional[Callable] = None   # (stack) -> bool: enabled on the first run (the feature was in use)
@@ -54,8 +57,13 @@ class Module:
     card_slot: str = "top"              # where on the start page: "top" (after the advisor) or "access" (after the generator)
     banner: Optional[Callable] = None   # (stack) -> HTML shown at the top of the start page ("" for none)
     setup_section: Optional[Callable] = None  # (stack, msg) -> HTML of its own section at the end of the setup page
+    form_section: Optional[Callable] = None   # (stack) -> HTML (a fieldset) inside the setup page's main form
+    form_check: Optional[Callable] = None     # (stack, form): raise FieldError before anything is saved
+    form_save: Optional[Callable] = None      # (stack, form) -> messages: save its fields from the main form
+    display_data: Optional[Callable] = None   # (stack, site, now) -> fields added to the wall display's data
     routes: dict = dataclasses.field(default_factory=dict)  # ("GET" | "POST", path) -> fn(stack, form) -> Response
-    every: dict = dataclasses.field(default_factory=dict)   # seconds -> fn(stack) -> messages to log, in the collector
+    every: dict = dataclasses.field(default_factory=dict)   # seconds -> fn(stack) -> messages to log, in the collector;
+    #                                       or (fn, retry seconds) to try again sooner after a failure
     compose_profiles: Optional[Callable] = None  # (stack) -> Compose profiles (optional services) to run now
 
 
@@ -259,7 +267,8 @@ def run_due(stack, last, now=None):
     when each ran ({(id, seconds): time}); a hook that fails is logged and tried again on its next turn."""
     now = now if now is not None else time.time()
     for m in enabled(stack):
-        for secs, fn in m.every.items():
+        for secs, hook in m.every.items():
+            fn, retry = hook if isinstance(hook, tuple) else (hook, secs)
             key = (m.id, secs)
             if now - last.get(key, 0) < secs:
                 continue
@@ -269,3 +278,88 @@ def run_due(stack, last, now=None):
                     log(f"{m.title}: {msg}")
             except Exception as e:  # noqa: BLE001 - keep collecting
                 log(f"{m.title}: failed:", e)
+                last[key] = now - secs + retry
+
+
+def display_data(stack, site, now):
+    out = {}
+    for _, d in _each(stack, "display_data", site, now):
+        out.update(d)
+    return out
+
+
+def settings_rev(stack):
+    """Newest change to any module's settings (the wall display reloads when its settings change)."""
+    d = os.path.join(stack, "state", "modules")
+    try:
+        return max((int(os.path.getmtime(os.path.join(d, f))) for f in os.listdir(d) if f.endswith(".json")), default=0)
+    except FileNotFoundError:
+        return 0
+
+
+# --------------------------------------------------------------------------
+# The setup page's main form: a switch per module, and the enabled modules' fieldsets
+# --------------------------------------------------------------------------
+def switches(stack):
+    """The "Optional features" fieldset: one switch per module (saved with the main form)."""
+    rows = []
+    for m in all_modules():
+        try:
+            on = load(stack, m.id)["enabled"]
+        except Exception:  # noqa: BLE001 - its file is broken: shown off; saving leaves it as it is
+            on = None
+        desc = f" <small style='display:inline'>{html.escape(m.description)}</small>" if m.description else ""
+        rows.append(f"<label><input type='checkbox' name='module_{m.id}' value='1' style='width:auto'"
+                    f"{' checked' if on else ''}{' disabled' if on is None else ''}> <b>{html.escape(m.title)}</b>{desc}</label>")
+    return ("<fieldset id='features'><legend>Optional features</legend><input type='hidden' name='modules_form' value='1'>"
+            + "".join(rows) + "<small>Turning one off hides its settings and pages and stops what it runs; its settings "
+            "are kept for when it's turned on again.</small></fieldset>")
+
+
+def form_sections(stack):
+    out = []
+    for m, h in _each(stack, "form_section"):
+        out.append(f"<input type='hidden' name='module_{m.id}_shown' value='1'>{h}")
+    return "\n".join(out)
+
+
+def _staying_on(stack, form):
+    """Enabled modules whose fields were on the page and that stay on."""
+    return [m for m in enabled(stack)
+            if form.get(f"module_{m.id}_shown") == "1" and (form.get("modules_form") != "1" or form.get(f"module_{m.id}") == "1")]
+
+
+def form_check(stack, form):
+    """Raise FieldError (or ValueError) if a module's fields in the main form aren't right; nothing is saved then."""
+    for m in _staying_on(stack, form):
+        if m.form_check:
+            m.form_check(stack, form)
+
+
+def form_apply(stack, form):
+    """After form_check: the switches, then each module's fields. Returns messages for the page."""
+    msgs = []
+    staying = _staying_on(stack, form)
+    if form.get("modules_form") == "1":
+        for m in all_modules():
+            try:
+                was = load(stack, m.id)["enabled"]
+            except Exception:  # noqa: BLE001 - broken file: left alone (its switch was disabled)
+                continue
+            on = form.get(f"module_{m.id}") == "1"
+            if on == was:
+                continue
+            try:
+                set_enabled(stack, m.id, on)
+                msgs.append(f"{m.title.lower()} {'on' if on else 'off'}")
+            except Exception as e:  # noqa: BLE001
+                log(f"{m.id}: turning {'on' if on else 'off'} failed:", e)
+                msgs.append(f"{m.title} couldn't be turned {'on' if on else 'off'}: {e}")
+    for m in staying:
+        if m.form_save:
+            try:
+                msgs += m.form_save(stack, form) or []
+            except Exception as e:  # noqa: BLE001
+                log(f"{m.id}: saving its settings failed:", e)
+                msgs.append(f"{m.title}: settings not saved ({e})")
+    return msgs

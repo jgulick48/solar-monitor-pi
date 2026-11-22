@@ -133,6 +133,7 @@ def restore(stack, form):
 MODULE = Module(
     id="backup",
     title="Backups",
+    description="nightly to a USB stick, and restoring from one",
     order=10,
     default_enabled=True,
     defaults={"uuid": "", "history": True, "chosen_at": None},
