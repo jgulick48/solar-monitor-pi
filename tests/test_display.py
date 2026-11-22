@@ -77,6 +77,10 @@ class Display(unittest.TestCase):
         self.assertEqual(display.INSTANT["ext_charge"], ss.hold(ss.EXT_CHARGE))
         self.assertEqual(genlog.QUERIES["charger"], ss.EXT_CHARGE)
         self.assertIn("min(lxp_batt_current_bms) < 0", ss.BMS_POWER)
+        # robust against what isn't a DC charger (ranch, 30 days: 5 phantom runs -> 0; VictoriaMetrics v1.156: a 3 kW
+        # charger -> 2980 W, solar charging with the BMS 8% high -> nothing, a generator the inverters see -> nothing)
+        for needle in ("avg_over_time((" + ss.BMS_POWER + ")[5m:30s])", "> 0.2 * abs(", "unless on () (max_over_time((max(lxp_v_gen) > 100"):
+            self.assertIn(needle, ss.EXT_CHARGE)
         self.assertNotIn("max(lxp_batt_current_bms) * max(lxp_v_bat)", open(advisor.__file__).read())
 
     def test_house_energy_uses_eps_when_the_load_counter_is_zero(self):

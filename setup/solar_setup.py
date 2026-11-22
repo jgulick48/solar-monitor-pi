@@ -258,8 +258,21 @@ GEN_POWER = ("((sum((lxp_p_gen < 25000) * (lxp_v_gen > bool 50)) or vector(0))"
 # when no inverter reports it.
 BMS_POWER = ("(max(lxp_batt_current_bms) > 0 or min(lxp_batt_current_bms) < 0 or max(lxp_batt_current_bms))"
              " * max(lxp_v_bat)")
-# Charging the inverters didn't do: a generator on a DC charger (Chargeverter), see genlog.py.
-EXT_CHARGE = f"{BMS_POWER} - (sum(lxp_p_charge) - sum(lxp_p_discharge))"
+# Charging the inverters didn't do: a generator on a DC charger (Chargeverter), see genlog.py. The battery's own power
+# (BMS) minus what the inverters charged/discharged, made robust against what isn't a charger (checked on 30 days of
+# the ranch's data, no DC charger there: the plain difference gave 5 phantom 10-minute "charger runs", all while
+# charging from solar, up to 5.4 kW; this gives none):
+#   - both averaged over 5 minutes: the BMS current and the inverters' power are read at different moments, so a
+#     changing load or cloud made them disagree for a reading or two;
+#   - more than 20% of the battery power: the two meters differ by a few percent (conversion losses, calibration),
+#     which at 8 kW of charging is hundreds of watts;
+#   - not while the inverters see a generator themselves (GEN port or AC input with voltage, or in the last 15 min):
+#     that one is counted by GEN_POWER, and its start/stop briefly skews the difference.
+# Consumers still require more than 500 W (and the generator log 10 minutes of it).
+_INV_NET = "(sum(lxp_p_charge) - sum(lxp_p_discharge))"
+EXT_CHARGE = (f"((avg_over_time(({BMS_POWER})[5m:30s]) - avg_over_time(({_INV_NET})[5m:30s]))"
+              f" > 0.2 * abs(avg_over_time(({_INV_NET})[5m:30s])))"
+              " unless on () (max_over_time((max(lxp_v_gen) > 100 or max(lxp_v_ac_r) > 100)[15m:1m]) > 0)")
 GEN_ENERGY_DAY = ("((sum(lxp_e_gen_day * (max_over_time(lxp_v_gen[1d]) > bool 50)) or vector(0))"
                   " + (sum(lxp_e_to_user_day) or vector(0)))")
 
