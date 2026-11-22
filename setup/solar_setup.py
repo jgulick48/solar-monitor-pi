@@ -589,6 +589,8 @@ def main():
     state_path = os.path.join(stack, "state", "inverters.json")
     inverters = load_json(state_path, {})
     sec = ensure_secrets(stack)
+    import modules  # each module's settings file, moved over from the old places the first time
+    modules.migrate_all(stack)
     write_env(stack, sec)
     first = seed_homeassistant(stack, sec)
     ha_changed = sync_homeassistant(stack)

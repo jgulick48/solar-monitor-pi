@@ -2,7 +2,7 @@
 """solar-backup: nightly backups to a USB stick, and restoring from one.
 
 The stick is any USB stick with a FAT32, exFAT, ext4 or NTFS file system, chosen on the setup page
-(state/backup.json {"uuid": ..., "history": true}). The box never formats it. It is only mounted
+(state/modules/backup.json {"uuid": ..., "history": true}). The box never formats it. It is only mounted
 while a backup or restore runs, so it can be pulled out safely at any other time.
 
 On the stick, in solar-monitor-backup/:
@@ -62,11 +62,17 @@ def log(*a):
 
 
 def settings(stack):
-    return {"uuid": "", "history": True, **ss.load_json(os.path.join(stack, "state", "backup.json"), {})}
+    """{"uuid", "history", "chosen_at"}: kept by the backup module (state/modules/backup.json)."""
+    import modules
+    return {"chosen_at": None, **modules.settings(stack, "backup")}
 
 
 def save_settings(stack, d):
-    ss.write_if_changed(os.path.join(stack, "state", "backup.json"), json.dumps(d, indent=2) + "\n", 0o644)
+    import modules
+    cur = settings(stack)
+    if d.get("uuid") != cur["uuid"]:
+        d = {**d, "chosen_at": int(time.time()) if d.get("uuid") else None}   # the overdue check counts from here
+    modules.save(stack, "backup", d)
 
 
 def status_path(stack):
@@ -294,7 +300,7 @@ def restore(stack):
             subprocess.run(ss.compose_cmd(stack) + ["stop"], capture_output=True)
             restic(stack, "restore", "latest", "--host", "solar-monitor", "--target", "/data/stack/state/restore")
         src = os.path.join(target, "data", "stack")
-        keep = ss.load_json(os.path.join(stack, "state", "backup.json"), {})
+        keep = {k: cfg[k] for k in ("uuid", "history")}   # the stick in use now, not the one in the backup
         # settings and Home Assistant: replace
         for sub in ("homeassistant", "go2rtc"):
             if os.path.isdir(os.path.join(src, sub)):

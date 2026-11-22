@@ -28,13 +28,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import advisor  # noqa: E402
-import backup  # noqa: E402
 import boxhealth  # noqa: E402
 import battery  # noqa: E402
 import display  # noqa: E402
 import protect  # noqa: E402
 import screenpower as sp  # noqa: E402
 import genlog  # noqa: E402
+import modules  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import support  # noqa: E402
 import tts  # noqa: E402
@@ -482,15 +482,16 @@ padding:12px 44px 12px 16px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.
 
 
 NAV = [("/", "Home", "Solar monitor"), ("/setup", "Setup", "Site setup"), ("/generator", "Generator", "Generator"),
-       ("/battery", "Battery", "Battery health"), ("/backup", "Backups", "Backups"), ("/advisor", "Advisor", "Advisor"),
-       ("/display", "Screen", None)]
+       ("/battery", "Battery", "Battery health"), ("/advisor", "Advisor", "Advisor"), ("/display", "Screen", None)]
+NAV_MODULES_AT = 4          # the enabled modules' pages go before the Advisor
 APPS = [("8123", "Home Assistant"), ("3000", "Grafana")]
 
 
 def nav(title):
     """The header on every page: this box's pages, then Home Assistant and Grafana on the same host (set in the
     browser from the address used, so it works by IP and by solar-monitor.local alike)."""
-    links = "".join(f"<a href='{href}'{' class=on aria-current=page' if t == title else ''}>{name}</a>" for href, name, t in NAV)
+    entries = NAV[:NAV_MODULES_AT] + modules.nav(STACK) + NAV[NAV_MODULES_AT:]
+    links = "".join(f"<a href='{href}'{' class=on aria-current=page' if t == title else ''}>{name}</a>" for href, name, t in entries)
     apps = "".join(f"<a class='app' data-port='{port}' href='#' target='_blank' rel='noopener'>{name} &#8599;</a>" for port, name in APPS)
     return (f"<header class='nav'><nav aria-label='Pages'>{links}</nav><span class='apps'>{apps}</span></header>"
             "<script>document.querySelectorAll('a[data-port]').forEach(a=>{a.href=location.protocol+'//'+location.hostname+':'+a.dataset.port+'/'})</script>")
@@ -584,7 +585,7 @@ def status_page(handler):
 <form method="post" action="/update" style="margin-top:8px"><button>Check for updates now</button></form></div>
 <div class="card"><b>Advisor</b>: <a href="/advisor">what would help most &mdash; batteries, panels, an inverter or an automatic generator</a>
 <br><small>{html.escape(adv_note)}</small></div>
-<div class="card"><b>Backups</b>: {backup_line()} &nbsp;<a href="/backup">change</a></div>
+{modules.cards(STACK)}
 {box_card()}
 {battery_card(site)}
 {generator_card(site)}
@@ -1097,58 +1098,6 @@ def box_card():
             f"{(' (' + ', '.join(bits) + ')') if bits else ''}{('<ul>' + finds + '</ul>') if finds else ''}{note}</div>")
 
 
-def backup_line():
-    """One line for the start page."""
-    cfg, st = backup.settings(STACK), ss.load_json(backup.status_path(STACK), {})
-    if not cfg["uuid"]:
-        return "<b>not set up</b>: plug a USB stick into the Pi and choose it."
-    line = f"last backup {_when(st.get('last_ok'))}"
-    if st.get("snapshots"):
-        line += f", {st['snapshots']} on the stick, {st.get('free_gb', '?')} GB free"
-    if st.get("result") == "error":
-        line += f". <b>Last attempt failed</b>: {html.escape(st.get('message', ''))}"
-    elif st.get("result") in ("running", "restoring"):
-        line += f". {html.escape(st.get('message', ''))}..."
-    return line
-
-
-def backup_page(msg=""):
-    cfg, st = backup.settings(STACK), ss.load_json(backup.status_path(STACK), {})
-    sticks = backup.list_sticks()
-    known = {k["uuid"] for k in sticks}
-    opts = []
-    for k in sticks:
-        desc = f"{k['model'].strip() or 'USB stick'}, {k['size']}, {k['fstype']}" + (f", label {k['label']}" if k["label"] else "")
-        opts.append(f"<label><input type='radio' name='uuid' value='{html.escape(k['uuid'])}' style='width:auto'"
-                    f"{' checked' if k['uuid'] == cfg['uuid'] else ''}> {html.escape(desc)}</label>")
-    if cfg["uuid"] and cfg["uuid"] not in known:
-        opts.append(f"<label><input type='radio' name='uuid' value='{html.escape(cfg['uuid'])}' style='width:auto' checked>"
-                    " The chosen stick (not plugged in right now)</label>")
-    opts.append(f"<label><input type='radio' name='uuid' value='' style='width:auto'{'' if cfg['uuid'] else ' checked'}>"
-                " No backups</label>")
-    found = "" if sticks else "<p><small>No USB stick found. Plug one in (FAT32, exFAT, ext4 or NTFS; 16 GB or more) and reload this page.</small></p>"
-    status = html.escape(st.get("message", "no backup yet"))
-    restore = ""
-    if cfg["uuid"]:
-        restore = """<h2>Restore</h2><form method="post" action="/backup/restore">
-<p>Replaces this box's settings, passwords, Home Assistant (accounts, dashboards, history) and the inverter history with the
-newest backup on the stick. Use it after replacing the SSD: flash the image, start the box, choose the stick above, then restore.
-It stops everything for a few minutes.</p>
-<label><input type="checkbox" name="confirm" value="1" style="width:auto"> Yes, replace everything on this box with the backup</label>
-<p><button>Restore from the stick</button></p></form>"""
-    body = f"""<h1>Backups</h1>{('<div class="card">' + html.escape(msg) + '</div>') if msg else ''}
-<div class="card"><b>Status</b>: {backup_line()}<br><small>Last result: {status}</small>
-<form method="post" action="/backup/run" style="margin-top:8px"><button{'' if cfg['uuid'] else ' disabled'}>Back up now</button></form></div>
-<form method="post" action="/backup/settings"><fieldset><legend>USB stick</legend>{''.join(opts)}{found}
-<label><input type="checkbox" name="history" value="1" style="width:auto"{' checked' if cfg['history'] else ''}> Include the inverter history (VictoriaMetrics)</label>
-<small>Every night at about 01:30; 7 daily, 4 weekly and 6 monthly backups are kept. The stick is only in use during a backup,
-so it can be pulled out at any other time. It is never formatted: the backups go in a <code>solar-monitor-backup</code> folder.
-<b>The key to the backups is on the stick too</b> (so a new box can restore from the stick alone): whoever has the stick can read
-this box's passwords and camera links. Keep it in the Pi.</small></fieldset>
-<p><button>Save</button> &nbsp;<a href="/">Back</a></p></form>{restore}"""
-    return page("Backups", body)
-
-
 def remote_section(msg=""):
     """Remote access (Cloudflare Tunnel) on the setup page: its own form, since it talks to Cloudflare."""
     d = tunnel.settings(STACK)
@@ -1314,12 +1263,26 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(min(n, 65536)).decode()
         return {k: v[0] for k, v in urllib.parse.parse_qs(raw, keep_blank_values=True).items()}
 
+    def module_route(self, method, url_path):
+        """An enabled module's page (modules/): True if one answered."""
+        fn = modules.route(STACK, method, url_path)
+        if not fn:
+            return False
+        r = fn(STACK, self.form() if method == "POST" else {})
+        if r.location:
+            self.send(303, "", extra={"Location": r.location})
+        else:
+            self.send(r.code, page(r.title, r.body))
+        return True
+
     def do_GET(self):
         url = urllib.parse.urlsplit(self.path)
         if url.path == "/weather/ambient":
             # Ambient Weather "custom server": GET <path>?...&solarradiation=..&tempf=..
             q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
             self.weather_push(q, "ambient")
+            return
+        if self.module_route("GET", url.path):
             return
         if self.path == "/":
             self.send(200, status_page(self))
@@ -1341,8 +1304,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(display.data(STACK, load_site())), "application/json")
         elif self.path == "/api/ha":
             self.send(200, json.dumps(display.ha_status(STACK, load_site())), "application/json")
-        elif self.path == "/backup":
-            self.send(200, backup_page())
         elif self.path == "/battery":
             self.send(200, battery_page(load_site()))
         elif self.path == "/generator":
@@ -1356,6 +1317,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, page("Not found", "<p>Not found. <a href='/'>Start page</a></p>"))
 
     def do_POST(self):
+        if self.module_route("POST", self.path):
+            return
         if self.path == "/setup":
             f = self.form()
             try:
@@ -1396,14 +1359,6 @@ class Handler(BaseHTTPRequestHandler):
                 w["source"] = src
                 save_weather(w)
             self.send(200, setup_page(load_site(), done=msgs))
-        elif self.path == "/backup/settings":
-            f = self.form()
-            uuid = f.get("uuid", "").strip()
-            if uuid and uuid not in {k["uuid"] for k in backup.list_sticks()} | {backup.settings(STACK)["uuid"]}:
-                self.send(400, backup_page("That stick isn't plugged in."))
-                return
-            backup.save_settings(STACK, {**backup.settings(STACK), "uuid": uuid, "history": f.get("history") == "1"})
-            self.send(200, backup_page("Saved." + (" The first backup runs tonight; or use Back up now." if uuid else "")))
         elif self.path == "/generator/serviced":
             f = self.form()
             kind = f.get("kind")
@@ -1487,17 +1442,6 @@ class Handler(BaseHTTPRequestHandler):
             msg = send_test_notification()
             self.send(200, page("Test notification", f"<h1>Test notification</h1><div class='card'>{html.escape(msg)}</div>"
                                                       "<p><a href='/'>Back</a></p>"))
-        elif self.path == "/backup/run":
-            run_quietly(["systemctl", "start", "--no-block", "solar-backup.service"])
-            self.send(303, "", extra={"Location": "/backup"})
-        elif self.path == "/backup/restore":
-            if self.form().get("confirm") != "1":
-                self.send(400, backup_page("Tick the box to confirm the restore."))
-                return
-            # Its own unit: the restore restarts the stack, and must outlive this request.
-            run_quietly(["systemd-run", "--unit=solar-restore", "--collect", "--no-block", sys.executable,
-                         os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup.py"), "restore", "--stack", STACK])
-            self.send(200, backup_page("Restoring: this takes a few minutes. Reload this page to see when it's done."))
         elif self.path == "/update":
             if os.path.exists(UPDATE_SCRIPT):
                 # Its own systemd unit: the update restarts this web service, which must not take the update with it.
