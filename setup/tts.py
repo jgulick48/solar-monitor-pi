@@ -137,23 +137,119 @@ def wav(stack, text, voice, synth=synthesize):
     return data
 
 
-def prewarm(stack, cameras, settings, synth=synthesize):
-    """Make every camera's phrases ahead of time (in the background when settings are saved)."""
+def prewarm(stack, cameras, settings, synth=synthesize, progress=None):
+    """Make every camera's phrases ahead of time (in the background when settings are saved).
+    progress(made, total) is called as it goes."""
     from display import SOUND_KINDS
     labels = {"doorbell": "Doorbell", "person": "Person", "vehicle": "Vehicle", "animal": "Animal", "package": "Package"}
     on = [labels[k] for k, _, _ in SOUND_KINDS if (settings.get("sounds") or {}).get(k)]
+    todo = [(c, label) for c in cameras for label in on if label != "Doorbell" or c.get("doorbell")]
     made = 0
-    for c in cameras:
-        for label in on:
-            if label == "Doorbell" and not c.get("doorbell"):
-                continue
-            try:
-                wav(stack, phrase(label, c["name"], settings.get("speak_template"), settings.get("speak_doorbell")),
-                    settings.get("voice"), synth)
-                made += 1
-            except (OSError, ValueError):
-                return made
+    for c, label in todo:
+        try:
+            wav(stack, phrase(label, c["name"], settings.get("speak_template"), settings.get("speak_doorbell")),
+                settings.get("voice"), synth)
+            made += 1
+        except (OSError, ValueError):
+            return made
+        if progress:
+            progress(made, len(todo))
     return made
+
+
+# ---------------------------------------------------------------------- first-time download, with progress
+# Turning speech on the first time downloads the Piper image (about 200 MB) and then Piper downloads the voice
+# (about 63 MB) into the tts-data volume. The setup page shows a progress bar from PROGRESS: the image through
+# Docker's own API (bytes per layer), the voice by the size of its file as it grows, then the phrases being made.
+PROGRESS = {"active": False, "step": "", "pct": None, "detail": "", "error": "", "at": 0}
+DOCKER_SOCK = "/var/run/docker.sock"
+VOICE_BYTES = 63_201_294          # en_US-lessac-medium.onnx; the other medium voices are about the same
+
+
+def _docker(method, path, timeout=30):
+    import http.client
+
+    class Conn(http.client.HTTPConnection):
+        def connect(self):
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.settimeout(timeout)
+            self.sock.connect(DOCKER_SOCK)
+    c = Conn("localhost", timeout=timeout)
+    c.request(method, path)
+    return c.getresponse()
+
+
+def image_ref(stack):
+    """The Piper image the stack uses (stack/compose.yaml)."""
+    try:
+        for line in open(os.path.join(stack, "compose.yaml")):
+            if "image:" in line and "wyoming-piper" in line:
+                return line.split("image:", 1)[1].strip()
+    except OSError:
+        pass
+    return "rhasspy/wyoming-piper:2.5.4"
+
+
+def image_present(ref):
+    import urllib.parse
+    try:
+        r = _docker("GET", f"/images/{urllib.parse.quote(ref, safe='')}/json")
+        r.read()
+        return r.status == 200
+    except OSError:
+        return False
+
+
+def pull_image(ref, report):
+    """Pull through Docker's API; report(done_bytes, total_bytes, extracting) as layers download."""
+    import urllib.parse
+    name, _, tag = ref.rpartition(":")
+    r = _docker("POST", f"/images/create?fromImage={urllib.parse.quote(name)}&tag={urllib.parse.quote(tag)}", timeout=120)
+    if r.status != 200:
+        raise OSError(f"Docker said {r.status} {r.read()[:200]!r}")
+    layers = {}                                       # id -> [done, total]
+    while True:
+        line = r.readline()
+        if not line:
+            break
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        if m.get("error"):
+            raise OSError(m["error"])
+        lid, st, pd = m.get("id"), m.get("status", ""), m.get("progressDetail") or {}
+        if not lid:
+            continue
+        if st == "Downloading" and pd.get("total"):
+            layers[lid] = [pd.get("current", 0), pd["total"]]
+        elif st in ("Download complete", "Verifying Checksum", "Pull complete", "Extracting") and lid in layers:
+            layers[lid][0] = layers[lid][1]
+        report(sum(v[0] for v in layers.values()), sum(v[1] for v in layers.values()), st in ("Extracting", "Pull complete"))
+
+
+def voice_bytes(voice):
+    """Bytes of the voice downloaded so far in the tts-data volume (Piper writes it while downloading)."""
+    try:
+        r = _docker("GET", "/volumes")
+        vols = json.loads(r.read()).get("Volumes") or []
+    except (OSError, ValueError):
+        return 0
+    total = 0
+    for v in vols:
+        if v.get("Name", "").endswith("tts-data") and v.get("Mountpoint"):
+            try:
+                for n in os.listdir(v["Mountpoint"]):
+                    if n.startswith(voice or "") and ".onnx" in n and not n.endswith(".json"):
+                        total = max(total, os.path.getsize(os.path.join(v["Mountpoint"], n)))
+            except OSError:
+                pass
+    return total
+
+
+def set_progress(**kw):
+    import time
+    PROGRESS.update(at=time.time(), **kw)
 
 
 def status(host=HOST, port=PORT):
