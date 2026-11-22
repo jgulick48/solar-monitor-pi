@@ -620,7 +620,7 @@
       "type": "prometheus",
       "uid": "victoriametrics"
      },
-     "expr": "sum(lxp_p_gen)",
+     "expr": "((sum((lxp_p_gen < 25000) * (lxp_v_gen > bool 50)) or vector(0)) + (sum(lxp_p_to_user * (lxp_v_ac_r > bool 50)) or vector(0)))",
      "legendFormat": "Generator input",
      "refId": "D"
     }

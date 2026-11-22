@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "setup"))
 import display  # noqa: E402
+import solar_setup as ss  # noqa: E402
 
 DENVER = ZoneInfo("America/Denver")
 SITE = {"name": "Test", "latitude": "39.74", "longitude": "-104.99", "time_zone": "America/Denver",
@@ -23,7 +24,7 @@ SITE = {"name": "Test", "latitude": "39.74", "longitude": "-104.99", "time_zone"
 
 class FakeVM(http.server.BaseHTTPRequestHandler):
     values = {"max(lxp_soc)": 62, "sum(lxp_p_pv)": 3400, "sum(lxp_p_load) or sum(lxp_p_eps)": 900,
-              "sum(lxp_p_charge) - sum(lxp_p_discharge)": 2300, "sum(lxp_p_gen)": 0, "sum(lxp_e_pv_day)": 12.3,
+              "sum(lxp_p_charge) - sum(lxp_p_discharge)": 2300, ss.GEN_POWER: 0, "sum(lxp_e_pv_day)": 12.3,
               "sum(lxp_e_load_day) or sum(lxp_e_eps_day)": 8.1, "sum(lxp_bridge_connected)": 2,
               "max(lxp_fault_code)": 0, "max(lxp_warning_code)": 0, "time() - max(timestamp(lxp_soc))": 12}
 
@@ -54,6 +55,18 @@ class Display(unittest.TestCase):
         for bad in ("http://x/y", "rtsps:///nohost", "garbage"):
             with self.assertRaises(ValueError):
                 display.go2rtc_source(bad)
+
+    def test_generator_power_ignores_the_6000xp_gen_registers(self):
+        # one guarded expression everywhere (checked against VictoriaMetrics v1.156: 6000XP with 55/64 kW and 0 V
+        # on its GEN registers -> 0 W; generator on its AC input -> counted; 18kPV GEN port with voltage -> counted)
+        import advisor
+        import genlog
+        self.assertEqual(display.INSTANT["gen"], ss.GEN_POWER)
+        self.assertEqual(genlog.QUERIES["inverter"], ss.GEN_POWER)
+        for needle in ("lxp_v_gen > bool 50", "lxp_p_gen < 25000", "lxp_v_ac_r > bool 50"):
+            self.assertIn(needle, ss.GEN_POWER)
+        self.assertIn("max_over_time(lxp_v_gen[1d]) > bool 50", ss.GEN_ENERGY_DAY)
+        self.assertNotIn("sum(lxp_p_gen)", open(advisor.__file__).read())
 
     def test_hhmm_and_off_hours(self):
         self.assertEqual(display.parse_hhmm("6:05"), "06:05")
