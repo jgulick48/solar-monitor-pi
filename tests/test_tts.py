@@ -101,3 +101,46 @@ class TTS(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Progress(unittest.TestCase):
+    def test_pull_progress_from_docker_stream(self):
+        import io
+        lines = [{"status": "Pulling fs layer", "id": "a"}, {"status": "Pulling fs layer", "id": "b"},
+                 {"status": "Downloading", "id": "a", "progressDetail": {"current": 10, "total": 100}},
+                 {"status": "Downloading", "id": "b", "progressDetail": {"current": 50, "total": 300}},
+                 {"status": "Download complete", "id": "a"}, {"status": "Extracting", "id": "a", "progressDetail": {"current": 5, "total": 100}},
+                 {"status": "Downloading", "id": "b", "progressDetail": {"current": 300, "total": 300}}, {"status": "Pull complete", "id": "b"}]
+
+        class Resp(io.BytesIO):
+            status = 200
+        orig = tts._docker
+        tts._docker = lambda m, p, timeout=30: Resp(b"\n".join(json.dumps(x).encode() for x in lines) + b"\n")
+        seen = []
+        try:
+            tts.pull_image("rhasspy/wyoming-piper:2.5.4", lambda d, t, x: seen.append((d, t, x)))
+        finally:
+            tts._docker = orig
+        self.assertEqual(seen[3], (60, 400, False))       # after both layers started downloading
+        self.assertEqual(seen[-1], (400, 400, True))
+        tts._docker = lambda m, p, timeout=30: Resp(json.dumps({"error": "manifest unknown"}).encode() + b"\n")
+        try:
+            with self.assertRaisesRegex(OSError, "manifest unknown"):
+                tts.pull_image("x:1", lambda *a: None)
+        finally:
+            tts._docker = orig
+
+    def test_prewarm_reports_progress(self):
+        with tempfile.TemporaryDirectory() as stack:
+            got = []
+            tts.prewarm(stack, [{"name": "Driveway"}, {"name": "Front door", "doorbell": True}],
+                        {"sounds": {"person": True, "doorbell": True}, "voice": "v"}, synth=lambda t, v: b"RIFF",
+                        progress=lambda m, t: got.append((m, t)))
+            self.assertEqual(got, [(1, 3), (2, 3), (3, 3)])
+
+    def test_bar_html(self):
+        import solar_web
+        h = solar_web.speech_progress_html({"active": True, "step": "Downloading the voice", "pct": 42, "detail": "26 MB of about 63 MB", "error": ""})
+        self.assertIn("<progress max='100' value='42'", h)
+        self.assertIn("/speech/progress", h)
+        self.assertIn("stopped: no network", solar_web.speech_progress_html({"active": False, "error": "no network", "step": "", "pct": None, "detail": ""}))

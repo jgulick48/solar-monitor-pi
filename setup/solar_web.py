@@ -697,7 +697,7 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect
 <label>Voice <select name="voice">{''.join(f"<option value='{v}'{' selected' if dsp.get('voice', 'en_US-lessac-medium') == v else ''}>{html.escape(t)}</option>" for v, t in tts.VOICES)}</select></label></div>
 <div class="row"><label>Announcement {inp('speak_template', dsp.get('speak_template', tts.DEFAULT_TEMPLATE))}</label>
 <label>Doorbell {inp('speak_doorbell', dsp.get('speak_doorbell', tts.DEFAULT_DOORBELL))}</label></div>
-<small>{{object}} is Person, Vehicle, Animal or Package; {{camera}} the camera's name. {html.escape(speech_line(dsp))}</small>
+<small>{{object}} is Person, Vehicle, Animal or Package; {{camera}} the camera's name. {speech_line(dsp)}</small>
 <p><button formaction="/display/test-sound" formmethod="post" formnovalidate>Play a test sound</button>
 <button formaction="/display/test-speak" formmethod="post" formnovalidate>Play a test announcement</button>
 <button formaction="/display/restart" formmethod="post" formnovalidate>Restart the dashboard</button>
@@ -841,31 +841,81 @@ def sound_check():
 
 
 def speech_line(dsp):
+    """The speech service's state, as HTML: with a progress bar while it is downloading (refreshes itself)."""
+    p = tts.PROGRESS
+    if p["active"] or p["error"]:
+        return speech_progress_html(p)
     if not dsp.get("speak"):
-        return "Speech is off. Turning it on downloads the speech service (about 200 MB) and the voice once; it then works offline."
-    st = tts.status()
-    if st["ok"]:
+        return html.escape("Speech is off. Turning it on downloads the speech service (about 200 MB) and the voice once; it then works offline.")
+    if tts.status()["ok"]:
         return "The speech service is running."
-    return "The speech service is starting (the first time it downloads; this takes a few minutes)."
+    return html.escape("The speech service is starting (the first time it downloads; this takes a few minutes).")
+
+
+def speech_progress_html(p):
+    if p["error"]:
+        return f"<span id='speechprog' class='err'>Speech setup stopped: {html.escape(p['error'])}</span>"
+    bar = (f"<progress max='100' value='{p['pct']}' style='width:100%;max-width:340px;height:14px'></progress>"
+           if p["pct"] is not None else "<progress style='width:100%;max-width:340px;height:14px'></progress>")
+    return (f"<span id='speechprog' style='display:block;margin-top:6px'>{html.escape(p['step'])}"
+            f"{(' ' + str(p['pct']) + '%') if p['pct'] is not None else ''}<br>{bar}<br>{html.escape(p['detail'])}</span>"
+            """<script>(function(){const t=setInterval(async()=>{try{const r=await fetch('/speech/progress',{cache:'no-store'});
+const p=await r.json(),e=document.getElementById('speechprog');if(!e)return clearInterval(t);
+if(!p.active){clearInterval(t);e.textContent=p.error?('Speech setup stopped: '+p.error):'The speech service is running.';return}
+const b=e.querySelector('progress');if(p.pct===null)b.removeAttribute('value');else b.value=p.pct;
+e.firstChild.textContent=p.step+(p.pct===null?'':' '+p.pct+'%');e.lastChild.textContent=p.detail}catch(x){}},2000)})()</script>""")
 
 
 def start_speech(changed):
     """After saving: start/stop the tts service if speech or the voice changed, then make the phrases ahead of time."""
+    def mb(b):
+        return f"{b / 1e6:.0f} MB"
+
     def run():
         with speech_lock:
             d = display.load(STACK)
-            if changed:
-                ss.write_env(STACK, ss.ensure_secrets(STACK))
+            try:
+                if changed:
+                    ss.write_env(STACK, ss.ensure_secrets(STACK))
+                    if d.get("speak"):
+                        ref = tts.image_ref(STACK)
+                        if not tts.image_present(ref):
+                            tts.set_progress(active=True, step="Downloading the speech service", pct=0, detail="", error="")
+                            best = [0]
+
+                            def report(done, total, extracting):
+                                pct = int(done * 100 / total) if total else 0
+                                best[0] = max(best[0], pct)          # layer sizes arrive one by one: never go back
+                                tts.set_progress(step="Unpacking the speech service" if extracting and best[0] >= 99
+                                                 else "Downloading the speech service", pct=best[0],
+                                                 detail=f"{mb(done)} of {mb(total)}" if total else "")
+                            tts.pull_image(ref, report)
+                        tts.set_progress(active=True, step="Starting the speech service", pct=None, detail="", error="")
+                        run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "tts"])
+                    else:
+                        run_quietly(ss.compose_cmd(STACK) + ["rm", "-s", "-f", "tts"])
                 if d.get("speak"):
-                    run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "tts"])
-                else:
-                    run_quietly(ss.compose_cmd(STACK) + ["rm", "-s", "-f", "tts"])
-            if d.get("speak"):
-                for _ in range(60):          # wait for Piper (and its first voice download)
-                    if tts.status()["ok"]:
-                        break
-                    time.sleep(10)
-                tts.prewarm(STACK, d["cameras"], d)
+                    voice = d.get("voice") or "en_US-lessac-medium"
+                    for _ in range(360):         # wait for Piper and its first voice download (up to an hour)
+                        if tts.status()["ok"]:
+                            break
+                        got = tts.voice_bytes(voice)
+                        if got and got < tts.VOICE_BYTES * 1.05:
+                            tts.set_progress(active=True, step="Downloading the voice", pct=min(99, int(got * 100 / tts.VOICE_BYTES)),
+                                             detail=f"{mb(got)} of about {mb(tts.VOICE_BYTES)}", error="")
+                        elif tts.PROGRESS["active"]:
+                            tts.set_progress(step="Starting the speech service", pct=None, detail="")
+                        time.sleep(5 if tts.PROGRESS["active"] else 10)
+                    else:
+                        raise OSError("the speech service didn't answer within an hour")
+                    if tts.PROGRESS["active"]:
+                        tts.set_progress(step="Preparing the announcements", pct=0, detail="")
+                    tts.prewarm(STACK, d["cameras"], d,
+                                progress=lambda made, total: tts.PROGRESS["active"] and tts.set_progress(
+                                    pct=int(made * 100 / total), detail=f"{made} of {total} phrases"))
+                tts.set_progress(active=False, step="", pct=None, detail="", error="")
+            except OSError as e:
+                tts.set_progress(active=False, error=str(e)[:200])
     threading.Thread(target=run, daemon=True).start()
 
 
@@ -1270,6 +1320,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, display.PAGE)
         elif url.path == "/display/say":
             self.say(dict(urllib.parse.parse_qsl(url.query)))
+        elif self.path == "/speech/progress":
+            self.send(200, json.dumps(tts.PROGRESS), "application/json")
         elif self.path == "/display/events":
             self.send(200, json.dumps(display.events(STACK)), "application/json")
         elif self.path == "/display/power":                  # for solar-display-power.service
