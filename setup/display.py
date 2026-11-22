@@ -145,6 +145,63 @@ def power_state(stack):
 TEST_SOUND = {"at": 0, "speak": 0}   # the setup page's test buttons: the screen plays a chime / an announcement when these change
 
 
+def stream_codec(cam_id, secs=6, base="http://127.0.0.1:1984"):
+    """The video codec go2rtc gets from one of the screen's cameras ("H264", "H265"...), or "" if no video arrived.
+    Pulls the stream for a few seconds so go2rtc connects, and reads what the camera sent."""
+    def pull():
+        try:
+            with urllib.request.urlopen(f"{base}/api/stream.mp4?src={urllib.parse.quote(cam_id)}", timeout=secs + 2) as r:
+                end = time.time() + secs
+                while time.time() < end and r.read(16384):
+                    pass
+        except OSError:
+            pass
+    t = threading.Thread(target=pull, daemon=True)
+    t.start()
+    codec = ""
+    for _ in range(secs * 2):
+        time.sleep(0.5)
+        try:
+            with urllib.request.urlopen(f"{base}/api/streams?src={urllib.parse.quote(cam_id)}", timeout=3) as r:
+                s = json.load(r)
+        except (OSError, ValueError):
+            continue
+        for p in s.get("producers") or []:
+            for m in p.get("medias") or []:
+                if m.startswith("video"):
+                    codec = m.split(",")[-1].strip().split("/")[0].upper()
+        if codec:
+            break
+    t.join(secs + 3)
+    return codec
+
+
+def check_cameras(stack):
+    """Each camera's codec, kept in state/camera-check.json for the screen and the setup page. The screen's Chromium
+    plays H.264 only: a camera sending H.265 (UniFi Protect's Enhanced Encoding) stays black (seen on site)."""
+    out = {}
+    for i, c in enumerate(load(stack)["cameras"], 1):
+        out[f"cam{i}"] = {"name": c.get("name") or f"Camera {i}", "codec": stream_codec(f"cam{i}"), "at": int(time.time())}
+    ss.write_if_changed(os.path.join(stack, "state", "camera-check.json"), json.dumps(out, indent=2) + "\n", 0o644)
+    return out
+
+
+def camera_problems(stack):
+    """{camN: text} for cameras the screen can't show, from the last check."""
+    chk = ss.load_json(os.path.join(stack, "state", "camera-check.json"), {})
+    names = {f"cam{i}": c.get("name") for i, c in enumerate(load(stack)["cameras"], 1)}
+    out = {}
+    for cam, r in chk.items():
+        if names.get(cam) != r.get("name"):
+            continue                                  # cameras changed since the check
+        if r.get("codec") in ("H265", "HEVC"):
+            out[cam] = (f"{r['name']} sends H.265 video, which this screen can't play. In UniFi Protect, open the camera's "
+                        "settings and turn off Enhanced Encoding.")
+        elif r.get("codec") == "":
+            out[cam] = f"{r['name']} sent no video when checked."
+    return out
+
+
 def screen_off_now(d, now=None):
     """Is the screen off now (schedule, occupancy, camera wake-ups: screenpower.wanted)?"""
     return not sp.wanted({**d, **sp.migrate(d)}, now)[0]
@@ -392,7 +449,8 @@ def data(stack, site):
     return {
         "name": site.get("name") or "Solar", "now": vals, "series": series, "alerts": alerts, "advice": advice,
         "battery_kwh": kwh, "generator": site.get("generator"), "low_soc": site.get("low_soc_alert"),
-        "cameras": [{"id": f"cam{i}", "name": c.get("name") or f"Camera {i}"} for i, c in enumerate(d["cameras"], 1)],
+        "cameras": [{"id": f"cam{i}", "name": c.get("name") or f"Camera {i}", "problem": camera_problems(stack).get(f"cam{i}", "")}
+                    for i, c in enumerate(d["cameras"], 1)],
         "screen_off": screen_off_now(d, now.replace(tzinfo=None)), "quiet_hours": quiet_hours(d, now.replace(tzinfo=None)),
         "rev": int(os.path.getmtime(settings_path(stack))) if os.path.exists(settings_path(stack)) else 0,
         "time": hm(now, site), "date": now.strftime("%a %b %-d"),
@@ -590,7 +648,7 @@ solar-cam video{width:100%;height:100%;object-fit:cover;display:block}
 .cam.ring{box-shadow:inset 0 0 0 calc(var(--u)*.5) var(--bad)}
 .cam .badge{position:absolute;z-index:2;right:14px;top:10px;font-size:calc(var(--u)*1.4);font-weight:700;color:#000;
 background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot .badge{display:block}.cam.ring .badge{background:var(--bad);color:#fff}
-.cam .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:calc(var(--u)*1.4)}
+.cam .msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:calc(var(--u)*1.4);padding:0 8%;text-align:center}
 #info{display:flex;flex-direction:column;padding:calc(var(--u)*1.6) calc(var(--u)*1.8);gap:calc(var(--u)*1.1);min-width:0;height:100vh;overflow:hidden}
 #top{display:flex;justify-content:space-between;align-items:baseline}
 #name{font-size:calc(var(--u)*2);font-weight:600}#clock{font-size:calc(var(--u)*2.6);font-variant-numeric:tabular-nums}
@@ -725,6 +783,7 @@ async function showCams(){
     if(s.cam===c.id)continue;
     dropPlayer(s); s.cam=c.id; const m=s.el.querySelector(".msg"); m.textContent="";
     if(!local){m.textContent="Cameras show on the box's own screen";continue}
+    if(c.problem&&/H\.265/.test(c.problem)){m.textContent=c.problem;continue}   // can't play it: say why instead of a black box
     try{ s.player=await camElement(c.id); s.el.insertBefore(s.player,s.el.firstChild); }
     catch(e){ m.textContent="Camera service not running"; }
   }

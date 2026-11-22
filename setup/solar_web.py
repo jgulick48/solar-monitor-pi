@@ -529,7 +529,11 @@ def status_page(handler):
     rows = "".join(
         f"<tr><td>{html.escape(dl)}</td><td>{html.escape(i.get('serial') or 'not seen yet')}</td>"
         f"<td>{html.escape(i.get('host', ''))}</td><td>{html.escape(i.get('last_seen', ''))}</td>"
-        f"<td>{'yes' if i.get('present') else '<b>not found in last scan</b>'}</td></tr>" for dl, i in sorted(inv.items()))
+        f"<td>{'yes' if i.get('present') else '<b>not found in last scan</b>'}"
+        + ("" if i.get("present") else
+           f"<form method='post' action='/inverter/forget' style='display:inline;margin-left:8px'><input type='hidden' name='datalog' value='{html.escape(dl)}'>"
+           f"<button title='Remove this dongle from the monitor and Home Assistant (if it comes back, the next scan finds it again)'>Forget</button></form>")
+        + "</td></tr>" for dl, i in sorted(inv.items()))
     rows = rows or "<tr><td colspan=5>No dongles found yet. They're scanned for every hour, or press <i>Scan now</i>.</td></tr>"
     banner = "" if site["_configured"] else (
         "<div class='card warn'><b>Finish setup:</b> enter the site's location, batteries and panels on the "
@@ -792,7 +796,8 @@ def protect_section(msg=""):
                 f"{'' if c['state'] in ('', 'CONNECTED') else ', ' + html.escape(c['state'].lower())}</small></label>" for c in cams)
             ev = ("events connected" if protect.EVENTS.connected else
                   ("events not connected yet" + (f": {html.escape(protect.EVENTS.error)}" if protect.EVENTS.error else "")))
-            cams_html = f"""<form method="post" action="/protect/cameras"><fieldset><legend>Cameras on the screen ({ev})</legend>
+            probs = "".join(notice("err", t) for t in display.camera_problems(STACK).values())
+            cams_html = probs + f"""<form method="post" action="/protect/cameras"><fieldset><legend>Cameras on the screen ({ev})</legend>
 {rows or '<p>No cameras on this console.</p>'}
 <label><input type="checkbox" name="highlight_motion" value="1" style="width:auto"{' checked' if d['highlight_motion'] else ''}>
  Also bring cameras to the front for plain motion (not only people, vehicles, animals, packages and the doorbell)</label>
@@ -1399,6 +1404,12 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/display/test-power":
             sp.TEST["until"] = time.time() + 15
             self.send(200, setup_page(load_site(), done=["the screen turns off for 15 seconds, then back on"]))
+        elif self.path == "/inverter/forget":
+            try:
+                msgs = ss.forget_dongle(STACK, self.form().get("datalog", ""))
+            except (ValueError, OSError, subprocess.SubprocessError) as e:
+                msgs = [f"not forgotten: {e}"]
+            self.send(200, status_page(self).replace("<h1>Solar monitor</h1>", "<h1>Solar monitor</h1>" + notice("err" if is_error(msgs[0]) else "ok", "; ".join(msgs) + "."), 1))
         elif self.path == "/display/test-sound":
             display.TEST_SOUND["at"] = time.time()
             ok = display.screen_connected() and run_quietly(["systemctl", "is-active", "--quiet", "solar-display.service"]).returncode == 0
@@ -1520,6 +1531,9 @@ class Handler(BaseHTTPRequestHandler):
         if changed:
             r = run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", "go2rtc"])
             msgs.append("cameras updated" if r.returncode == 0 else f"camera service restart failed: {r.stderr.strip()[-200:]}")
+        if action != "/protect/forget":
+            threading.Thread(target=lambda: (time.sleep(5), refresh_camera_quality()), daemon=True).start()
+            msgs.append("checking each camera's video in the background (reload this page in a minute)")
         protect.listen(STACK)
         return "; ".join(msgs) + "."
 
@@ -1538,14 +1552,29 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("%s %s\n" % (self.address_string(), fmt % a))
 
 
-def refresh_camera_quality():
-    """After an update (or a board change): Protect cameras at the quality the setting asks for."""
+def refresh_camera_quality(check=True):
+    """Protect cameras at the quality the setting asks for, with the links Protect currently hands out (it changes
+    them; a stale link left a camera black on site), then each camera's codec (state/camera-check.json)."""
     try:
         if protect.refresh_quality(STACK):
             run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", "go2rtc"])
             print("camera links refreshed at", protect.settings(STACK).get("applied_quality"), flush=True)
+            time.sleep(5)
     except (OSError, ValueError, protect.ProtectError) as e:
-        print("camera quality refresh failed:", e, flush=True)
+        print("camera link refresh failed:", e, flush=True)
+    if check and display.load(STACK)["cameras"]:
+        try:
+            r = display.check_cameras(STACK)
+            print("camera check:", {k: v["codec"] or "no video" for k, v in r.items()}, flush=True)
+        except OSError as e:
+            print("camera check failed:", e, flush=True)
+
+
+def camera_upkeep():
+    """At startup and then every hour."""
+    while True:
+        refresh_camera_quality()
+        time.sleep(3600)
 
 
 def main():
@@ -1556,7 +1585,7 @@ def main():
     args = ap.parse_args()
     STACK = args.stack
     protect.listen(STACK)          # UniFi Protect events for the wall display, if set up
-    threading.Thread(target=refresh_camera_quality, daemon=True).start()
+    threading.Thread(target=camera_upkeep, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
 
 

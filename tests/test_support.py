@@ -197,3 +197,37 @@ class Page(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Forget(unittest.TestCase):
+    def test_forget_only_gone_dongles(self):
+        import solar_setup
+        with tempfile.TemporaryDirectory() as stack:
+            os.makedirs(os.path.join(stack, "state"))
+            os.makedirs(os.path.join(stack, "bridge"))
+            inv = {"BA00000001": {"host": "192.168.12.150", "present": False, "serial": "0000000001"},
+                   "DJ52170989": {"host": "192.168.1.54", "present": True, "serial": "5223740520"}}
+            with open(os.path.join(stack, "state", "inverters.json"), "w") as f:
+                json.dump(inv, f)
+            calls = []
+            orig_run, orig_secrets = solar_setup.subprocess.run, solar_setup.ensure_secrets
+            def fake_run(cmd, **kw):
+                calls.append(cmd)
+                out = "homeassistant/sensor/lxp_BA00000001/soc/config\nhomeassistant/sensor/lxp_DJ52170989/soc/config\nlxp/BA00000001/inputs/all\n" \
+                    if "mosquitto_sub" in cmd else ""
+                return subprocess.CompletedProcess(cmd, 0, out, "")
+            solar_setup.subprocess.run = fake_run
+            solar_setup.ensure_secrets = lambda s: {"mqtt_bridge": "b", "mqtt_homeassistant": "h"}
+            try:
+                with self.assertRaisesRegex(ValueError, "found in the last scan"):
+                    solar_setup.forget_dongle(stack, "DJ52170989")
+                msgs = solar_setup.forget_dongle(stack, "BA00000001")
+            finally:
+                solar_setup.subprocess.run, solar_setup.ensure_secrets = orig_run, orig_secrets
+            with open(os.path.join(stack, "state", "inverters.json")) as f:
+                self.assertEqual(list(json.load(f)), ["DJ52170989"])
+            cleared = [c[c.index("-t") + 1] for c in calls if "mosquitto_pub" in c]
+            self.assertEqual(cleared, ["homeassistant/sensor/lxp_BA00000001/soc/config", "lxp/BA00000001/inputs/all"])
+            self.assertIn("2 Home Assistant entries removed", msgs)
+            with open(os.path.join(stack, "bridge", "config.yml")) as f:
+                self.assertNotIn("BA00000001", f.read())

@@ -359,14 +359,30 @@ def resolve_quality(setting, model=None):
     return "low" if "Raspberry Pi" in model and "Raspberry Pi 5" not in model else "medium"
 
 
+def stale_links(stack):
+    """Names of the picked cameras whose saved stream link Protect no longer hands out (it changes them, e.g.
+    after a console update; seen on site: the old link connected but sent nothing, so the camera was blank)."""
+    import display
+    d = settings(stack)
+    out = []
+    for c in display.load(stack)["cameras"]:
+        if c.get("protect_id"):
+            try:
+                if _token(c["url"]) not in stream_tokens(d["host"], d["api_key"], c["protect_id"]):
+                    out.append(c["name"])
+            except ProtectError:
+                pass
+    return out
+
+
 def refresh_quality(stack):
-    """After an update or a quality change: re-fetch the picked cameras' links if they were made at another
-    quality. Returns True when display.json changed (go2rtc then needs a restart)."""
+    """At startup and every hour: re-fetch the picked cameras' links if they were made at another quality, or if
+    Protect has changed them. Returns True when display.json changed (go2rtc then needs a restart)."""
     d = settings(stack)
     if not (d.get("host") and d.get("api_key") and d.get("cameras")):
         return False
     want = resolve_quality(d.get("quality", "auto"))
-    if d.get("applied_quality") == want:
+    if d.get("applied_quality") == want and not stale_links(stack):
         return False
     cams = list_cameras(d["host"], d["api_key"])
     return apply_cameras(stack, [c["id"] for c in d["cameras"]], cams)
