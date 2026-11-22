@@ -15,6 +15,7 @@ import urllib.request
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "setup"))
+import cameras  # noqa: E402
 import display  # noqa: E402
 import solar_setup as ss  # noqa: E402
 
@@ -52,11 +53,11 @@ class FakeVM(http.server.BaseHTTPRequestHandler):
 
 class Display(unittest.TestCase):
     def test_go2rtc_source(self):
-        self.assertEqual(display.go2rtc_source("rtsps://192.168.1.1:7441/AbC123?enableSrtp"), "rtspx://192.168.1.1:7441/AbC123")
-        self.assertEqual(display.go2rtc_source("rtsp://10.0.0.5:7447/xyz"), "rtsp://10.0.0.5:7447/xyz")
+        self.assertEqual(cameras.go2rtc_source("rtsps://192.168.1.1:7441/AbC123?enableSrtp"), "rtspx://192.168.1.1:7441/AbC123")
+        self.assertEqual(cameras.go2rtc_source("rtsp://10.0.0.5:7447/xyz"), "rtsp://10.0.0.5:7447/xyz")
         for bad in ("http://x/y", "rtsps:///nohost", "garbage"):
             with self.assertRaises(ValueError):
-                display.go2rtc_source(bad)
+                cameras.go2rtc_source(bad)
 
     def test_generator_power_ignores_the_6000xp_gen_registers(self):
         # one guarded expression everywhere (checked against VictoriaMetrics v1.156: 6000XP with 55/64 kW and 0 V
@@ -186,7 +187,8 @@ class Display(unittest.TestCase):
         j = json.loads(urllib.request.urlopen(base + "/display/data").read())
         self.assertEqual(j["name"], "Test")
         setup = urllib.request.urlopen(base + "/setup").read().decode()
-        self.assertIn("Screen and cameras", setup)
+        self.assertIn("<legend>Screen</legend>", setup)
+        self.assertIn("<legend>Cameras</legend>", setup)            # the cameras module: on, the box had cameras
         self.assertNotIn("TOK", setup)               # saved link is masked
         self.assertIn("rtsps://h:7441/••••OK", setup)
         start = urllib.request.urlopen(base + "/").read().decode()
@@ -197,7 +199,7 @@ class Display(unittest.TestCase):
                     generator_fuel="gasoline", weather_source="openmeteo", display_enabled="1",
                     power_mode="hours", hours1_days="weekdays", hours1_on="6:00", hours1_off="22:00",
                     hours2_days="weekends", hours2_on="08:00", hours2_off="01:00", wake_doorbell="1", cec="1",
-                    cam1_name="Drive", cam1_url="",
+                    module_cameras_shown="1", cam1_name="Drive", cam1_url="",
                     cam2_name="Door", cam2_url="rtsps://10.1.1.1:7441/SECRET2?enableSrtp")
         post = lambda f: urllib.request.urlopen(urllib.request.Request(  # noqa: E731
             base + "/setup", data=urllib.parse.urlencode(f).encode(), method="POST"))

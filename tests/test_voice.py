@@ -115,6 +115,9 @@ class Voice(unittest.TestCase):
         modules.set_enabled(self.stack, "voice", True)
         page = solar_web.setup_page(solar_web.load_site())
         self.assertIn("<legend>Voice announcements</legend>", page)
+        self.assertNotIn("name='speak_template'", page)               # ... and with cameras: it's the cameras' wording
+        modules.set_enabled(self.stack, "cameras", True)
+        page = solar_web.setup_page(solar_web.load_site())
         self.assertIn("name='speak_template'", page)
         self.assertIn('formaction="/voice/test"', page)
         # saving the camera settings without the wording on the page keeps it

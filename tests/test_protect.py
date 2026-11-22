@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "setup"))
+import cameras  # noqa: E402
 import display  # noqa: E402
 import protect  # noqa: E402
 
@@ -207,7 +208,7 @@ class Display(unittest.TestCase):
         display.save(self.stack, {**display.DEFAULTS, "cameras": [{"name": "Driveway", "url": "rtsp://a/1"}, {"name": "Front Yard", "url": "rtsp://a/2"}]})
         with open(os.path.join(self.stack, "state", "camera-check.json"), "w") as f:
             json.dump({"cam1": {"name": "Driveway", "codec": "H264"}, "cam2": {"name": "Front Yard", "codec": "H265"}}, f)
-        probs = display.camera_problems(self.stack)
+        probs = cameras.camera_problems(self.stack)
         self.assertEqual(list(probs), ["cam2"])
         self.assertIn("Enhanced Encoding", probs["cam2"])
         self.assertIn("if(c.problem&&/H\\.265/.test(c.problem))", display.PAGE)

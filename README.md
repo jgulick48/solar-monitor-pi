@@ -74,7 +74,7 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
   on (`~solar-display/.asoundrc`, Pi 4: HDMI-A-1 = vc4hdmi0); the screen or TV needs speakers.
 - **Voice announcements** (optional, like UniFi's Alarm Manager; setup page: *Optional features* → *Voice
   announcements*): after the chime, or instead of it, Piper says what a camera saw, "Person at the Front door" /
-  "Someone's at the Front door" (wording under *Screen and cameras*, `{object}` and `{camera}`), in one of four English
+  "Someone's at the Front door" (wording under *Cameras*, `{object}` and `{camera}`), in one of four English
   voices. Other features can use it for their own alerts (`modules.voice.announce(stack, text, chime=...)`; the display
   speaks announcements from the last two minutes, not during quiet hours). Piper runs in the optional `tts` service
   (`rhasspy/wyoming-piper`, the voice Home Assistant uses for local voice); it isn't in the image (about 200 MB):
@@ -122,7 +122,7 @@ the box) supplies "now" with its own readings, wind included. In the US, Nationa
 (every 10 minutes) appear with the other notes, red for severe ones. If the panel doesn't fit the screen (long notes, a
 small screen), the hourly row is left out first.
 
-**When the screen is on** (setup page, Screen and cameras): always; during **on-hours** (up to four lines such as
+**When the screen is on** (setup page, *Screen*): always; during **on-hours** (up to four lines such as
 Mon-Fri 06:30-22:00 and Sat-Sun 08:00-01:00, past midnight allowed); **when someone's in the room**, from Home
 Assistant occupancy, motion or presence sensors (`binary_sensor.*`, `person.*`, `input_boolean.*`; stays on for a set
 time after the room empties); or during the on-hours *and* when someone's there. Camera events (doorbell, person, ...)
@@ -136,6 +136,9 @@ changes, so a TV turned off with its remote stays off until the next change.
 
 ### Cameras (UniFi Protect)
 
+Cameras are an optional feature (setup page: *Optional features* → *Cameras*; on for boxes that had cameras
+before). Turning it off stops go2rtc and the Protect event listener and keeps the camera settings.
+
 Up to 16 cameras; two are on screen at a time and they take turns every 15 seconds (only the two on screen are
 played, so more cameras don't load the Pi).
 
@@ -147,7 +150,7 @@ the front of the screen with an amber frame and a label, and a **doorbell ring**
 the event ends. Plain motion does the same only if *Also bring cameras to the front for plain motion* is ticked. The
 key is kept in `state/protect.json` (mode 600); the console's self-signed certificate isn't checked.
 
-**By stream link** (any RTSP/RTSPS H.264 camera, no events): setup page, *Screen and cameras*: name each camera and
+**By stream link** (any RTSP/RTSPS H.264 camera, no events): setup page, *Cameras*: name each camera and
 paste its stream link. A camera added this way and later picked from UniFi Protect is dropped from the manual list
 (same stream token or name), and the screen never shows the same camera in both places. In UniFi Protect: open the camera
 -> Settings -> Advanced -> RTSPS, turn on **Medium** quality (720p: sharp enough for a 960x540 tile and light on
@@ -434,8 +437,8 @@ Home Assistant, Grafana and the rest.
   settings (`state/modules/<id>.json`, moved over from the old file on the first run after an update), its pages,
   setup-page section or fieldset, start-page card or banner, wall-display data, Home Assistant fields, collector
   hooks and Compose profiles. The core in `setup/modules/__init__.py` calls only the enabled ones; the setup page's
-  *Optional features* switches turn them on and off. So far: backups, remote access, remote support, SSH access, weather and voice;
-  cameras and the generator move there next.
+  *Optional features* switches turn them on and off. So far: backups, cameras, remote access, remote support, SSH access, weather and voice;
+  the generator moves there next.
 - `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it; `setup/modules/backup/`
   is its page and settings.
 - `setup/support.py` turns remote support on and off (tunnel, SSH key, sudo, SSH) and switches it off when its time is up;
@@ -444,7 +447,8 @@ Home Assistant, Grafana and the rest.
 
 - `setup/tunnel.py` sets up remote access through a Cloudflare Tunnel (Cloudflare API calls, `cloudflared` service);
   `setup/modules/tunnel/` is its setup-page section, start-page card and Home Assistant's `external_url`.
-- `setup/display.py` is the wall display (page, data, settings, go2rtc config, screen schedule);
+- `setup/display.py` is the wall display (page, data, settings, screen schedule); `setup/cameras.py` its cameras
+  (go2rtc config, Protect detections, hourly upkeep) and `setup/modules/cameras/` their setup page;
   `setup/kiosk.sh` starts Chromium; `system/` has the kiosk PAM session and the HDMI hotplug rule.
 - `image/build.sh` builds the image: it takes Raspberry Pi OS Lite (arm64, checksum-verified), grows the
   root partition, installs Docker, avahi (`solar-monitor.local`), unattended-upgrades and the kiosk (cage, Chromium) in a chroot, runs

@@ -194,7 +194,7 @@ def form_section(stack):
     voices = "".join(f"<option value='{v}'{' selected' if s['voice'] == v else ''}>{html.escape(t)}</option>" for v, t in tts.VOICES)
     return f"""<fieldset id="voice"><legend>Voice announcements</legend>
 <small>Spoken through the screen's speakers (HDMI) by Piper text-to-speech on this box: what a camera saw (its wording is
-under Screen and cameras), and alerts from other features. The screen's volume and quiet hours apply.</small>
+under Cameras), and alerts from other features. The screen's volume and quiet hours apply.</small>
 <div class="row"><label>How <select name="speak_mode">{modes}</select></label>
 <label>Voice <select name="voice">{voices}</select></label></div>
 <small>{status_html(stack)}</small>

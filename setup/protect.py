@@ -276,6 +276,14 @@ EVENTS = Events()
 _listener = {"thread": None, "key": None, "stop": None}
 
 
+def stop():
+    """Stop the event listener (the cameras module was turned off)."""
+    if _listener["stop"]:
+        _listener["stop"].set()
+    _listener["key"] = None
+    EVENTS.connected = False
+
+
 def listen(stack):
     """Start (or restart, after a settings change) the background event listener. Safe to call repeatedly."""
     d = settings(stack)

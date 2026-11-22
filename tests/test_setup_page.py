@@ -50,7 +50,7 @@ class SetupPage(unittest.TestCase):
         self.assertIn("class='toast err'", page)
         self.assertIn("id=notice class='card notice err'", page)       # in the Remote access section
         self.assertIn('getElementById("notice")', page)
-        page = solar_web.setup_page(solar_web.load_site(), protect_msg="connected: 4 camera(s).")
+        page = solar_web.setup_page(solar_web.load_site(), module_msgs={"cameras": "connected: 4 camera(s)."})
         self.assertIn("class='toast ok'", page)
         self.assertTrue(solar_web.is_error("2 camera(s) on the screen; camera service restart failed: x"))
         self.assertFalse(solar_web.is_error("remote access on at https://solar.example.com"))

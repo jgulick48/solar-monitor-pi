@@ -338,13 +338,6 @@ def power_fields(dsp):
 <p><button formaction="/display/test-power" formmethod="post" formnovalidate>Test: screen off for 15 seconds</button></p>"""
 
 
-def mask_url(url):
-    """rtsps://host:7441/TOKEN?x -> rtsps://host:7441/••••ab (the token is a password)."""
-    u = urllib.parse.urlsplit(url)
-    tail = u.path.rsplit("/", 1)[-1]
-    return f"{u.scheme}://{u.netloc}/" + ("\u2022" * 4 + tail[-2:] if tail else "")
-
-
 def screen_power_form(form):
     """When the screen is on (screenpower.py) from the setup form. Raises FieldError."""
     rows = []
@@ -374,48 +367,18 @@ def screen_power_form(form):
 
 
 def apply_display(form):
-    """Screen and camera settings from the setup form. Returns messages; raises ValueError."""
+    """The screen's settings from the setup form. Returns messages; raises ValueError."""
     cur = display.load(STACK)
-    d = {"enabled": form.get("display_enabled") == "1",
-         **screen_power_form(form), "cameras": [],
-         "sounds": {k: form.get(f"sound_{k}") == "1" for k, _, _ in display.SOUND_KINDS},
+    d = {**cur, "enabled": form.get("display_enabled") == "1", **screen_power_form(form),
          "volume": max(0, min(100, int(form.get("volume") or 70) if str(form.get("volume") or "70").isdigit() else 70)),
-         "sound_quiet": form.get("sound_quiet") == "1",
-         "sound_cooldown": (lambda v: v if v in dict(display.COOLDOWNS) else 60)(int(form.get("sound_cooldown")) if str(form.get("sound_cooldown", "")).isdigit() else 60),
-         "sound_gap": (lambda v: v if v in dict(display.GAPS) else 5)(int(form.get("sound_gap")) if str(form.get("sound_gap", "")).isdigit() else 5),
-         "doorbell_always": form.get("doorbell_always") == "1",
-         # the cameras' wording for voice announcements: only on the page while voice is on; kept otherwise
-         "speak_template": (form.get("speak_template") or cur.get("speak_template") or tts.DEFAULT_TEMPLATE).strip()[:120],
-         "speak_doorbell": (form.get("speak_doorbell") or cur.get("speak_doorbell") or tts.DEFAULT_DOORBELL).strip()[:120]}
-    for k in ("speak_template", "speak_doorbell"):
-        try:
-            tts.check_template(d[k])
-        except ValueError as e:
-            raise FieldError(k, f"Announcement: {e}")
-    # UniFi Protect's cameras are set in their own section (protect.py); the fields here are the manual ones
-    keep = [c for c in cur["cameras"] if c.get("protect_id")]
-    manual = [c for c in cur["cameras"] if not c.get("protect_id")]
-    for i in range(1, display.MAX_CAMERAS + 1):
-        name = form.get(f"cam{i}_name", "").strip()[:30]
-        url = form.get(f"cam{i}_url", "").strip()
-        old = manual[i - 1] if len(manual) >= i else None
-        if form.get(f"cam{i}_remove") == "1":
-            continue
-        if not url and old:
-            url = old["url"]  # the saved link isn't shown again; empty keeps it
-        if url:
-            display.go2rtc_source(url)  # validates
-            d["cameras"].append({"name": name or f"Camera {i}", "url": url})
-    d["cameras"] = (keep + d["cameras"])[:display.MAX_CAMERAS]
+         "sound_quiet": form.get("sound_quiet") == "1"}       # the camera settings: the cameras module
     def run(cmd):
         try:
             return subprocess.run(cmd, capture_output=True, text=True)
         except OSError as e:
             return subprocess.CompletedProcess(cmd, 1, "", str(e))
     msgs = []
-    if display.save(STACK, d):
-        r = run(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", "go2rtc"])
-        msgs.append("cameras updated" if r.returncode == 0 else f"camera service restart failed: {r.stderr.strip()[-200:]}")
+    display.save(STACK, d)
     if d["enabled"] != cur.get("enabled", True):
         run(["systemctl", "start" if d["enabled"] else "stop", "solar-display.service"])
         msgs.append("screen " + ("on" if d["enabled"] else "off"))
@@ -613,7 +576,7 @@ def mark_field(body, name, error):
     return body[:m.start()] + bad + body[m.end():end] + f"<span class='fielderr'>{html.escape(error)}</span>" + body[end:]
 
 
-def setup_page(site, error="", done=None, protect_msg="", error_field="", form=None, module_msgs=None):
+def setup_page(site, error="", done=None, error_field="", form=None, module_msgs=None):
     upd = update_settings()
     def inp(name, value, typ="text", extra=""):
         return f"<input name='{name}' type='{typ}' value='{html.escape(str(value))}' {extra}>"
@@ -647,38 +610,18 @@ def setup_page(site, error="", done=None, protect_msg="", error_field="", form=N
                         "path <code>/weather/ecowitt</code>, port 80; Ambient Weather path <code>/weather/ambient?</code>. "
                         + (f"Last data received {html.escape(wth['last_push'])}." if wth.get("last_push") else "Nothing received yet."))
     dsp = display.load(STACK)
-    cams = ""
-    manual = [c for c in dsp["cameras"] if not c.get("protect_id")]
-    for i in range(1, min(len(manual) + 1, display.MAX_CAMERAS - (len(dsp["cameras"]) - len(manual))) + 1):
-        c = manual[i - 1] if len(manual) >= i else {}
-        saved = (f"<small>Saved: <code>{html.escape(mask_url(c['url']))}</code>. Leave the link empty to keep it. "
-                 f"<label style='display:inline'><input type='checkbox' name='cam{i}_remove' value='1' style='width:auto'> remove</label></small>") if c else ""
-        cams += (f"<div class='row'><label>Camera {i} name {inp(f'cam{i}_name', c.get('name', ''), 'text', 'placeholder=' + chr(39) + ('Driveway' if i == 1 else 'Front door') + chr(39))}</label>"
-                 f"<label style='flex:2 1 300px'>Stream link {inp(f'cam{i}_url', '', 'text', 'placeholder=' + chr(39) + 'rtsps://192.168.1.1:7441/...' + chr(39) + ' style=' + chr(39) + 'max-width:100%' + chr(39) + ' autocomplete=off')}</label></div>{saved}")
-    screen_fields = f"""<fieldset id="screen"><legend>Screen and cameras</legend>
+    screen_fields = f"""<fieldset id="screen"><legend>Screen</legend>
 <p><small>Screen: {html.escape(display.screen_line())}. The picture size comes from the screen itself (its EDID);
 4K TVs are run at 1920x1080, which they scale up.</small></p>
 <label><input type="checkbox" name="display_enabled" value="1" style="width:auto"{' checked' if dsp['enabled'] else ''}> Show the dashboard on a screen plugged into the HDMI port</label>
 {power_fields(dsp)}
-<p style="margin-top:16px"><b>Sounds</b> <small style="display:inline">through the screen's speakers (HDMI), when a UniFi Protect camera sees:</small></p>
-<div class="row">{''.join(f"<label><input type='checkbox' name='sound_{k}' value='1'{' checked' if (dsp.get('sounds') or {}).get(k, on) else ''}> {t}</label>" for k, t, on in display.SOUND_KINDS)}</div>
-<div class="row"><label>Repeat the same alert (same camera, same kind) at most every <select name="sound_cooldown">{''.join(f"<option value='{v}'{' selected' if dsp.get('sound_cooldown', 60) == v else ''}>{t}</option>" for v, t in display.COOLDOWNS)}</select></label>
-<label>Any two sounds at least <select name="sound_gap">{''.join(f"<option value='{v}'{' selected' if dsp.get('sound_gap', 5) == v else ''}>{t}</option>" for v, t in display.GAPS)}</select></label></div>
-<label><input type="checkbox" name="doorbell_always" value="1"{' checked' if dsp.get('doorbell_always', True) else ''}> The doorbell always rings (not held back by these limits)</label>
-<small>Limits the sounds and announcements only; the camera still comes to the front of the screen.</small>
+<p style="margin-top:16px"><b>Sound</b> <small style="display:inline">through the screen's speakers (HDMI): camera chimes and voice announcements</small></p>
 <div class="row"><label>Volume <input type="range" name="volume" min="0" max="100" step="5" value="{dsp.get('volume', 70)}"></label>
 <label><input type="checkbox" name="sound_quiet" value="1"{' checked' if dsp.get('sound_quiet', True) else ''}> Not during the screen-off hours</label></div>
-{camera_wording(dsp)}
 <p><button formaction="/display/test-sound" formmethod="post" formnovalidate>Play a test sound</button>
 <button formaction="/display/restart" formmethod="post" formnovalidate>Restart the dashboard</button>
 <small style="display:inline">on the screen (save first if you changed something). The TV's own volume applies too.</small></p>
-<details><summary>Sound check</summary><pre style="white-space:pre-wrap;font-size:12px">{html.escape(sound_check())}</pre></details>
-<p><small>Two cameras at a time are shown next to the power figures, taking turns every 15 seconds. To add one by its stream link instead, in UniFi Protect: open the camera &rarr; Settings &rarr; Advanced &rarr;
-RTSPS, turn on <b>Medium</b> quality and copy its link (<code>rtsps://...:7441/...</code>). The camera pictures are only shown on the
-box's own screen, not to other computers on the network.</small></p>{cams}
-<p><small>UniFi Protect cameras can be picked from a list instead (and come to the front when they see someone):
-<a href="#protect">UniFi Protect cameras</a> below. Camera entities, motion and doorbell events in Home Assistant: add the UniFi Protect integration there (Settings &rarr;
-Devices &amp; services; it's usually found automatically) with a local Protect user.</small></p></fieldset>"""
+<details><summary>Sound check</summary><pre style="white-space:pre-wrap;font-size:12px">{html.escape(sound_check())}</pre></details></fieldset>"""
     # One message per response: a banner pinned to the top of the window, the same message where it belongs
     # (next to the field, or in the section whose form was sent) and the page scrolled there.
     msg, toast, target = "", "", ""
@@ -689,7 +632,7 @@ Devices &amp; services; it's usually found automatically) with a local Protect u
     elif done:
         text = "Saved: " + "; ".join(done) + "."
         toast, msg = notice("ok", text, toast=True), notice("ok", text, link=("/", "Back to the start page"))
-    sections = [(protect_msg, "UniFi Protect")] + [(msg, modules.get(mid).title) for mid, msg in (module_msgs or {}).items()]
+    sections = [(msg, modules.get(mid).title) for mid, msg in (module_msgs or {}).items()]
     for sec_msg, title in sections:
         if sec_msg:
             kind = "err" if is_error(sec_msg) else "ok"
@@ -743,50 +686,10 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
 <option value="main"{' selected' if upd['channel'] == 'main' else ''}>Every change on main (test boxes)</option></select></label></fieldset>
 <p><button>Save</button> &nbsp;<a href="/">Cancel</a></p></form>
 <p><small>Saving restarts Home Assistant (about a minute) when the location, time zone or sizes changed.</small></p>
-{protect_section(protect_msg)}
 {modules.setup_sections(STACK, module_msgs)}{scroll_to(target)}"""
     if error_field:
         body = mark_field(body, error_field, error)
     return page("Site setup", body)
-
-
-def protect_section(msg=""):
-    """UniFi Protect cameras (protect.py): console address and API key, then which cameras the screen shows."""
-    d = protect.settings(STACK)
-    note = notice("err" if is_error(msg) else "ok", msg) if msg else ""
-    saved = "<small>An API key is saved; leave the field empty to keep it.</small>" if d["api_key"] else ""
-    cams_html = ""
-    if d["host"] and d["api_key"]:
-        try:
-            cams = protect.list_cameras(d["host"], d["api_key"])
-            picked = {c["id"] for c in d["cameras"]}
-            rows = "".join(
-                f"<label><input type='checkbox' name='cam_{html.escape(c['id'])}' value='1' style='width:auto'"
-                f"{' checked' if c['id'] in picked else ''}> {html.escape(c['name'])}"
-                f"<small> {'doorbell, ' if c['doorbell'] else ''}{html.escape(', '.join(c['smart']) or 'motion only')}"
-                f"{'' if c['state'] in ('', 'CONNECTED') else ', ' + html.escape(c['state'].lower())}</small></label>" for c in cams)
-            ev = ("events connected" if protect.EVENTS.connected else
-                  ("events not connected yet" + (f": {html.escape(protect.EVENTS.error)}" if protect.EVENTS.error else "")))
-            probs = "".join(notice("err", t) for t in display.camera_problems(STACK).values())
-            cams_html = probs + f"""<form method="post" action="/protect/cameras"><fieldset><legend>Cameras on the screen ({ev})</legend>
-{rows or '<p>No cameras on this console.</p>'}
-<label><input type="checkbox" name="highlight_motion" value="1" style="width:auto"{' checked' if d['highlight_motion'] else ''}>
- Also bring cameras to the front for plain motion (not only people, vehicles, animals, packages and the doorbell)</label>
-<label>Camera picture <select name="protect_quality">{''.join(f"<option value='{v}'{' selected' if d.get('quality', 'auto') == v else ''}>{html.escape(t)}</option>" for v, t in protect.QUALITIES)}</select></label>
-<small>Now: {html.escape(d.get('applied_quality') or protect.resolve_quality(d.get('quality', 'auto')))}. Playing the video is most of this box's work; low quality takes about a third less on a Pi 4.
-The video also stops while the screen is off.</small>
-<p><button>Save cameras</button></p></fieldset></form>
-<form method="post" action="/protect/forget"><p><button>Forget this console</button></p></form>"""
-        except protect.ProtectError as e:
-            cams_html = f"<p class='err'>{html.escape(str(e))}</p>"
-    return f"""<h2 id="protect">UniFi Protect cameras (optional)</h2>{note}
-<form method="post" action="/protect/connect"><fieldset><legend>UniFi Protect console</legend>
-<p><small>Lists the cameras so you can pick them (their stream links are filled in for you), and brings a camera to the
-front of the screen when it sees a person, vehicle, animal or package, or the doorbell rings. Make an API key on the console:
-UniFi OS &rarr; Settings &rarr; Control Plane &rarr; Integrations &rarr; Create API Key.</small></p>
-<div class="row"><label>Console address {f"<input name='protect_host' value='{html.escape(d['host'])}' placeholder='192.168.1.1'>"}</label>
-<label>API key <input name="protect_key" type="password" autocomplete="off"></label></div>{saved}
-<p><button>Save and connect</button></p></fieldset></form>{cams_html}"""
 
 
 def sound_check():
@@ -806,19 +709,6 @@ def sound_check():
              "The kiosk's sound goes to: " + ("; ".join(chosen) or "the default card (no choice written yet: restart the dashboard)")]
     lines += said
     return "\n".join(lines)
-
-
-def camera_wording(dsp):
-    """What the screen says for a camera event: only while voice announcements are on (the voice module)."""
-    if not modules.load(STACK, "voice")["enabled"]:
-        return ""
-    def inp(name, value):
-        return f"<input name='{name}' type='text' value='{html.escape(str(value))}' >"
-    return f"""<p style="margin-top:16px"><b>Spoken announcements</b> <small style="display:inline">(Voice announcements, below, says
-these for the kinds ticked above)</small></p>
-<div class="row"><label>Announcement {inp('speak_template', dsp.get('speak_template', tts.DEFAULT_TEMPLATE))}</label>
-<label>Doorbell {inp('speak_doorbell', dsp.get('speak_doorbell', tts.DEFAULT_DOORBELL))}</label></div>
-<small>{{object}} is Person, Vehicle, Animal or Package; {{camera}} the camera's name.</small>"""
 
 
 def run_quietly(cmd):
@@ -1118,19 +1008,8 @@ class Handler(BaseHTTPRequestHandler):
             f = self.form()
             try:
                 site = validate(f)
-                for i in range(1, display.MAX_CAMERAS + 1):  # check the screen settings before saving anything
-                    if f.get(f"cam{i}_url", "").strip():
-                        try:
-                            display.go2rtc_source(f[f"cam{i}_url"])
-                        except ValueError as e:
-                            raise FieldError(f"cam{i}_url", f"Camera {i}: {e}")
                 screen_power_form(f)
                 modules.form_check(STACK, f)
-                for k in ("speak_template", "speak_doorbell"):
-                    try:
-                        tts.check_template((f.get(k) or "{object}").strip())
-                    except ValueError as e:
-                        raise FieldError(k, f"Announcement: {e}")
             except ValueError as e:
                 cur = load_site()
                 cur.update({k: v for k, v in f.items() if k in DEFAULT_SITE and k != "arrays"})
@@ -1168,8 +1047,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
             genlog.mark_serviced(STACK, kind, hours)
             self.send(200, generator_page(load_site(), "Service recorded."))
-        elif self.path in ("/protect/connect", "/protect/cameras", "/protect/forget"):
-            self.send(200, setup_page(load_site(), protect_msg=self.protect_post(self.path, self.form())))
         elif self.path in ("/display/presence", "/display/power-report"):
             # from Home Assistant's automation (host network) / the power service: this box only
             if not self.loopback():
@@ -1277,42 +1154,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def protect_post(self, action, f):
-        d = protect.settings(STACK)
-        try:
-            if action == "/protect/connect":
-                host = protect.clean_host(f.get("protect_host"))
-                key = f.get("protect_key", "").strip() or (d["api_key"] if host == d["host"] else "")
-                if not key:
-                    return "the API key is needed"
-                cams = protect.list_cameras(host, key)
-                protect.save(STACK, {**d, "host": host, "api_key": key})
-                return f"connected: {len(cams)} camera(s). Tick the ones for the screen."
-            if action == "/protect/forget":
-                changed = protect.apply_cameras(STACK, [], [])
-                protect.save(STACK, dict(protect.DEFAULTS))
-                msgs = ["forgotten"]
-            else:
-                cams = protect.list_cameras(d["host"], d["api_key"])
-                picked = [c["id"] for c in cams if f.get(f"cam_{c['id']}") == "1"]
-                q = f.get("protect_quality") if f.get("protect_quality") in dict(protect.QUALITIES) else "auto"
-                protect.save(STACK, {**protect.settings(STACK), "highlight_motion": f.get("highlight_motion") == "1", "quality": q})
-                changed = protect.apply_cameras(STACK, picked, cams)
-                msgs = [f"{len(picked)} camera(s) on the screen"]
-                if protect.LAST_DUPES:
-                    msgs.append("removed the stream link for " + ", ".join(protect.LAST_DUPES)
-                                + ": the same camera as one picked from UniFi Protect")
-        except (ValueError, protect.ProtectError) as e:
-            return f"not saved: {e}"
-        if changed:
-            r = run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", "go2rtc"])
-            msgs.append("cameras updated" if r.returncode == 0 else f"camera service restart failed: {r.stderr.strip()[-200:]}")
-        if action != "/protect/forget":
-            threading.Thread(target=lambda: (time.sleep(5), refresh_camera_quality()), daemon=True).start()
-            msgs.append("checking each camera's video in the background (reload this page in a minute)")
-        protect.listen(STACK)
-        return "; ".join(msgs) + "."
-
     def weather_push(self, q, kind):
         try:
             solar = float(q["solarradiation"]) if q.get("solarradiation") not in (None, "") else None
@@ -1328,31 +1169,6 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("%s %s\n" % (self.address_string(), fmt % a))
 
 
-def refresh_camera_quality(check=True):
-    """Protect cameras at the quality the setting asks for, with the links Protect currently hands out (it changes
-    them; a stale link left a camera black on site), then each camera's codec (state/camera-check.json)."""
-    try:
-        if protect.refresh_quality(STACK):
-            run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", "go2rtc"])
-            print("camera links refreshed at", protect.settings(STACK).get("applied_quality"), flush=True)
-            time.sleep(5)
-    except (OSError, ValueError, protect.ProtectError) as e:
-        print("camera link refresh failed:", e, flush=True)
-    if check and display.load(STACK)["cameras"]:
-        try:
-            r = display.check_cameras(STACK)
-            print("camera check:", {k: v["codec"] or "no video" for k, v in r.items()}, flush=True)
-        except OSError as e:
-            print("camera check failed:", e, flush=True)
-
-
-def camera_upkeep():
-    """At startup and then every hour."""
-    while True:
-        refresh_camera_quality()
-        time.sleep(3600)
-
-
 def main():
     global STACK
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1360,8 +1176,8 @@ def main():
     ap.add_argument("--port", type=int, default=80)
     args = ap.parse_args()
     STACK = args.stack
-    protect.listen(STACK)          # UniFi Protect events for the wall display, if set up
-    threading.Thread(target=camera_upkeep, daemon=True).start()
+    if modules.load(STACK, "cameras")["enabled"]:
+        protect.listen(STACK)      # UniFi Protect events for the wall display, if set up (the cameras module)
     ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
 
 

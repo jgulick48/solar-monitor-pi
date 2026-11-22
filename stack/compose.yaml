@@ -69,10 +69,12 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on: [mosquitto]
 
-  # Cameras for the HDMI display (setup/display.py writes go2rtc/go2rtc.yaml from the setup page).
-  # Turns the cameras' RTSP(S) streams into MSE for the kiosk browser; localhost only.
+  # Cameras for the HDMI display (setup/cameras.py writes go2rtc/go2rtc.yaml from the setup page).
+  # Turns the cameras' RTSP(S) streams into MSE for the kiosk browser; localhost only. Off unless .env has
+  # COMPOSE_PROFILES=cameras (the cameras module is on).
   go2rtc:
     image: alexxit/go2rtc:1.9.15
+    profiles: [cameras]
     restart: unless-stopped
     # host network, listening on 127.0.0.1 only (go2rtc.yaml): the video doesn't pass through docker-proxy,
     # which cost the Pi 4 a few percent of CPU
