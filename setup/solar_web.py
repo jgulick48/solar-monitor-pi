@@ -221,6 +221,7 @@ def num(form, key, lo, hi, required=True, integer=False):
 
 
 def validate(form):
+    cur = load_site()
     site = {
         "name": (form.get("name", "").strip() or "Solar")[:40],
         "time_zone": form.get("time_zone", "").strip(),
@@ -230,9 +231,8 @@ def validate(form):
         "units": form.get("units") if form.get("units") in ("us_customary", "metric") else "us_customary",
         "battery_count": num(form, "battery_count", 1, 64, integer=True),
         "battery_kwh_each": num(form, "battery_kwh_each", 0.5, 100),
-        "generator": form.get("generator") if form.get("generator") in ("none", "manual", "automatic") else "manual",
-        "generator_kw": num(form, "generator_kw", 1, 200, required=False),
-        "generator_fuel": form.get("generator_fuel") if form.get("generator_fuel") in ("gasoline", "propane", "diesel") else "gasoline",
+        # the generator's own settings: the generator module (kept here, in site.json, where the others read them)
+        **{k: cur[k] for k in ("generator", "generator_kw", "generator_fuel")},
         "future_generator_kw": num(form, "future_generator_kw", 1, 200, required=False),
         "low_soc_alert": num(form, "low_soc_alert", 5, 80, integer=True),
         "inverter_model": form.get("inverter_model") if form.get("inverter_model") in advisor.INVERTERS else "6000xp",
@@ -434,9 +434,9 @@ padding:12px 44px 12px 16px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.
 @media (max-width:600px){body{padding:12px} fieldset{padding:6px 12px 14px} .row label{flex-basis:100%}}"""
 
 
-NAV = [("/", "Home", "Solar monitor"), ("/setup", "Setup", "Site setup"), ("/generator", "Generator", "Generator"),
+NAV = [("/", "Home", "Solar monitor"), ("/setup", "Setup", "Site setup"),
        ("/battery", "Battery", "Battery health"), ("/advisor", "Advisor", "Advisor"), ("/display", "Screen", None)]
-NAV_MODULES_AT = 4          # the enabled modules' pages go before the Advisor
+NAV_MODULES_AT = 3          # the enabled modules' pages (backups, generator) go before the Advisor
 APPS = [("8123", "Home Assistant"), ("3000", "Grafana")]
 
 
@@ -541,7 +541,6 @@ def status_page(handler):
 {modules.cards(STACK)}
 {box_card()}
 {battery_card(site)}
-{generator_card(site)}
 {modules.cards(STACK, "access")}
 <div class="card"><b>Screen</b>: {display_line} <a href="/display">preview</a> &nbsp;<a href="/setup#screen">change</a>{display_problem(dsp)}</div>
 <div class="card" id="weather"><b>Sunlight data</b>: {weather_line}
@@ -593,13 +592,8 @@ def setup_page(site, error="", done=None, error_field="", form=None, module_msgs
 <label>Watts per panel {inp(f'a{i}_panel_watts', a['panel_watts'], 'number', 'min=10')}</label></div>
 <div class="row"><label>Tilt from flat (degrees) {inp(f'a{i}_tilt', a['tilt'], 'number', 'min=0 max=90')}</label>
 <label>Facing {direction(f'a{i}_azimuth', a['azimuth'])}</label></div></fieldset>"""
-    gen = "".join(f"<option value='{v}'{' selected' if site['generator'] == v else ''}>{t}</option>" for v, t in
-                  (("none", "No generator"), ("manual", "Started by hand (e.g. portable generator + Chargeverter)"),
-                   ("automatic", "Auto-start from the inverter's generator dry contact")))
     inv_opts = "".join(f"<option value='{k}'{' selected' if site.get('inverter_model') == k else ''}>{v['name']} "
                        f"({v['ac_kw']:g} kW out, {v['pv_kw']:g} kW solar in)</option>" for k, v in advisor.INVERTERS.items())
-    fuel_opts = "".join(f"<option value='{v}'{' selected' if site.get('generator_fuel') == v else ''}>{v.title()}</option>"
-                        for v in ("gasoline", "propane", "diesel"))
     n_inv = len(ss.load_json(path("state", "inverters.json"), {}))
     wth = weather_settings()
     cost_inputs = "".join(f"<label>{t} {inp('cost_' + k, site['costs'].get(k, ''), 'text', chr(32) + 'inputmode=decimal')}</label>"
@@ -665,10 +659,6 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
 {arrays}
 <fieldset><legend>Inverters</legend><label>Model <select name="inverter_model">{inv_opts}</select></label>
 <small>{n_inv} inverter dongle(s) found on the network. Used by the advisor for output, solar input and charging limits.</small></fieldset>
-<fieldset><legend>Generator</legend><label>How is the generator started? <select name="generator">{gen}</select></label>
-<div class="row"><label>Generator size in kW (optional) {inp('generator_kw', site['generator_kw'], 'text', "inputmode='decimal'")}</label>
-<label>Fuel <select name="generator_fuel">{fuel_opts}</select></label></div>
-<label>Size of an automatic generator to compare against, kW {inp('future_generator_kw', site['future_generator_kw'], 'text', "inputmode='decimal'")}</label></fieldset>
 <fieldset><legend>Sunlight data (for the advisor)</legend>
 <label><input type="radio" name="weather_source" value="openmeteo" style="width:auto"{' checked' if wth['source'] == 'openmeteo' else ''}>
  Open-Meteo (free online weather service; sends the site location)</label>
@@ -679,7 +669,8 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
 <small>{station_note}</small></fieldset>
 {screen_fields}
 {modules.form_sections(STACK)}
-<fieldset><legend>Prices (optional, for the advisor's cost comparison)</legend><div class="row">{cost_inputs}</div></fieldset>
+<fieldset><legend>Prices (optional, for the advisor's cost comparison)</legend><div class="row">{cost_inputs}</div>
+<label>Size of an automatic generator to compare against, kW {inp('future_generator_kw', site['future_generator_kw'], 'text', "inputmode='decimal'")}</label></fieldset>
 <fieldset><legend>Updates</legend>
 <label><input type="checkbox" name="auto_update" value="1" style="width:auto"{' checked' if upd['enabled'] else ''}> Install new versions automatically (checked daily, early morning)</label>
 <label>Follow <select name="update_channel"><option value="release"{' selected' if upd['channel'] == 'release' else ''}>Releases (recommended)</option>
@@ -772,58 +763,6 @@ measuring the cells. The figures are for the whole bank (the highest and lowest 
 connected to the battery's BMS: in a parallel system the other inverters report zeros, which are left out.</small></p>
 <p><a href="/">Back</a></p>"""
     return page("Battery health", body)
-
-
-def _hm(ts):
-    return time.strftime("%a %b %-d %H:%M", time.localtime(ts))
-
-
-def generator_card(site):
-    """Start page: hours since the generator's last service."""
-    s = genlog.status(STACK, site)
-    if not s["kinds"]:
-        return ""
-    parts = []
-    for k in s["kinds"]:
-        line = f"{k['since_service']:g} of {k['interval']} hours since the last service"
-        if k["due"]:
-            line = f"<b>service due</b>: {line}"
-        if k["running"]:
-            line += " (running now)"
-        parts.append(line)
-    return f"<div class='card{' warn' if any(k['due'] for k in s['kinds']) else ''}'><b>Generator</b>: {'; '.join(parts)} &nbsp;<a href='/generator'>log</a></div>"
-
-
-def generator_page(site, msg=""):
-    s = genlog.status(STACK, site)
-    st = genlog.load(STACK)
-    cards = ""
-    for k in s["kinds"]:
-        last = k["last_run"]
-        last_txt = (f"{_hm(last['start'])}, {last['hours']:.1f} h, {last['kwh']:g} kWh") if last else "none yet"
-        cards += f"""<div class="card{' warn' if k['due'] else ''}"><b>{html.escape(k['name'])}</b><br>
-{'<b>Service due.</b> ' if k['due'] else ''}{k['since_service']:g} hours since the last service
-({'serviced ' + html.escape(k['serviced_on']) if k['serviced_on'] else 'no service recorded yet: counted from the start of the history'});
-service every {k['interval']} hours, {max(k['left'], 0):g} to go.{' <b>Running now.</b>' if k['running'] else ''}<br>
-<small>Last run: {last_txt}. Last 30 days: {k['runs_30d']} run(s), {k['hours_30d']:g} h, {k['kwh_30d']:g} kWh.
-{k['total_hours']:g} hours in all.</small>
-<form method="post" action="/generator/serviced" style="margin-top:8px"><input type="hidden" name="kind" value="{k['kind']}">
-<label>Hours it has run since that service (0 if just now) <input name="hours_since" value="0" inputmode="decimal" style="max-width:120px"></label>
-<p><button>Serviced (oil changed)</button></p></form></div>"""
-    if not cards:
-        cards = "<p>No generator runs found in the history yet.</p>"
-    rows = "".join(f"<tr><td>{_hm(r['start'])}</td><td>{r['hours']:.1f} h</td><td>{r['kwh']:g} kWh</td><td>{r['peak_kw']:g} kW</td>"
-                   f"<td>{'GEN input' if r['kind'] == 'inverter' else 'DC charger'}</td></tr>" for r in reversed(st["runs"][-50:]))
-    note = ""
-    if s["backfilling"]:
-        note = f"<p><small>Still reading the older history (up to {_hm(s['processed_until'])}); this takes a few minutes.</small></p>"
-    body = f"""<h1>Generator</h1>{('<div class="card">' + html.escape(msg) + '</div>') if msg else ''}{note}{cards}
-<p><small>Runs are found in the inverter history: power on the inverters' generator input, or charging the inverters didn't do
-themselves (a generator on a Chargeverter or other DC charger). Service intervals: 200 hours for a generator on the GEN input,
-100 hours for one charging through a DC charger. Home Assistant reminds you when a service is due.</small></p>
-<h2>Runs</h2><table><tr><th>Started</th><th>Ran</th><th>Energy</th><th>Peak</th><th>Connected to</th></tr>{rows or '<tr><td colspan=5>none</td></tr>'}</table>
-<p><a href="/">Back</a></p>"""
-    return page("Generator", body)
 
 
 def phones():
@@ -991,8 +930,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(display.ha_status(STACK, load_site())), "application/json")
         elif self.path == "/battery":
             self.send(200, battery_page(load_site()))
-        elif self.path == "/generator":
-            self.send(200, generator_page(load_site()))
         elif self.path == "/setup":
             self.send(200, setup_page(load_site()))
         elif self.path == "/api/status":
@@ -1018,9 +955,12 @@ class Handler(BaseHTTPRequestHandler):
             ss.write_if_changed(path("state", "site.json"), json.dumps(site, indent=2) + "\n", 0o644)
             ss.write_if_changed(path("state", "update.json"), json.dumps(
                 {"enabled": f.get("auto_update") == "1", "channel": "main" if f.get("update_channel") == "main" else "release"}, indent=2) + "\n", 0o644)
+            mod_msgs = modules.form_apply(STACK, f)   # first: the generator module writes its part of site.json
+            saved = ss.load_json(path("state", "site.json"), {})
+            site.update({k: saved[k] for k in ("generator", "generator_kw", "generator_fuel") if k in saved})
             msgs = apply_site(site)
             msgs += apply_display(f)
-            msgs += modules.form_apply(STACK, f)
+            msgs += mod_msgs
             src = f.get("weather_source") if f.get("weather_source") in ("openmeteo", "station", "push") else "openmeteo"
             ip = f.get("station_ip", "").strip()
             w = weather_settings()
@@ -1035,18 +975,6 @@ class Handler(BaseHTTPRequestHandler):
                 w["source"] = src
                 save_weather(w)
             self.send(200, setup_page(load_site(), done=msgs))
-        elif self.path == "/generator/serviced":
-            f = self.form()
-            kind = f.get("kind")
-            try:
-                hours = float(f.get("hours_since") or 0)
-                if kind not in genlog.QUERIES or not 0 <= hours <= 10000:
-                    raise ValueError
-            except ValueError:
-                self.send(400, generator_page(load_site(), "Hours since the service must be a number of hours."))
-                return
-            genlog.mark_serviced(STACK, kind, hours)
-            self.send(200, generator_page(load_site(), "Service recorded."))
         elif self.path in ("/display/presence", "/display/power-report"):
             # from Home Assistant's automation (host network) / the power service: this box only
             if not self.loopback():

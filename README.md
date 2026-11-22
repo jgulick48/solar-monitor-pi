@@ -248,6 +248,11 @@ section on the Solar dashboard. A BMS fault also shows on the wall display.
 
 ## Generator log and service reminder
 
+The generator is an optional feature (setup page: *Optional features* → *Generator*; on unless the site had chosen "No
+generator"). Its section says how it is started (by hand or auto-start from the dry contact), its size and fuel; the
+start-the-generator advice on the wall display is for a generator started by hand. Turning it off is what "No generator"
+was: no generator tile or advice, no log or reminders.
+
 The box finds every generator run in the inverter history, a minute at a time, two ways:
 
 - **On the inverters' GEN input** (usually auto-started by the dry contact): generator input power above 200 W.
@@ -437,8 +442,8 @@ Home Assistant, Grafana and the rest.
   settings (`state/modules/<id>.json`, moved over from the old file on the first run after an update), its pages,
   setup-page section or fieldset, start-page card or banner, wall-display data, Home Assistant fields, collector
   hooks and Compose profiles. The core in `setup/modules/__init__.py` calls only the enabled ones; the setup page's
-  *Optional features* switches turn them on and off. So far: backups, cameras, remote access, remote support, SSH access, weather and voice;
-  the generator moves there next.
+  *Optional features* switches turn them on and off. Backups, cameras, the generator, remote access, remote support, SSH access, weather and
+  voice announcements are modules.
 - `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it; `setup/modules/backup/`
   is its page and settings.
 - `setup/support.py` turns remote support on and off (tunnel, SSH key, sudo, SSH) and switches it off when its time is up;

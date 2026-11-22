@@ -25,7 +25,6 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import genlog  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import modules  # noqa: E402
 import weather  # noqa: E402
@@ -134,7 +133,6 @@ def main():
     args = ap.parse_args()
     marker = os.path.join(args.stack, "state", "openmeteo-backfilled")
     last_om = 0.0
-    last_gen = 0.0
     hooks = {}
     while True:
         try:
@@ -153,15 +151,7 @@ def main():
             except Exception as e:  # noqa: BLE001
                 log("Open-Meteo fetch failed:", e)
                 last_om = time.time() - 3000  # retry in ~10 minutes
-        if time.time() - last_gen >= 300:
-            try:
-                n = genlog.update(args.stack)
-                if n:
-                    log(f"generator log: {n} new run(s)")
-            except Exception as e:  # noqa: BLE001
-                log("generator log update failed:", e)
-            last_gen = time.time()
-        modules.run_due(args.stack, hooks)          # the enabled modules' own schedules (remote support, weather)
+        modules.run_due(args.stack, hooks)          # the enabled modules' own schedules (remote support, weather, cameras, generator log)
         if args.once:
             return
         time.sleep(60)
