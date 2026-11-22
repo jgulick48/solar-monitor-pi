@@ -212,6 +212,18 @@ def load_json(path, default):
         return default
 
 
+# The battery's BMS data (cell voltages and temperatures, SOH, cycles, BMS faults, rated capacity) comes from the
+# inverter(s) connected to the BMS. In a parallel system the others report 0 for all of it (seen on site: 0 V and
+# 0 degrees from the second 6000XP made the coldest cell "0 C" and the cell spread 3.3 V). A unit counts as
+# BMS-connected when it reports a cell voltage.
+BMS_UNITS = "(max by (deploymentID) (lxp_max_cell_volt) > 0)"
+
+
+def from_bms(selector):
+    """selector limited to the BMS-connected inverter(s)."""
+    return f"({selector} and on (deploymentID) {BMS_UNITS})"
+
+
 # Generator power from the inverters (W) and today's generator energy (kWh), for the display, the generator log and the
 # advisor. The GEN port counts only while it has generator voltage, and below 25 kW: on the EG4 6000XP those registers
 # hold other data (seen on site: 55-64 kW, 51.2 kWh today and a dry contact "on" with 0 V and no generator). Plus the AC

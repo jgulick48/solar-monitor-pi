@@ -24,6 +24,7 @@ class Fake:
 
     def vm_at(self, q, ts):
         v = self.v
+        q = q.replace(battery.ss.BMS_UNITS, "")      # the "BMS-connected inverter" filter isn't a value
         if "time() and on()" in q:
             return v["last_full"] if "max_over_time" in q else v["first"]
         if "* 1000) and on()" in q:
@@ -57,6 +58,22 @@ def discharge_series(drop_from=95, drop_to=45, kw=2.3):  # 10 h, so energy = kw 
         out_w[t] = 0
         in_w[t] = 5000
     return {"max(lxp_soc)": soc, "sum(lxp_p_discharge)": out_w, "sum(lxp_p_charge)": in_w}
+
+
+class Primary(unittest.TestCase):
+    def test_bms_data_only_from_the_inverter_that_has_it(self):
+        # the other inverter of a parallel system reports 0 V / 0 C / 0 cycles: filtered out by inverter, not by value
+        for k in ("min_cell", "min_temp", "max_temp", "cycles", "rated_ah", "bms_fault"):
+            self.assertIn("and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)", battery.Q[k])
+        self.assertIn("> 0)", battery.Q["soh"])                    # SOH 0 = not reported (6000XP)
+        self.assertNotIn("and on (deploymentID)", battery.Q["soc"])
+
+    def test_bms_line(self):
+        s = {"bms_inverters": ["DJ1"], "other_inverters": ["DJ2"]}
+        self.assertEqual(battery.bms_line(s), "DJ1 (connected to the battery's BMS); DJ2 reports no BMS data, "
+                                              "as usual for the other inverters of a parallel system")
+        self.assertIn("none of the inverters", battery.bms_line({"bms_inverters": [], "other_inverters": ["DJ1"]}))
+        self.assertEqual(battery.bms_line({"bms_inverters": ["A"], "other_inverters": []}), "A (connected to the battery's BMS)")
 
 
 class Battery(unittest.TestCase):

@@ -29,6 +29,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import display  # noqa: E402
+import solar_setup as ss  # noqa: E402
 
 SPREAD_OK_MV, SPREAD_WARN_MV = 50, 100
 FULL_SOC = 98
@@ -38,18 +39,30 @@ NOT_FULL_NOTE_D, NOT_FULL_WARN_D = 14, 30
 MIN_DROP = 30           # % of charge, for the capacity estimate
 STEP = 300
 
+B = ss.from_bms        # BMS data only from the inverter(s) connected to the BMS (solar_setup.BMS_UNITS)
 Q = {
-    "max_cell": "max(lxp_max_cell_volt)",
-    "min_cell": "min(lxp_min_cell_volt)",
-    "max_temp": "max(lxp_max_cell_temp)",
-    "min_temp": "min(lxp_min_cell_temp)",
-    "soh": "min(lxp_soh)",
-    "cycles": "max(lxp_cycle_cnt_bms)",
-    "bms_fault": "max(lxp_fault_code_bms)",
-    "bms_warning": "max(lxp_warning_code_bms)",
+    "max_cell": f"max({B('lxp_max_cell_volt')})",
+    "min_cell": f"min({B('lxp_min_cell_volt')})",
+    "max_temp": f"max({B('lxp_max_cell_temp')})",
+    "min_temp": f"min({B('lxp_min_cell_temp')})",
+    "soh": f"min({B('lxp_soh')} > 0)",            # 0 = not reported (the 6000XP sends 0), not a dead battery
+    "cycles": f"max({B('lxp_cycle_cnt_bms')})",
+    "bms_fault": f"max({B('lxp_fault_code_bms')})",
+    "bms_warning": f"max({B('lxp_warning_code_bms')})",
     "soc": "max(lxp_soc)",
-    "rated_ah": "sum(max by (deploymentID) (lxp_batt_capacity))",
+    # each BMS's bank once (a shared bank is reported by every inverter of a parallel system)
+    "rated_ah": f"sum(max by (deploymentID) ({B('lxp_batt_capacity')}))",
 }
+
+
+def bms_inverters():
+    """(inverters reporting the battery's BMS data, the other inverters): dongle serials."""
+    try:
+        bms = sorted(r["metric"].get("deploymentID", "") for r in display._vm("/api/v1/query", {"query": ss.BMS_UNITS}))
+        all_ = sorted(r["metric"].get("deploymentID", "") for r in display._vm("/api/v1/query", {"query": "max by (deploymentID) (lxp_soc)"}))
+    except (OSError, ValueError, KeyError):
+        return [], []
+    return bms, [d for d in all_ if d not in bms]
 SPREAD_TOP = f"(({Q['max_cell']} - {Q['min_cell']}) * 1000) and on() ({Q['soc']} >= {FULL_SOC})"
 
 
@@ -128,6 +141,7 @@ def status(stack, site, now=None):
     full_ts = _cached("full", 900, lambda: last_full(now))
     first_ts = _cached("first", 3600, lambda: display.vm_at(f"min_over_time((time() and on() {Q['soc']})[60d:5m])", now))
     caps = _cached("capacity", 3600, lambda: capacity_estimate(now))
+    bms_units, other_units = _cached("bms_units", 300, bms_inverters)
     try:
         nameplate = round(int(site["battery_count"]) * float(site["battery_kwh_each"]), 1)
     except (KeyError, TypeError, ValueError):
@@ -188,7 +202,19 @@ def status(stack, site, now=None):
         "bms_fault": cur.get("bms_fault"), "bms_warning": cur.get("bms_warning"),
         "last_full": full_ts, "history_start": first_ts, "capacity_kwh": cap, "capacity_samples": len(caps), "nameplate_kwh": nameplate,
         "rated_ah": cur.get("rated_ah"),
+        "bms_inverters": bms_units, "other_inverters": other_units,
     }
+
+
+def bms_line(s):
+    """Which inverter the battery's data comes from, for the pages."""
+    if not s["bms_inverters"]:
+        return "none of the inverters reports the battery's BMS data (check the BMS cable and the battery type setting)"
+    line = ", ".join(s["bms_inverters"]) + (" (connected to the battery's BMS)" if len(s["bms_inverters"]) == 1 else " (each connected to a BMS)")
+    if s["other_inverters"]:
+        line += (f"; {', '.join(s['other_inverters'])} report{'s' if len(s['other_inverters']) == 1 else ''} no BMS data, "
+                 "as usual for the other inverters of a parallel system")
+    return line
 
 
 def _r(v, n=0):
@@ -197,7 +223,7 @@ def _r(v, n=0):
 
 HA_KEYS = ["battery_health", "battery_health_text", "battery_spread_top", "battery_spread_top_day", "battery_spread_now",
            "battery_temp_min", "battery_temp_max", "battery_soh", "battery_cycles", "battery_capacity_estimate",
-           "bms_fault_code", "bms_warning_code", "battery_last_full"]
+           "bms_fault_code", "bms_warning_code", "battery_last_full", "battery_bms_inverter"]
 
 
 def ha_fields_empty():
@@ -219,4 +245,5 @@ def ha_fields(stack, site, now=None):
         "bms_fault_code": _r(s["bms_fault"]) or 0, "bms_warning_code": _r(s["bms_warning"]) or 0,
         "battery_last_full": dt.datetime.fromtimestamp(s["last_full"]).astimezone().isoformat(timespec="seconds")
         if s["last_full"] else None,
+        "battery_bms_inverter": ", ".join(s["bms_inverters"]) or None,
     }
