@@ -176,5 +176,51 @@ class Modules(unittest.TestCase):
         self.assertIn("off.</div>", html.split('<h2 id="support">')[1])
 
 
+    def test_weather_moves_over_from_the_display_settings(self):
+        with open(os.path.join(self.stack, "state", "display.json"), "w") as f:
+            json.dump({"weather": False, "wx_days": 4, "wx_page": 0}, f)
+        self.assertFalse(modules.load(self.stack, "weather")["enabled"])          # it was off: it stays off
+        self.assertEqual(modules.settings(self.stack, "weather"), {"days": 4, "page": 0})
+        self.assertEqual(modules.display_data(self.stack, {}, None), {})
+        modules.set_enabled(self.stack, "weather", True)
+        import wx
+        old = wx.view
+        wx.view = lambda stack, site, now: {"now": "sunny"}
+        try:
+            self.assertEqual(modules.display_data(self.stack, {}, None), {"weather": {"now": "sunny"}, "wx_days": 4, "wx_page": 0})
+        finally:
+            wx.view = old
+
+    def test_hook_retries_sooner_after_a_failure(self):
+        calls = []
+        def hook(stack):
+            calls.append(len(calls))
+            if len(calls) == 1:
+                raise OSError("offline")
+        self.add(Module(id="demo", title="Demo", default_enabled=True, every={1800: (hook, 300)}))
+        last = {}
+        for t in (10_000, 10_100, 10_299, 10_300, 10_600, 12_099, 12_100):
+            modules.run_due(self.stack, last, now=t)
+            if t in (10_000, 10_300, 12_100):
+                self.assertEqual(last[("demo", 1800)], t if t != 10_000 else 10_000 - 1800 + 300)
+        self.assertEqual(len(calls), 3)          # 10 000 (failed), 10 300 (5 minutes later), then 30 minutes after that
+
+    def test_backups_turned_off_dont_run(self):
+        import backup
+        backup.save_settings(self.stack, {"uuid": "62A1-77F0", "history": True})
+        modules.set_enabled(self.stack, "backup", False)
+        self.assertEqual(backup.run(self.stack), 0)
+        with open(backup.status_path(self.stack)) as f:
+            self.assertEqual(json.load(f)["message"], "backups are turned off")
+
+    def test_failed_field_check_stops_the_save(self):
+        def check(stack, form):
+            raise modules.FieldError("demo_x", "Demo: x must be a number")
+        self.add(Module(id="demo", title="Demo", default_enabled=True, form_check=check))
+        with self.assertRaises(modules.FieldError):
+            modules.form_check(self.stack, {"module_demo_shown": "1", "modules_form": "1", "module_demo": "1"})
+        modules.form_check(self.stack, {"module_demo_shown": "1", "modules_form": "1"})   # being turned off: not checked
+
+
 if __name__ == "__main__":
     unittest.main()

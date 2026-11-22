@@ -82,6 +82,7 @@ def on_disable(stack):
 MODULE = Module(
     id="support",
     title="Remote support",
+    description="let a helper you trust connect to this box for a while",
     order=30,
     default_enabled=True,
     defaults=engine.DEFAULTS,

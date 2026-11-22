@@ -127,6 +127,7 @@ def on_disable(stack):
 MODULE = Module(
     id="tunnel",
     title="Remote access",
+    description="Home Assistant away from home, through your own Cloudflare Tunnel",
     order=20,
     default_enabled=True,
     defaults=engine.DEFAULTS,

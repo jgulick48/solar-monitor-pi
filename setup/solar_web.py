@@ -39,7 +39,7 @@ import solar_setup as ss  # noqa: E402
 import tts  # noqa: E402
 import weather  # noqa: E402
 import wx  # noqa: E402
-from webui import is_error, notice  # noqa: E402
+from webui import FieldError, is_error, notice  # noqa: E402
 
 STACK = "/opt/solar-monitor/stack"
 SETUP_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "solar_setup.py")
@@ -191,13 +191,6 @@ def load_site():
 # --------------------------------------------------------------------------
 # Validation and apply
 # --------------------------------------------------------------------------
-class FieldError(ValueError):
-    """A setup form value that isn't right; .field is the input's name, so the page can point at it."""
-    def __init__(self, field, msg):
-        super().__init__(msg)
-        self.field = field
-
-
 FIELD_NAMES = {"latitude": "Latitude", "longitude": "Longitude", "elevation": "Elevation", "battery_count": "Number of batteries",
                "battery_kwh_each": "kWh per battery", "generator_kw": "Generator size", "future_generator_kw": "Automatic generator size",
                "low_soc_alert": "Low battery alert", "time_zone": "Time zone"}
@@ -383,11 +376,7 @@ def screen_power_form(form):
 def apply_display(form):
     """Screen and camera settings from the setup form. Returns messages; raises ValueError."""
     cur = display.load(STACK)
-    def pick(name, allowed, default):
-        v = form.get(name, "")
-        return int(v) if str(v).isdigit() and int(v) in allowed else default
-    d = {"enabled": form.get("display_enabled") == "1", "weather": form.get("display_weather") == "1",
-         "wx_days": pick("wx_days", range(2, 8), 7), "wx_page": pick("wx_page", (0, 5, 8, 12, 20, 30), 8),
+    d = {"enabled": form.get("display_enabled") == "1",
          **screen_power_form(form), "cameras": [],
          "sounds": {k: form.get(f"sound_{k}") == "1" for k, _, _ in display.SOUND_KINDS},
          "volume": max(0, min(100, int(form.get("volume") or 70) if str(form.get("volume") or "70").isdigit() else 70)),
@@ -677,9 +666,6 @@ def setup_page(site, error="", done=None, protect_msg="", error_field="", form=N
 <p><small>Screen: {html.escape(display.screen_line())}. The picture size comes from the screen itself (its EDID);
 4K TVs are run at 1920x1080, which they scale up.</small></p>
 <label><input type="checkbox" name="display_enabled" value="1" style="width:auto"{' checked' if dsp['enabled'] else ''}> Show the dashboard on a screen plugged into the HDMI port</label>
-<label><input type="checkbox" name="display_weather" value="1" style="width:auto"{' checked' if dsp.get('weather', True) else ''}> Show the weather with the solar figures (now, the next hours and days, wind; National Weather Service alerts in the US)</label>
-<div class="row"><label>Forecast <select name="wx_days">{''.join(f"<option value='{n}'{' selected' if dsp.get('wx_days', 7) == n else ''}>{n} days</option>" for n in range(2, 8))}</select></label>
-<label>When they don't all fit, show the next ones every <select name="wx_page">{''.join(f"<option value='{v}'{' selected' if dsp.get('wx_page', 8) == v else ''}>{t}</option>" for v, t in ((5, '5 seconds'), (8, '8 seconds'), (12, '12 seconds'), (20, '20 seconds'), (30, '30 seconds'), (0, "never (show only what fits)")))}</select></label></div>
 {power_fields(dsp)}
 <p style="margin-top:16px"><b>Sounds</b> <small style="display:inline">through the screen's speakers (HDMI), when a UniFi Protect camera sees:</small></p>
 <div class="row">{''.join(f"<label><input type='checkbox' name='sound_{k}' value='1'{' checked' if (dsp.get('sounds') or {}).get(k, on) else ''}> {t}</label>" for k, t, on in display.SOUND_KINDS)}</div>
@@ -725,6 +711,7 @@ Devices &amp; services; it's usually found automatically) with a local Protect u
             toast, target = notice(kind, f"{title}: {sec_msg}", toast=True), "notice"
     body = f"""<h1>Site setup</h1>{toast}{msg}
 <form method="post" action="/setup">
+{modules.switches(STACK)}
 <fieldset><legend>Location</legend>
 <label>Site name {inp('name', site['name'])}</label>
 <div class="row"><label>Latitude {inp('latitude', site['latitude'], 'text', "inputmode='decimal' placeholder='e.g. 39.7392'")}</label>
@@ -763,6 +750,7 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
  The station sends its data here (Ecowitt "customized" upload or Ambient Weather custom server)</label>
 <small>{station_note}</small></fieldset>
 {screen_fields}
+{modules.form_sections(STACK)}
 <fieldset><legend>Prices (optional, for the advisor's cost comparison)</legend><div class="row">{cost_inputs}</div></fieldset>
 <fieldset><legend>Updates</legend>
 <label><input type="checkbox" name="auto_update" value="1" style="width:auto"{' checked' if upd['enabled'] else ''}> Install new versions automatically (checked daily, early morning)</label>
@@ -1219,6 +1207,7 @@ class Handler(BaseHTTPRequestHandler):
                         except ValueError as e:
                             raise FieldError(f"cam{i}_url", f"Camera {i}: {e}")
                 screen_power_form(f)
+                modules.form_check(STACK, f)
                 for k in ("speak_template", "speak_doorbell"):
                     try:
                         tts.check_template((f.get(k) or "{object}").strip())
@@ -1234,6 +1223,7 @@ class Handler(BaseHTTPRequestHandler):
                 {"enabled": f.get("auto_update") == "1", "channel": "main" if f.get("update_channel") == "main" else "release"}, indent=2) + "\n", 0o644)
             msgs = apply_site(site)
             msgs += apply_display(f)
+            msgs += modules.form_apply(STACK, f)
             src = f.get("weather_source") if f.get("weather_source") in ("openmeteo", "station", "push") else "openmeteo"
             ip = f.get("station_ip", "").strip()
             w = weather_settings()

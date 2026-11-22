@@ -237,6 +237,10 @@ def vm_snapshot_delete(name):
 
 # --------------------------------------------------------------------------
 def run(stack):
+    import modules
+    if not modules.load(stack, "backup")["enabled"]:
+        record(stack, result="off", message="backups are turned off")
+        return 0
     cfg = settings(stack)
     if not cfg["uuid"]:
         record(stack, result="off", message="no backup stick chosen")

@@ -135,7 +135,6 @@ def main():
     marker = os.path.join(args.stack, "state", "openmeteo-backfilled")
     last_om = 0.0
     last_gen = 0.0
-    last_wx = last_alerts = 0.0
     hooks = {}
     while True:
         try:
@@ -154,19 +153,6 @@ def main():
             except Exception as e:  # noqa: BLE001
                 log("Open-Meteo fetch failed:", e)
                 last_om = time.time() - 3000  # retry in ~10 minutes
-        if time.time() - last_wx >= 1800:          # weather forecast for the wall display
-            try:
-                wx.fetch_forecast(args.stack)
-                last_wx = time.time()
-            except Exception as e:  # noqa: BLE001
-                log("weather forecast fetch failed:", e)
-                last_wx = time.time() - 1500          # retry in ~5 minutes
-        if time.time() - last_alerts >= 600:
-            try:
-                wx.fetch_alerts(args.stack)
-            except Exception as e:  # noqa: BLE001
-                log("weather alerts fetch failed:", e)
-            last_alerts = time.time()
         if time.time() - last_gen >= 300:
             try:
                 n = genlog.update(args.stack)
@@ -175,7 +161,7 @@ def main():
             except Exception as e:  # noqa: BLE001
                 log("generator log update failed:", e)
             last_gen = time.time()
-        modules.run_due(args.stack, hooks)          # the enabled modules' own schedules (remote support: every minute)
+        modules.run_due(args.stack, hooks)          # the enabled modules' own schedules (remote support, weather)
         if args.once:
             return
         time.sleep(60)
