@@ -15,7 +15,7 @@ services:
       - "127.0.0.1:1883:1883"
 
   bridge:
-    image: jgulick48/lxp-bridge-go:2026.11.21-0538
+    image: jgulick48/lxp-bridge-go:2026.11.22-0513
     restart: unless-stopped
     command: ["-configFile", "/config/config.yml"]
     volumes:

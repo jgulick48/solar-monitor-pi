@@ -235,6 +235,7 @@ class Inverter:
     def holdings(self):
         r = [0] * 256
         r[2:7] = [ord(c) for c in "SIMUL"]                                # placeholder model text
+        r[19] = self.a.device_type                                         # device type code: 44 = 18kPV, 38 = 6000XP (lxp-bridge-go model auto-detection)
         r[64] = 100                                                        # charge power %
         r[194], r[195] = 20, 90                                            # gen start/end SoC
         return r
@@ -357,6 +358,7 @@ def main():
     e = os.environ.get
     ap.add_argument("--datalog", default=e("DATALOG", "BA00000001"))
     ap.add_argument("--serial", default=e("SERIAL", "0000000001"))
+    ap.add_argument("--device-type", type=int, default=int(e("DEVICE_TYPE", "44")), help="holding 19: 44 = 18kPV (default), 38 = 6000XP")
     ap.add_argument("--port", type=int, default=int(e("PORT", "8000")))
     ap.add_argument("--control-port", type=int, default=int(e("CONTROL_PORT", "8080")))
     ap.add_argument("--scenario", default=e("SCENARIO", "normal"), choices=SCENARIOS)

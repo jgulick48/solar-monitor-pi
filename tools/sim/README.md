@@ -7,7 +7,7 @@ inverters or a weather station. Standard library only: they run on a stock `pyth
 
 Listens on TCP 8000 like a real dongle: heartbeats with the datalog serial every 15 s and translated replies to
 read-input and read-holding requests with the inverter serial, so the box's discovery finds it and lxp-bridge-go reads
-it unchanged (checked with lxp-bridge-go 2026.11.21-0538: solar, load, battery, SoC/SOH, cells, temperatures, BMS
+it unchanged (checked with lxp-bridge-go 2026.11.21-0538; 2026.11.22-0513 detects the model from holding 19, which the simulator answers with 44 (18kPV) or `--device-type 38` (6000XP): solar, load, battery, SoC/SOH, cells, temperatures, BMS
 current, cycles, faults, generator). Writes are acknowledged and ignored.
 
 The inverter is a small simulation: a clear-sky sun for the latitude with drifting clouds, a house load with an evening
