@@ -17,7 +17,7 @@ Account > Cloudflare Tunnel > Edit, Zone > DNS > Edit and Zone > Zone > Read.
 Home Assistant is told to trust X-Forwarded-For from localhost (its .storage/http; YAML `http:` is
 ignored since 2026.11) and gets the address as external_url; solar_web restarts it for both.
 
-The settings (with the API token) are kept in state/tunnel.json and the run token in
+The settings (with the API token) are kept in state/modules/tunnel.json and the run token in
 state/tunnel.env, both mode 600.
 """
 import json
@@ -42,7 +42,8 @@ class CFError(Exception):
 
 
 def settings_path(stack):
-    return os.path.join(stack, "state", "tunnel.json")
+    import modules
+    return modules.path(stack, "tunnel")
 
 
 def env_path(stack):
@@ -50,11 +51,14 @@ def env_path(stack):
 
 
 def settings(stack):
-    return {**DEFAULTS, **ss.load_json(settings_path(stack), {})}
+    """Kept by the tunnel module (state/modules/tunnel.json)."""
+    import modules
+    return {**DEFAULTS, **modules.settings(stack, "tunnel")}
 
 
 def save(stack, d):
-    ss.write_if_changed(settings_path(stack), json.dumps(d, indent=2) + "\n", 0o600)
+    import modules
+    modules.save(stack, "tunnel", d)
 
 
 def hostname(d):

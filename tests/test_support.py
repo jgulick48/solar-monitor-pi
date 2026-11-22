@@ -185,9 +185,9 @@ class Page(unittest.TestCase):
             try:
                 html = solar_web.setup_page(solar_web.load_site())
                 self.assertIn('action="/support"', html)
-                self.assertEqual(solar_web.support_banner(), "")
+                self.assertEqual(solar_web.modules.banners(stack), "")
                 support.save(stack, {**support.DEFAULTS, "enabled": True, "until": 2_000_000_000, "token": TOKEN, "ssh_key": KEY})
-                self.assertIn("Remote support is on", solar_web.support_banner())
+                self.assertIn("Remote support is on", solar_web.modules.banners(stack))
                 html = solar_web.setup_page(solar_web.load_site())
                 self.assertNotIn(TOKEN, html)
                 self.assertIn("Turn remote support off now", html)
