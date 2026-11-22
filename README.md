@@ -72,12 +72,14 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
   kind) at most once a minute by default, any two sounds at least 5 seconds apart, and the doorbell always rings
   (all adjustable); the camera still comes to the front of the screen. The kiosk points its sound at the HDMI port the screen is
   on (`~solar-display/.asoundrc`, Pi 4: HDMI-A-1 = vc4hdmi0); the screen or TV needs speakers.
-- **Spoken announcements** (optional, like UniFi's Alarm Manager): after the chime, or instead of it, Piper says what a
-  camera saw, "Person at the Front door" / "Someone's at the Front door" (wording editable, `{object}` and `{camera}`),
-  in one of four English voices. Piper runs in the optional `tts` service (`rhasspy/wyoming-piper`, the voice Home
-  Assistant uses for local voice); it isn't in the image (about 200 MB): turning speech on downloads it and the voice
-  once, then it works offline. Phrases are made ahead of time and cached (`state/tts-cache`). *Play a test announcement*
-  on the setup page checks it.
+- **Voice announcements** (optional, like UniFi's Alarm Manager; setup page: *Optional features* → *Voice
+  announcements*): after the chime, or instead of it, Piper says what a camera saw, "Person at the Front door" /
+  "Someone's at the Front door" (wording under *Screen and cameras*, `{object}` and `{camera}`), in one of four English
+  voices. Other features can use it for their own alerts (`modules.voice.announce(stack, text, chime=...)`; the display
+  speaks announcements from the last two minutes, not during quiet hours). Piper runs in the optional `tts` service
+  (`rhasspy/wyoming-piper`, the voice Home Assistant uses for local voice); it isn't in the image (about 200 MB):
+  turning voice on downloads it and the voice once, then it works offline. Phrases are made ahead of time and cached
+  (`state/tts-cache`). *Play a test announcement* on the setup page checks it.
 - **Burn-in protection**: every 20 minutes the layout changes (cameras on the left or the right, or without cameras
   the tiles in order or reversed; the figures top-down or flipped, clock at the bottom), with a short fade, and every
   minute the whole page drifts a few pixels along a small circle, so no label, border or grid line stays on the same
@@ -432,8 +434,8 @@ Home Assistant, Grafana and the rest.
   settings (`state/modules/<id>.json`, moved over from the old file on the first run after an update), its pages,
   setup-page section or fieldset, start-page card or banner, wall-display data, Home Assistant fields, collector
   hooks and Compose profiles. The core in `setup/modules/__init__.py` calls only the enabled ones; the setup page's
-  *Optional features* switches turn them on and off. So far: backups, remote access, remote support, SSH access and weather;
-  voice announcements, cameras and the generator move there next.
+  *Optional features* switches turn them on and off. So far: backups, remote access, remote support, SSH access, weather and voice;
+  cameras and the generator move there next.
 - `setup/backup.py` (`solar-backup.timer`) backs up to the USB stick and restores from it; `setup/modules/backup/`
   is its page and settings.
 - `setup/support.py` turns remote support on and off (tunnel, SSH key, sudo, SSH) and switches it off when its time is up;

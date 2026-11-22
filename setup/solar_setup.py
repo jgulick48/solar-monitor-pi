@@ -338,19 +338,16 @@ def host_timezone():
 
 
 def env_profiles(stack):
-    """Optional compose services that are turned on: cloudflared for remote access (tunnel.py) and
-    cloudflared-support for remote support (support.py)."""
-    import modules  # remote access and remote support say when their services run
-    profiles = modules.compose_profiles(stack)
-    if load_json(os.path.join(stack, "state", "display.json"), {}).get("speak"):
-        profiles.append("tts")          # Piper for spoken camera announcements (tts.py)
-    return profiles
+    """Optional compose services that are turned on, from the modules: cloudflared (remote access), cloudflared-support
+    (remote support), tts (voice announcements)."""
+    import modules
+    return modules.compose_profiles(stack)
 
 
 def env_extra(stack):
-    """Other generated .env settings: the Piper voice for the tts service."""
-    voice = load_json(os.path.join(stack, "state", "display.json"), {}).get("voice") or "en_US-lessac-medium"
-    return [f"TTS_VOICE={voice}"] if all(c.isalnum() or c in "_-" for c in voice) else []
+    """Other generated .env settings, from the modules (the voice module: the Piper voice for the tts service)."""
+    import modules
+    return modules.env_lines(stack)
 
 
 def load_env_text(sec, tz, profiles=(), extra=()):

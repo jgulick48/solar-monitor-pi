@@ -384,11 +384,9 @@ def apply_display(form):
          "sound_cooldown": (lambda v: v if v in dict(display.COOLDOWNS) else 60)(int(form.get("sound_cooldown")) if str(form.get("sound_cooldown", "")).isdigit() else 60),
          "sound_gap": (lambda v: v if v in dict(display.GAPS) else 5)(int(form.get("sound_gap")) if str(form.get("sound_gap", "")).isdigit() else 5),
          "doorbell_always": form.get("doorbell_always") == "1",
-         "speak": form.get("speak") == "1",
-         "speak_mode": "only" if form.get("speak_mode") == "only" else "after",
-         "speak_template": (form.get("speak_template") or tts.DEFAULT_TEMPLATE).strip()[:120],
-         "speak_doorbell": (form.get("speak_doorbell") or tts.DEFAULT_DOORBELL).strip()[:120],
-         "voice": form.get("voice") if form.get("voice") in dict(tts.VOICES) else "en_US-lessac-medium"}
+         # the cameras' wording for voice announcements: only on the page while voice is on; kept otherwise
+         "speak_template": (form.get("speak_template") or cur.get("speak_template") or tts.DEFAULT_TEMPLATE).strip()[:120],
+         "speak_doorbell": (form.get("speak_doorbell") or cur.get("speak_doorbell") or tts.DEFAULT_DOORBELL).strip()[:120]}
     for k in ("speak_template", "speak_doorbell"):
         try:
             tts.check_template(d[k])
@@ -415,7 +413,6 @@ def apply_display(form):
         except OSError as e:
             return subprocess.CompletedProcess(cmd, 1, "", str(e))
     msgs = []
-    speech_changed = (d["speak"], d["voice"]) != (cur.get("speak", False), cur.get("voice", "en_US-lessac-medium"))
     if display.save(STACK, d):
         r = run(ss.compose_cmd(STACK) + ["up", "-d", "--force-recreate", "go2rtc"])
         msgs.append("cameras updated" if r.returncode == 0 else f"camera service restart failed: {r.stderr.strip()[-200:]}")
@@ -428,10 +425,6 @@ def apply_display(form):
         r = run(ss.compose_cmd(STACK) + ["restart", "homeassistant"])
         msgs.append("Home Assistant restarted for the occupancy sensors" if r.returncode == 0 else
                     f"Home Assistant didn't restart: {r.stderr.strip()[-200:]}")
-    if speech_changed or d["speak"]:
-        start_speech(speech_changed)
-        if speech_changed:
-            msgs.append("speech " + ("turning on (the first time it downloads the speech service, a few minutes)" if d["speak"] else "off"))
     return msgs
 
 
@@ -675,16 +668,8 @@ def setup_page(site, error="", done=None, protect_msg="", error_field="", form=N
 <small>Limits the sounds and announcements only; the camera still comes to the front of the screen.</small>
 <div class="row"><label>Volume <input type="range" name="volume" min="0" max="100" step="5" value="{dsp.get('volume', 70)}"></label>
 <label><input type="checkbox" name="sound_quiet" value="1"{' checked' if dsp.get('sound_quiet', True) else ''}> Not during the screen-off hours</label></div>
-<p style="margin-top:16px"><b>Spoken announcements</b> <small style="display:inline">(like UniFi's Alarm Manager; Piper text-to-speech on this box)</small></p>
-<label><input type="checkbox" name="speak" value="1"{' checked' if dsp.get('speak') else ''}> Say what a camera saw, for the kinds ticked above</label>
-<div class="row"><label>How <select name="speak_mode"><option value="after"{' selected' if dsp.get('speak_mode', 'after') == 'after' else ''}>Chime, then the announcement</option>
-<option value="only"{' selected' if dsp.get('speak_mode') == 'only' else ''}>Only the announcement</option></select></label>
-<label>Voice <select name="voice">{''.join(f"<option value='{v}'{' selected' if dsp.get('voice', 'en_US-lessac-medium') == v else ''}>{html.escape(t)}</option>" for v, t in tts.VOICES)}</select></label></div>
-<div class="row"><label>Announcement {inp('speak_template', dsp.get('speak_template', tts.DEFAULT_TEMPLATE))}</label>
-<label>Doorbell {inp('speak_doorbell', dsp.get('speak_doorbell', tts.DEFAULT_DOORBELL))}</label></div>
-<small>{{object}} is Person, Vehicle, Animal or Package; {{camera}} the camera's name. {speech_line(dsp)}</small>
+{camera_wording(dsp)}
 <p><button formaction="/display/test-sound" formmethod="post" formnovalidate>Play a test sound</button>
-<button formaction="/display/test-speak" formmethod="post" formnovalidate>Play a test announcement</button>
 <button formaction="/display/restart" formmethod="post" formnovalidate>Restart the dashboard</button>
 <small style="display:inline">on the screen (save first if you changed something). The TV's own volume applies too.</small></p>
 <details><summary>Sound check</summary><pre style="white-space:pre-wrap;font-size:12px">{html.escape(sound_check())}</pre></details>
@@ -804,9 +789,6 @@ UniFi OS &rarr; Settings &rarr; Control Plane &rarr; Integrations &rarr; Create 
 <p><button>Save and connect</button></p></fieldset></form>{cams_html}"""
 
 
-speech_lock = threading.Lock()
-
-
 def sound_check():
     """What the Pi's sound looks like from here: its sound cards, the card the kiosk chose (~/.asoundrc) and the
     kiosk's own sound line from this boot. Shown on the setup page, to see why the screen is silent."""
@@ -826,83 +808,17 @@ def sound_check():
     return "\n".join(lines)
 
 
-def speech_line(dsp):
-    """The speech service's state, as HTML: with a progress bar while it is downloading (refreshes itself)."""
-    p = tts.PROGRESS
-    if p["active"] or p["error"]:
-        return speech_progress_html(p)
-    if not dsp.get("speak"):
-        return html.escape("Speech is off. Turning it on downloads the speech service (about 200 MB) and the voice once; it then works offline.")
-    if tts.status()["ok"]:
-        return "The speech service is running."
-    return html.escape("The speech service is starting (the first time it downloads; this takes a few minutes).")
-
-
-def speech_progress_html(p):
-    if p["error"]:
-        return f"<span id='speechprog' class='err'>Speech setup stopped: {html.escape(p['error'])}</span>"
-    bar = (f"<progress max='100' value='{p['pct']}' style='width:100%;max-width:340px;height:14px'></progress>"
-           if p["pct"] is not None else "<progress style='width:100%;max-width:340px;height:14px'></progress>")
-    return (f"<span id='speechprog' style='display:block;margin-top:6px'>{html.escape(p['step'])}"
-            f"{(' ' + str(p['pct']) + '%') if p['pct'] is not None else ''}<br>{bar}<br>{html.escape(p['detail'])}</span>"
-            """<script>(function(){const t=setInterval(async()=>{try{const r=await fetch('/speech/progress',{cache:'no-store'});
-const p=await r.json(),e=document.getElementById('speechprog');if(!e)return clearInterval(t);
-if(!p.active){clearInterval(t);e.textContent=p.error?('Speech setup stopped: '+p.error):'The speech service is running.';return}
-const b=e.querySelector('progress');if(p.pct===null)b.removeAttribute('value');else b.value=p.pct;
-e.firstChild.textContent=p.step+(p.pct===null?'':' '+p.pct+'%');e.lastChild.textContent=p.detail}catch(x){}},2000)})()</script>""")
-
-
-def start_speech(changed):
-    """After saving: start/stop the tts service if speech or the voice changed, then make the phrases ahead of time."""
-    def mb(b):
-        return f"{b / 1e6:.0f} MB"
-
-    def run():
-        with speech_lock:
-            d = display.load(STACK)
-            try:
-                if changed:
-                    ss.write_env(STACK, ss.ensure_secrets(STACK))
-                    if d.get("speak"):
-                        ref = tts.image_ref(STACK)
-                        if not tts.image_present(ref):
-                            tts.set_progress(active=True, step="Downloading the speech service", pct=0, detail="", error="")
-                            best = [0]
-
-                            def report(done, total, extracting):
-                                pct = int(done * 100 / total) if total else 0
-                                best[0] = max(best[0], pct)          # layer sizes arrive one by one: never go back
-                                tts.set_progress(step="Unpacking the speech service" if extracting and best[0] >= 99
-                                                 else "Downloading the speech service", pct=best[0],
-                                                 detail=f"{mb(done)} of {mb(total)}" if total else "")
-                            tts.pull_image(ref, report)
-                        tts.set_progress(active=True, step="Starting the speech service", pct=None, detail="", error="")
-                        run_quietly(ss.compose_cmd(STACK) + ["up", "-d", "tts"])
-                    else:
-                        run_quietly(ss.compose_cmd(STACK) + ["rm", "-s", "-f", "tts"])
-                if d.get("speak"):
-                    voice = d.get("voice") or "en_US-lessac-medium"
-                    for _ in range(360):         # wait for Piper and its first voice download (up to an hour)
-                        if tts.status()["ok"]:
-                            break
-                        got = tts.voice_bytes(voice)
-                        if got and got < tts.VOICE_BYTES * 1.05:
-                            tts.set_progress(active=True, step="Downloading the voice", pct=min(99, int(got * 100 / tts.VOICE_BYTES)),
-                                             detail=f"{mb(got)} of about {mb(tts.VOICE_BYTES)}", error="")
-                        elif tts.PROGRESS["active"]:
-                            tts.set_progress(step="Starting the speech service", pct=None, detail="")
-                        time.sleep(5 if tts.PROGRESS["active"] else 10)
-                    else:
-                        raise OSError("the speech service didn't answer within an hour")
-                    if tts.PROGRESS["active"]:
-                        tts.set_progress(step="Preparing the announcements", pct=0, detail="")
-                    tts.prewarm(STACK, d["cameras"], d,
-                                progress=lambda made, total: tts.PROGRESS["active"] and tts.set_progress(
-                                    pct=int(made * 100 / total), detail=f"{made} of {total} phrases"))
-                tts.set_progress(active=False, step="", pct=None, detail="", error="")
-            except OSError as e:
-                tts.set_progress(active=False, error=str(e)[:200])
-    threading.Thread(target=run, daemon=True).start()
+def camera_wording(dsp):
+    """What the screen says for a camera event: only while voice announcements are on (the voice module)."""
+    if not modules.load(STACK, "voice")["enabled"]:
+        return ""
+    def inp(name, value):
+        return f"<input name='{name}' type='text' value='{html.escape(str(value))}' >"
+    return f"""<p style="margin-top:16px"><b>Spoken announcements</b> <small style="display:inline">(Voice announcements, below, says
+these for the kinds ticked above)</small></p>
+<div class="row"><label>Announcement {inp('speak_template', dsp.get('speak_template', tts.DEFAULT_TEMPLATE))}</label>
+<label>Doorbell {inp('speak_doorbell', dsp.get('speak_doorbell', tts.DEFAULT_DOORBELL))}</label></div>
+<small>{{object}} is Person, Vehicle, Animal or Package; {{camera}} the camera's name.</small>"""
 
 
 def run_quietly(cmd):
@@ -1146,6 +1062,10 @@ class Handler(BaseHTTPRequestHandler):
         r = fn(STACK, self.form() if method == "POST" else {})
         if r.location:
             self.send(303, "", extra={"Location": r.location})
+        elif r.ctype:
+            self.send(r.code, r.body, r.ctype)
+        elif r.done is not None:
+            self.send(r.code, setup_page(load_site(), done=r.done))
         elif r.setup_msg is not None:
             self.send(r.code, setup_page(load_site(), module_msgs={mod.id: r.setup_msg}))
         else:
@@ -1169,8 +1089,6 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, display.PAGE)
         elif url.path == "/display/say":
             self.say(dict(urllib.parse.parse_qsl(url.query)))
-        elif self.path == "/speech/progress":
-            self.send(200, json.dumps(tts.PROGRESS), "application/json")
         elif self.path == "/display/events":
             self.send(200, json.dumps(display.events(STACK)), "application/json")
         elif self.path == "/display/power":                  # for solar-display-power.service
@@ -1280,9 +1198,6 @@ class Handler(BaseHTTPRequestHandler):
             ok = display.screen_connected() and run_quietly(["systemctl", "is-active", "--quiet", "solar-display.service"]).returncode == 0
             self.send(200, setup_page(load_site(), done=["test sound sent to the screen" if ok else
                                                          "test sound sent, but the screen's dashboard isn't running"]))
-        elif self.path == "/display/test-speak":
-            display.TEST_SOUND["speak"] = time.time()
-            self.send(200, setup_page(load_site(), done=["test announcement sent to the screen"]))
         elif self.path == "/display/restart":
             run_quietly(["systemctl", "reset-failed", "solar-display.service"])
             run_quietly(["systemctl", "restart", "--no-block", "solar-display.service"])
@@ -1329,9 +1244,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def say(self, q):
         """The announcement for a camera event (or the test) as WAV, from Piper via the cache."""
+        from modules import voice
+        if not voice.is_on(STACK):
+            self.send(503, "voice announcements are off", "text/plain")
+            return
         d = display.load(STACK)
-        if q.get("test"):
-            text = "This is a test announcement from the solar monitor."
+        if q.get("id"):
+            text = voice.text_of(STACK, int(q["id"])) if q["id"].isdigit() else None
+            if not text:
+                self.send(404, "no such announcement", "text/plain")
+                return
         else:
             try:
                 cam = d["cameras"][int(q.get("cam", "cam0")[3:]) - 1]
@@ -1344,7 +1266,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             text = tts.phrase(label, cam["name"], d.get("speak_template"), d.get("speak_doorbell"))
         try:
-            data = tts.wav(STACK, text, d.get("voice"))
+            data = tts.wav(STACK, text, voice.settings(STACK)["voice"])
         except (OSError, ValueError) as e:
             self.send(503, f"speech not available: {e}", "text/plain")
             return
