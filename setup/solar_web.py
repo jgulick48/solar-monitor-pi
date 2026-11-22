@@ -375,7 +375,11 @@ def screen_power_form(form):
 def apply_display(form):
     """Screen and camera settings from the setup form. Returns messages; raises ValueError."""
     cur = display.load(STACK)
+    def pick(name, allowed, default):
+        v = form.get(name, "")
+        return int(v) if str(v).isdigit() and int(v) in allowed else default
     d = {"enabled": form.get("display_enabled") == "1", "weather": form.get("display_weather") == "1",
+         "wx_days": pick("wx_days", range(2, 8), 7), "wx_page": pick("wx_page", (0, 5, 8, 12, 20, 30), 8),
          **screen_power_form(form), "cameras": [],
          "sounds": {k: form.get(f"sound_{k}") == "1" for k, _, _ in display.SOUND_KINDS},
          "volume": max(0, min(100, int(form.get("volume") or 70) if str(form.get("volume") or "70").isdigit() else 70)),
@@ -681,6 +685,8 @@ def setup_page(site, error="", done=None, remote_msg="", support_msg="", protect
 4K TVs are run at 1920x1080, which they scale up.</small></p>
 <label><input type="checkbox" name="display_enabled" value="1" style="width:auto"{' checked' if dsp['enabled'] else ''}> Show the dashboard on a screen plugged into the HDMI port</label>
 <label><input type="checkbox" name="display_weather" value="1" style="width:auto"{' checked' if dsp.get('weather', True) else ''}> Show the weather with the solar figures (now, the next hours and days, wind; National Weather Service alerts in the US)</label>
+<div class="row"><label>Forecast <select name="wx_days">{''.join(f"<option value='{n}'{' selected' if dsp.get('wx_days', 7) == n else ''}>{n} days</option>" for n in range(2, 8))}</select></label>
+<label>When they don't all fit, show the next ones every <select name="wx_page">{''.join(f"<option value='{v}'{' selected' if dsp.get('wx_page', 8) == v else ''}>{t}</option>" for v, t in ((5, '5 seconds'), (8, '8 seconds'), (12, '12 seconds'), (20, '20 seconds'), (30, '30 seconds'), (0, "never (show only what fits)")))}</select></label></div>
 {power_fields(dsp)}
 <p style="margin-top:16px"><b>Sounds</b> <small style="display:inline">through the screen's speakers (HDMI), when a UniFi Protect camera sees:</small></p>
 <div class="row">{''.join(f"<label><input type='checkbox' name='sound_{k}' value='1'{' checked' if (dsp.get('sounds') or {}).get(k, on) else ''}> {t}</label>" for k, t, on in display.SOUND_KINDS)}</div>

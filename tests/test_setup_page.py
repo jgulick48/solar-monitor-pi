@@ -77,6 +77,17 @@ class SetupPage(unittest.TestCase):
         out = solar_web.mark_field(body, "time_zone", "unknown time zone")
         self.assertTrue(out.endswith("</select><span class='fielderr'>unknown time zone</span></label>"))
 
+    def test_forecast_settings_shown_with_saved_values(self):
+        import json
+        page = solar_web.setup_page(solar_web.load_site())
+        self.assertIn("<option value='7' selected>7 days</option>", page)          # defaults
+        self.assertIn("<option value='8' selected>8 seconds</option>", page)
+        with open(os.path.join(self.tmp.name, "state", "display.json"), "w") as f:
+            json.dump({"wx_days": 4, "wx_page": 0}, f)
+        page = solar_web.setup_page(solar_web.load_site())
+        self.assertIn("<option value='4' selected>4 days</option>", page)
+        self.assertIn("<option value='0' selected>never (show only what fits)</option>", page)
+
 
 if __name__ == "__main__":
     unittest.main()

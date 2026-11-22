@@ -56,6 +56,8 @@ DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
             # and two sounds are at least sound_gap s apart; doorbell rings always (the highlight isn't limited)
             "sound_cooldown": 60, "sound_gap": 5, "doorbell_always": True,
             "weather": True,                 # weather (wx.py) in the panel with the solar figures
+            "wx_days": 7,                    # forecast days to show (2-7); more than fit are paged through
+            "wx_page": 8,                    # seconds per page of forecast days (0: show only what fits)
             "speak": False, "speak_mode": "after", "speak_template": "{object} at the {camera}",
             "speak_doorbell": "Someone's at the {camera}", "voice": "en_US-lessac-medium"}
 MAX_CAMERAS = 16   # all of them rotate through the two places on screen
@@ -468,6 +470,7 @@ def data(stack, site):
         "doorbell_always": d.get("doorbell_always", True),
         "expected": expected, "forecast": forecast_summary(fc, now, tz), "battery_high": high,
         "weather": wx.view(stack, site, now) if d.get("weather", True) else None,
+        "wx_days": d.get("wx_days", 7), "wx_page": d.get("wx_page", 8),
     }
 
 
@@ -730,6 +733,8 @@ background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot
 #soc{grid-row:span 2}.nocam #soc{grid-row:auto}
 #wx{display:none;background:var(--panel);border-radius:14px;padding:calc(var(--u)*.8) calc(var(--u)*1.1);gap:calc(var(--u)*.6);flex-direction:column}
 #wx.on{display:flex}
+#wxdots{display:none;justify-content:flex-end;gap:calc(var(--u)*.35);margin-top:calc(var(--u)*-.3)}#wxdots.on{display:flex}
+#wxdots b{width:calc(var(--u)*.45);height:calc(var(--u)*.45);border-radius:50%;background:var(--line)}#wxdots b.on{background:var(--muted)}
 #wxtop{display:flex;gap:calc(var(--u)*1.4);align-items:center;min-width:0}
 #wxnow{display:flex;align-items:center;gap:calc(var(--u)*.8);flex:0 1 auto;min-width:0;max-width:64%}
 #wxnow .t{font-size:calc(var(--u)*3.6);font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
@@ -778,7 +783,7 @@ background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot
   <div class="tile" id="bat"><div class="k">Battery power</div><div class="v">--</div><div class="s"></div></div>
   <div class="tile" id="gen"><div class="k">Generator</div><div class="v" style="color:var(--gen)">--</div><div class="s"></div></div>
  </div>
- <div id="wx"><div id="wxtop"><div id="wxnow"></div><div id="wxdays"></div></div><div id="wxhours"></div></div>
+ <div id="wx"><div id="wxtop"><div id="wxnow"></div><div id="wxdays"></div></div><div id="wxdots"></div><div id="wxhours"></div></div>
  <div id="chart"><div class="k"><span><span class="dot" style="background:var(--solar)"></span>Solar</span>
   <span><span class="dot" style="background:var(--load)"></span>House</span>
   <span><span class="dot" style="background:var(--batt)"></span>Battery %</span><span style="margin-left:auto">last 24 hours</span></div>
@@ -951,7 +956,11 @@ const ICONS={clear:d=>d?SUN:MOON,
 function wicon(k,day,cls){return `<svg class="wi ${cls||""}" viewBox="0 0 24 24">${(ICONS[k]||ICONS.cloud)(day!==false)}</svg>`}
 // arrow pointing the way the wind blows (it comes FROM the direction given)
 function warrow(deg){return deg==null?"":`<svg class="wa" viewBox="0 0 10 10"><path transform="rotate(${(+deg+180)%360} 5 5)" d="M5 0.5L8.5 9 5 7 1.5 9z"/></svg>`}
-function weather(w){
+// forecast days: when fewer fit than the setting asks for, page through them (wxPage advances every wx_page s)
+let wxPage=0,wxTimer=null,wxLast=null,wxCfg={days:7,page:8};
+function weather(w,cfg){
+  if(cfg)wxCfg=cfg; wxLast=w;
+  if(!wxTimer&&wxCfg.page>0)wxTimer=setInterval(()=>{wxPage++;if(wxLast)weather(wxLast)},wxCfg.page*1000);
   const box=$("wx");
   $("wrap").classList.toggle("wxon",!!w);
   if(!w){box.classList.remove("on");return}
@@ -973,12 +982,17 @@ function weather(w){
   // a rain-chance line only when one of the columns has a chance worth showing
   const pop=(list,x)=>list.some(v=>v.pop!=null&&v.pop>=10)?`<span class="r">${x.pop!=null&&x.pop>=10?x.pop+"%":"&nbsp;"}</span>`:"";
   const fits=el=>[...el.children].every(c=>c.scrollWidth<=c.clientWidth+1);
-  let dn=Math.max(2,Math.min(7,Math.floor(($("wxtop").clientWidth-$("wxnow").offsetWidth)/(lu*6))));
+  const total=Math.min(w.days.length,Math.max(2,+wxCfg.days||7));
+  let dn=Math.max(2,Math.min(total,Math.floor(($("wxtop").clientWidth-$("wxnow").offsetWidth)/(lu*6))));
   for(;;){ box.style.setProperty("--days",dn); drawDays(dn); if(dn<=2||fits($("wxdays")))break; dn--; }
+  const pages=wxCfg.page>0?Math.ceil(total/dn):1;
+  $("wxdots").classList.toggle("on",pages>1);
+  $("wxdots").innerHTML=pages>1?Array.from({length:pages},(_,i)=>`<b class="${i===wxPage%pages?"on":""}"></b>`).join(""):"";
   let hn=Math.max(4,Math.min(12,Math.floor(box.clientWidth/(lu*5.5))));
   for(;;){ drawHours(hn); if(hn<=4||fits($("wxhours"))||getComputedStyle($("wxhours")).display==="none")break; hn--; }
   function drawDays(dn){
-  const days=w.days.slice(0,dn);
+  const pages=wxCfg.page>0?Math.ceil(total/dn):1, start=Math.min((wxPage%pages)*dn,total-dn);
+  const days=w.days.slice(start,start+dn);
   $("wxdays").innerHTML=days.map(d=>`<div class="wc"><span>${d.name}</span>${wicon(d.icon,true,"s")}<span class="h">${t(d.hi)} <span style="color:var(--muted);font-weight:400">${t(d.lo)}</span></span>`+
     pop(days,d)+`<span>${d.wind!=null?warrow(d.deg)+" "+d.wind+(d.gust>d.wind?"&ndash;"+d.gust:""):""}</span></div>`).join("");
   }
@@ -1018,7 +1032,7 @@ async function tick(){
   $("gen").style.display=(d.generator==="none"&&!(n.gen>0))?"none":"";
   setTile("gen",(n.gen||0)>50?kw(n.gen):"Off",(n.gen||0)>50?"charging the battery":(d.generator==="manual"?"started by hand":""));
   chart(d.series||{});
-  weather(d.weather);
+  weather(d.weather,{days:d.wx_days,page:d.wx_page});
   const notes=[...(d.alerts||[])]; if(d.advice)notes.push(d.advice);
   for(const a of (d.weather&&d.weather.alerts)||[]){         // National Weather Service alerts
     const until=a.ends?new Date(a.ends):null;
