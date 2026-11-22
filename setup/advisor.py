@@ -94,7 +94,7 @@ def load_series(days):
         "chg": vm_range(a("sum(lxp_p_charge)"), start, end),
         "dis": vm_range(a("sum(lxp_p_discharge)"), start, end),
         "gen": vm_range(a(ss.GEN_POWER), start, end),
-        "bms_w": vm_range(a("max(lxp_batt_current_bms) * max(lxp_v_bat)"), start, end),
+        "bms_w": vm_range(a(ss.BMS_POWER), start, end),
         "ghi": vm_range(a("max(site_solar_radiation_wm2)"), start, end),
         "temp": vm_range(a("max(site_outdoor_temp_c) or max(site_openmeteo_temp_c)"), start, end),
     }

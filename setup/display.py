@@ -239,7 +239,7 @@ INSTANT = {
     "battery": "sum(lxp_p_charge) - sum(lxp_p_discharge)",
     "gen": ss.GEN_POWER,
     # charging the inverters didn't do: a generator on a DC charger (Chargeverter); see genlog.py
-    "ext_charge": "max(lxp_batt_current_bms) * max(lxp_v_bat) - (sum(lxp_p_charge) - sum(lxp_p_discharge))",
+    "ext_charge": ss.EXT_CHARGE,
     "pv_today": "sum(lxp_e_pv_day)",
     "used_today": "sum(lxp_e_load_day) or sum(lxp_e_eps_day)",
     "charged_today": "sum(lxp_e_chg_day)",

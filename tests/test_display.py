@@ -68,6 +68,15 @@ class Display(unittest.TestCase):
         self.assertIn("max_over_time(lxp_v_gen[1d]) > bool 50", ss.GEN_ENERGY_DAY)
         self.assertNotIn("sum(lxp_p_gen)", open(advisor.__file__).read())
 
+    def test_bms_current_from_the_inverter_that_has_it(self):
+        # checked against VictoriaMetrics v1.156: one BMS -17.1 A + one 0 while discharging 855 W -> about 0, not 855 W
+        import advisor
+        import genlog
+        self.assertEqual(display.INSTANT["ext_charge"], ss.EXT_CHARGE)
+        self.assertEqual(genlog.QUERIES["charger"], ss.EXT_CHARGE)
+        self.assertIn("min(lxp_batt_current_bms) < 0", ss.BMS_POWER)
+        self.assertNotIn("max(lxp_batt_current_bms) * max(lxp_v_bat)", open(advisor.__file__).read())
+
     def test_hhmm_and_off_hours(self):
         self.assertEqual(display.parse_hhmm("6:05"), "06:05")
         self.assertEqual(display.parse_hhmm(""), "")

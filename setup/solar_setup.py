@@ -219,6 +219,14 @@ def load_json(path, default):
 # there. The GEN port's energy counter only counts if the port had voltage in the last day.
 GEN_POWER = ("((sum((lxp_p_gen < 25000) * (lxp_v_gen > bool 50)) or vector(0))"
              " + (sum(lxp_p_to_user * (lxp_v_ac_r > bool 50)) or vector(0)))")
+# The battery's own power from its BMS (W, + charging). With two or more inverters on one bank only one of them gets
+# the BMS's current; the others report 0 (seen on site: -17.1 A and 0 while discharging, so max() read "idle" and
+# the inverters' 855 W discharge looked like 855 W of DC charging). Take the non-zero one, in either direction; empty
+# when no inverter reports it.
+BMS_POWER = ("(max(lxp_batt_current_bms) > 0 or min(lxp_batt_current_bms) < 0 or max(lxp_batt_current_bms))"
+             " * max(lxp_v_bat)")
+# Charging the inverters didn't do: a generator on a DC charger (Chargeverter), see genlog.py.
+EXT_CHARGE = f"{BMS_POWER} - (sum(lxp_p_charge) - sum(lxp_p_discharge))"
 GEN_ENERGY_DAY = ("((sum(lxp_e_gen_day * (max_over_time(lxp_v_gen[1d]) > bool 50)) or vector(0))"
                   " + (sum(lxp_e_to_user_day) or vector(0)))")
 
