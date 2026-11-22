@@ -700,60 +700,133 @@
   },
   {
    "id": 16,
-   "type": "timeseries",
-   "title": "Daily solar and use",
-   "datasource": {
-    "type": "prometheus",
-    "uid": "victoriametrics"
-   },
    "gridPos": {
     "x": 0,
     "y": 20,
     "w": 24,
     "h": 8
    },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   },
+   "type": "barchart",
+   "title": "Daily solar and use",
+   "description": "Solar made and energy used per day, from the inverters' daily counters: each day's total is taken when the counters reset (the inverters' own midnight), so a missed sample or the dashboard's time range doesn't change it. The last pair is today so far.",
+   "timeFrom": "14d",
+   "hideTimeOverride": true,
+   "interval": "1h",
+   "maxDataPoints": 400,
    "targets": [
     {
      "datasource": {
       "type": "prometheus",
       "uid": "victoriametrics"
      },
-     "expr": "max_over_time(sum(lxp_e_pv_day)[1d:5m])",
+     "expr": "(sum((max_over_time(lxp_e_pv_day[65m] offset -1h) and (last_over_time(lxp_e_pv_day[10m]) > last_over_time(lxp_e_pv_day[10m] offset -1h)))) or sum((last_over_time(lxp_e_pv_day[70m] offset -1h) and on () (time() > end() - step()))))",
      "legendFormat": "Solar",
-     "refId": "A"
+     "refId": "A",
+     "range": true
     },
     {
      "datasource": {
       "type": "prometheus",
       "uid": "victoriametrics"
      },
-     "expr": "max_over_time((sum((lxp_e_load_day > lxp_e_eps_day) or lxp_e_eps_day or lxp_e_load_day))[1d:5m])",
+     "expr": "(sum((((max_over_time(lxp_e_load_day[65m] offset -1h) and (last_over_time(lxp_e_load_day[10m]) > last_over_time(lxp_e_load_day[10m] offset -1h))) > (max_over_time(lxp_e_eps_day[65m] offset -1h) and (last_over_time(lxp_e_eps_day[10m]) > last_over_time(lxp_e_eps_day[10m] offset -1h)))) or (max_over_time(lxp_e_eps_day[65m] offset -1h) and (last_over_time(lxp_e_eps_day[10m]) > last_over_time(lxp_e_eps_day[10m] offset -1h))) or (max_over_time(lxp_e_load_day[65m] offset -1h) and (last_over_time(lxp_e_load_day[10m]) > last_over_time(lxp_e_load_day[10m] offset -1h))))) or sum((((last_over_time(lxp_e_load_day[70m] offset -1h) and on () (time() > end() - step())) > (last_over_time(lxp_e_eps_day[70m] offset -1h) and on () (time() > end() - step()))) or (last_over_time(lxp_e_eps_day[70m] offset -1h) and on () (time() > end() - step())) or (last_over_time(lxp_e_load_day[70m] offset -1h) and on () (time() > end() - step())))))",
      "legendFormat": "Used",
-     "refId": "B"
+     "refId": "B",
+     "range": true
     }
    ],
-   "options": {
-    "legend": {
-     "displayMode": "list",
-     "placement": "bottom"
-    },
-    "tooltip": {
-     "mode": "multi"
+   "transformations": [
+    {
+     "id": "joinByField",
+     "options": {
+      "byField": "Time",
+      "mode": "outer"
+     }
     }
-   },
+   ],
    "fieldConfig": {
     "defaults": {
      "unit": "kwatth",
-     "decimals": null,
+     "decimals": 1,
+     "color": {
+      "mode": "palette-classic"
+     },
      "custom": {
-      "lineWidth": 1,
-      "fillOpacity": 10,
-      "stacking": {
-       "mode": "none"
-      }
+      "fillOpacity": 80,
+      "lineWidth": 0,
+      "gradientMode": "none",
+      "axisSoftMin": 0
      }
     },
-    "overrides": []
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Solar"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "yellow"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Used"
+      },
+      "properties": [
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "blue"
+        }
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Time"
+      },
+      "properties": [
+       {
+        "id": "unit",
+        "value": "time:ddd M/D"
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "xField": "Time",
+    "orientation": "vertical",
+    "groupWidth": 0.75,
+    "barWidth": 0.95,
+    "stacking": "none",
+    "showValue": "auto",
+    "xTickLabelRotation": 0,
+    "xTickLabelSpacing": 80,
+    "barRadius": 0.05,
+    "fullHighlight": false,
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom",
+     "showLegend": true
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "none"
+    }
    }
   },
   {
