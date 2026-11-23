@@ -280,6 +280,14 @@ freeze risk, sensors offline)</label></div>
 <label>Heating fluid <select name="bo_fluid">{fluids}</select></label></div>
 <small>With the floor flow (the total of the manifold's loop flow meters while the floors heat), the box estimates the heat
 delivered to the floor: factor &times; GPM &times; the floor difference in °F (water 500; glycol less).</small>
+<p style="margin-top:12px"><b>Efficiency and sizing</b> <small style="display:inline">entered once; the rest is measured</small></p>
+<div class="row"><label>Boiler heating input, lowest (BTU/h) <input name="bo_min_btuh" type="number" min="0" value="{e(str(s.get('boiler_min_btuh') or ''))}"></label>
+<label>highest (BTU/h) <input name="bo_max_btuh" type="number" min="0" value="{e(str(s.get('boiler_max_btuh') or ''))}"></label></div>
+<div class="row"><label>Heated floor area (ft²) <input name="bo_area" type="number" min="0" value="{e(str(s.get('floor_area_ft2') or ''))}"></label>
+<label>Indoor temperature aimed for ({unit}) <input name="bo_indoor" type="number" step="any" value="{conv(float(s.get('indoor_c') or 20))}"></label>
+<label>Design outdoor temperature ({unit}) <input name="bo_design" type="number" step="any" value="{'' if s.get('design_c') in (None, '') else conv(float(s['design_c']))}" placeholder="the local heating design temperature"></label></div>
+<small>The design temperature is the cold the heating is sized for (the local code's figure, about the coldest 1% of
+hours). With it, the boiler page compares the heat the house needs then with the boiler and the slab.</small>
 <small>Changing which entities are watched restarts Home Assistant once (about a minute).</small>
 </fieldset>"""
 
@@ -315,6 +323,19 @@ def _parse(stack, form):
     if fluid not in engine.FLUID:
         raise FieldError("bo_fluid", "pick the heating fluid")
     out.update(floor_gpm=gpm, fluid=fluid, resets=bool(form.get("bo_resets")))
+    def whole(k, lo, hi, blank_ok=True):
+        v = (form.get(k) or "").strip()
+        if not v and blank_ok:
+            return ""
+        if not re.match(r"^\d+$", v) or not lo <= int(v) <= hi:
+            raise FieldError(k, f"a whole number from {lo:,} to {hi:,}")
+        return int(v)
+    out.update(boiler_min_btuh=whole("bo_min_btuh", 1000, 1000000), boiler_max_btuh=whole("bo_max_btuh", 1000, 1000000),
+               floor_area_ft2=whole("bo_area", 50, 100000),
+               indoor_c=temp("bo_indoor", 10, 30) if (form.get("bo_indoor") or "").strip() else engine.DEFAULTS["indoor_c"],
+               design_c=temp("bo_design", -50, 15) if (form.get("bo_design") or "").strip() else "")
+    if out["boiler_min_btuh"] and out["boiler_max_btuh"] and out["boiler_min_btuh"] > out["boiler_max_btuh"]:
+        raise FieldError("bo_min_btuh", "the lowest input must be under the highest")
     if out["resets"]:
         missing = [engine.ROLE[k][1] for k in ("boiler_switch", "boiler_power") if not roles.get(k)]
         if not roles.get("thermostat") and not roles.get("heat_call"):
@@ -435,6 +456,7 @@ a week of this has been checked for false faults.</small></p>
 <h2>Learned</h2><ul>{offs}<li>Boiler plug: {lvl}</li></ul>
 <h3>Outdoor reset (boiler supply while heating)</h3><table><tr><th>Outdoor</th><th>Boiler supply</th><th>Minutes</th></tr>{curve}</table>
 {_resets_html(s, v, us, when)}
+{_efficiency_html(stack, s, us)}
 <h2>Burner runs</h2><table><tr><th>Started</th><th>Length</th><th>Kind</th><th>Boiler supply</th><th>Outdoor</th></tr>{runs}</table>
 <h2>Per day</h2><table><tr><th>Day</th><th>Runs</th><th>Burner (min)</th><th>Heating (min)</th><th>Hot water (min)</th><th>Faults</th></tr>{days}</table>
 <h2>Faults and alerts</h2><table><tr><th>When</th><th>Kind</th><th>What</th><th>Done</th><th>Cleared</th></tr>{log}</table>
@@ -480,7 +502,87 @@ def ha_fields(stack, site):
                                          and time.time() - engine.reset_requests(stack).get("started", 0)
                                          > engine.RESET_OFF_S + engine.HEAT_BACK_S),
             "boiler_reset_state": last.get("reset_state", "idle") if fresh else "idle",
-            "boiler_reset_blocked": last.get("reset_why", "") if fresh else ""}
+            "boiler_reset_blocked": last.get("reset_why", "") if fresh else "",
+            "boiler_heat_today": round(v["today"].get("heat_kbtu", 0)) if v["today"] and str(s.get("floor_gpm") or "").strip() else None,
+            **_week_fields(stack, s)}
+
+
+def _week_fields(stack, s):
+    w = analysis(stack, s)["week"]
+    return {"boiler_heat_loss": w["heat_loss_btuh_f"], "boiler_efficiency": w["efficiency_pct"]}
+
+
+def _price(stack):
+    import modules
+    from modules import propane as pmod
+    try:
+        return pmod._price(stack, modules.settings(stack, "propane"))
+    except (ValueError, TypeError):
+        return None
+
+
+def analysis(stack, s, now=None):
+    """Finished days (with the propane split when the propane module is on), the last 7 and 28 days' figures,
+    the sizing check and short cycling."""
+    now = now or time.time()
+    st = engine.load(stack)
+    today = time.strftime("%Y-%m-%d", time.localtime(now))
+    pr = _propane(stack)
+    used = {d["date"]: d["used"] for d in (pr or {}).get("days") or []}
+    days = [engine.day_figures(k, d, used.get(k)) for k, d in sorted(st["days"].items()) if k < today]
+    price = _price(stack) if pr is not None else None
+    week, month = engine.efficiency(days, s, 7, price), engine.efficiency(days, s, 28, price)
+    ua = month["heat_loss_btuh_f"] or week["heat_loss_btuh_f"]
+    return {"days": days, "week": week, "month": month, "sizing": engine.sizing(s, ua, month["efficiency_pct"]),
+            "cycling": engine.short_cycling(st["runs"], now), "propane_on": pr is not None, "price": price}
+
+
+def _efficiency_html(stack, s, us):
+    a = analysis(stack, s)
+    e = html.escape
+    dd = lambda c: "&ndash;" if c is None else (f"{c * 9 / 5 + 32:.0f}" if us else f"{c:.1f}")  # noqa: E731
+    def fig(w):
+        loss = (f"{w['heat_loss_btuh_f']:,} BTU/h per °F" if w["heat_loss_btuh_f"] is not None else
+                f"&ndash; <small>({w['loss_days']} of 3 days)</small>")
+        eff = (f"{w['efficiency_pct']:g}%" if w["efficiency_pct"] is not None else
+               "&ndash; <small>(needs the propane module)</small>" if not a["propane_on"] else
+               f"&ndash; <small>({w['burned_days']} of 3 days)</small>")
+        cost = f", ${w['heating_cost_per_day']:,.2f} a day" if w.get("heating_cost_per_day") is not None else ""
+        gal = f"{w['heating_gal']:g} gal{cost}" if w["heating_gal"] is not None else "&ndash;"
+        hdd = f"{w['gal_per_hdd']:g}" if w["gal_per_hdd"] is not None else "&ndash;"
+        return f"<td>{w['heat_mbtu']:,.2f}M BTU</td><td>{loss}</td><td>{eff}</td><td>{gal}</td><td>{hdd}</td>"
+    if not str(s.get("floor_gpm") or "").strip():
+        return ("<h2>Efficiency and heat output</h2><p>Enter the floor flow (GPM) in <a href='/setup#boiler'>setup</a>: "
+                "the heat delivered, the house's heat loss and the boiler's efficiency are all measured from it.</p>")
+    sz = a["sizing"]
+    if sz:
+        slab = (f"; the slab delivers about {sz['slab_btuh'][0]:,} to {sz['slab_btuh'][1]:,} BTU/h" if sz["slab_btuh"] else "")
+        verdict = (f"<b>Short: {e(sz['first'])} runs out first</b>" if sz["short"] else
+                   f"{e(sz['first']).capitalize()} runs out first, with {sz['margin_pct']}% to spare")
+        sizing = (f"<p>On the design day ({_t(float(s['design_c']), us, 0)} outside, {_t(float(s['indoor_c']), us, 0)} inside) "
+                  f"the house needs about <b>{sz['need_btuh']:,} BTU/h</b>; the boiler can put out about {sz['boiler_btuh']:,} "
+                  f"BTU/h{slab}. {verdict}.</p>")
+    else:
+        sizing = ("<p><small>Sizing check: needs the heat loss (3 days of heating) and the design outdoor temperature "
+                  "(setup).</small></p>")
+    cy = a["cycling"]
+    cycling = (f"<p>Heating runs in the last 7 days: {cy['runs']}, median {cy['median_min']:g} min, {cy['short_pct']}% under "
+               f"10 minutes{' <b>(short cycling: the boiler may be oversized for mild days, or its settings too tight)</b>' if cy['short_pct'] >= 50 else ''}.</p>"
+               if cy else "")
+    rows = "".join(f"<tr><td>{d['date']}</td><td>{dd(d['outdoor_c'])} / {dd(d['indoor_c'])}</td><td>{'&ndash;' if d['hdd'] is None else d['hdd']}</td>"
+                   f"<td>{d['heat_kbtu']:,.0f}k</td><td>{d['heat_min']:.0f}</td>"
+                   f"<td>{'&ndash;' if not d['propane'] else format(d['propane']['heating'], 'g')}</td></tr>"
+                   for d in reversed(a["days"][-14:])) or "<tr><td colspan=6>No finished day yet.</td></tr>"
+    return f"""<h2>Efficiency and heat output</h2>
+<table><tr><th></th><th>Heat to the floor</th><th>Heat loss of the house</th><th>Boiler heating efficiency</th><th>Propane for heating</th><th>Gal per degree day</th></tr>
+<tr><td>Last 7 days</td>{fig(a['week'])}</tr><tr><td>Last 28 days</td>{fig(a['month'])}</tr></table>
+{sizing}{cycling}
+<table><tr><th>Day</th><th>Outdoor / indoor ({'°F' if us else '°C'})</th><th>Degree days (65 °F)</th><th>Heat (BTU)</th><th>Heating (min)</th><th>Propane for heating (gal)</th></tr>{rows}</table>
+<p><small>Heat loss: the heat delivered over the indoor-outdoor difference, on days at least 5 °F apart; sun and people
+add heat the boiler didn't, so it reads a little low on sunny days. Efficiency: the heat delivered over the propane
+burned for heating (the day's tank drop split by burner time: heating, hot water, the rest; {engine.PROPANE_BTU_PER_GAL:,}
+BTU per gallon); it includes the pipe losses between the boiler and the manifold. Expect &plusmn;10 to 15% from the
+uncalibrated flow meters and probes; good for following trends.</small></p>"""
 
 
 def _propane(stack):

@@ -65,7 +65,15 @@ FLUIDS = (("water", "Water", 500), ("pg30", "Propylene glycol 30%", 477), ("pg40
           ("pg50", "Propylene glycol 50%", 452), ("eg50", "Ethylene glycol 50%", 428))
 FLUID = {k: f for k, _, f in FLUIDS}
 DEFAULTS = {"roles": {r[0]: "" for r in ROLES}, "alerts": True, "floor_max_c": 50.0, "freeze_c": 10.0, "burner_w": "",
-            "floor_gpm": "", "fluid": "water", "resets": False}
+            "floor_gpm": "", "fluid": "water", "resets": False,
+            # efficiency and sizing (entered once; blank = not used)
+            "boiler_min_btuh": 18000, "boiler_max_btuh": 120000, "floor_area_ft2": "", "indoor_c": 20.0,
+            "design_c": ""}
+
+PROPANE_BTU_PER_GAL = 91500     # higher heating value, as boiler efficiency ratings use
+SLAB_BTUH_FT2 = (25, 35)        # what a slab delivers per square foot at comfortable floor temperatures
+HDD_BASE_F = 65.0
+MIN_DT_F = 5.0                  # days warmer than this under the indoor temperature don't count for heat loss
 
 # Resets (the Home Assistant automation in packages/solar_boiler.yaml switches the plug; the box decides whether it may)
 RESET_OFF_S = 30                # the plug is off this long
@@ -134,15 +142,19 @@ def to_c(value, unit):
     return (value - 32) * 5 / 9 if unit and "F" in str(unit) else value
 
 
-def reading(role, cur):
+def reading(role, cur, ha_unit="°C"):
     """One role's reading from its Home Assistant state: {"ok", "value", "raw"}; value in °C, W, A, or for the
-    thermostat and the call for heat True while calling."""
+    thermostat and the call for heat True while calling. The thermostat's also carries "indoor" (°C): its room
+    temperature, which Home Assistant gives in its own unit system (ha_unit), with no unit of its own."""
     if not cur or cur.get("state") in (None, "unavailable", "unknown", ""):
         return {"ok": False, "value": None, "raw": (cur or {}).get("state")}
     kind, raw = ROLE[role][2], cur.get("state")
     if kind == "climate":
-        action = str((cur.get("attributes") or {}).get("hvac_action") or "").lower()
-        return {"ok": True, "value": action in ("heating", "preheating") if action else None, "raw": action or raw}
+        attrs = cur.get("attributes") or {}
+        action = str(attrs.get("hvac_action") or "").lower()
+        room = hastates.number(attrs.get("current_temperature"))
+        return {"ok": True, "value": action in ("heating", "preheating") if action else None, "raw": action or raw,
+                "indoor": None if room is None else round(to_c(room, ha_unit), 2)}
     if kind in ("binary_sensor", "switch"):
         return {"ok": True, "value": str(raw).lower() == "on", "raw": raw}
     v = hastates.number(raw)
@@ -158,7 +170,9 @@ def reading(role, cur):
 
 def readings(stack, s):
     roles = s.get("roles") or {}
-    return {r: reading(r, hastates.get(stack, roles[r])) for r in ROLE if roles.get(r)}
+    site = ss.load_json(os.path.join(stack, "state", "site.json"), {})
+    unit = "°F" if site.get("units", "us_customary") == "us_customary" else "°C"   # the box sets HA's unit system
+    return {r: reading(r, hastates.get(stack, roles[r]), unit) for r in ROLE if roles.get(r)}
 
 
 def outdoor_c(stack, now=None):
@@ -358,6 +372,11 @@ def step(stack, s, r, now=None, outdoor=None, alert=None, ctx=None):
     day = st["days"].setdefault(time.strftime("%Y-%m-%d", time.localtime(now)),
                                 {"burner_min": 0.0, "heat_min": 0.0, "dhw_min": 0.0, "runs": 0, "faults": 0})
     day.setdefault("heat_kbtu", 0.0)
+    indoor = r["thermostat"].get("indoor") if r.get("thermostat", {}).get("ok") else None
+    for key, v in (("out", outdoor), ("in", indoor)):
+        if v is not None:
+            day[key + "_sum"] = round(day.get(key + "_sum", 0.0) + v, 2)
+            day[key + "_n"] = day.get(key + "_n", 0) + 1
     if output:
         day["heat_kbtu"] = round(day["heat_kbtu"] + output * dt / 60 / 1000, 2)
     if burner:
@@ -450,7 +469,7 @@ def step(stack, s, r, now=None, outdoor=None, alert=None, ctx=None):
     st["last"] = {**reset, "t": now, "state": state, "burner": burner, "calling": calling, "pumps": pumps, "dhw": dhw,
                   "power": power, "outdoor": outdoor, "temps": {k: round(v, 2) for k, v in t.items()},
                   "floor_diff": None if floor_diff is None else round(floor_diff, 2), "missing": missing,
-                  "output": output, "flowing": flowing,
+                  "output": output, "flowing": flowing, "indoor": indoor,
                   "offline": offline}
     save(stack, st)
     return msgs
@@ -599,6 +618,83 @@ def _detail(name, s, t, offline, roles):
     if name in ("no_run", "stopped", "no_heat") and "boiler_supply" in t:
         return f"Boiler supply {f(t['boiler_supply'])}."
     return ""
+
+
+def _mean(d, key):
+    return d[key + "_sum"] / d[key + "_n"] if d.get(key + "_n") else None
+
+
+def day_figures(date, d, propane_used=None):
+    """One finished day: means (°C), degree days, heat delivered, and the propane burned for heating (the day's
+    propane use split by burner time: heating, hot water, the rest)."""
+    out, ind = _mean(d, "out"), _mean(d, "in")
+    out_f = None if out is None else out * 9 / 5 + 32
+    burner = d.get("burner_min") or 0
+    split = None
+    if propane_used is not None and burner > 0:
+        heat_share, dhw_share = d.get("heat_min", 0) / burner, d.get("dhw_min", 0) / burner
+        split = {"heating": round(propane_used * heat_share, 2), "hot_water": round(propane_used * dhw_share, 2),
+                 "other": round(propane_used * max(0.0, 1 - heat_share - dhw_share), 2)}
+    return {"date": date, "outdoor_c": None if out is None else round(out, 1), "indoor_c": None if ind is None else round(ind, 1),
+            "hdd": None if out_f is None else round(max(0.0, HDD_BASE_F - out_f), 1), "heat_kbtu": d.get("heat_kbtu", 0.0),
+            "burner_min": burner, "heat_min": d.get("heat_min", 0), "dhw_min": d.get("dhw_min", 0), "runs": d.get("runs", 0),
+            "propane_used": propane_used, "propane": split}
+
+
+def efficiency(days, s, span=7, price=None):
+    """Heat loss, boiler heating efficiency and propane per degree day over the last `span` finished days
+    (day_figures()). Each figure is None until there are 3 days that give it."""
+    days = days[-span:]
+    loss = [(d["heat_kbtu"] * 1000, 24 * (d["indoor_c"] - d["outdoor_c"]) * 9 / 5) for d in days
+            if d["heat_kbtu"] and d["indoor_c"] is not None and d["outdoor_c"] is not None
+            and (d["indoor_c"] - d["outdoor_c"]) * 9 / 5 >= MIN_DT_F]
+    burned = [(d["heat_kbtu"] * 1000, d["propane"]["heating"] * PROPANE_BTU_PER_GAL) for d in days
+              if d["heat_kbtu"] and d.get("propane") and d["propane"]["heating"] > 0]
+    per_hdd = [(d["propane"]["heating"], d["hdd"]) for d in days if d.get("propane") and d["hdd"]]
+    ua = round(sum(a for a, _ in loss) / sum(b for _, b in loss)) if len(loss) >= 3 else None
+    eff = round(100 * sum(a for a, _ in burned) / sum(b for _, b in burned), 1) if len(burned) >= 3 else None
+    gal_hdd = round(sum(a for a, _ in per_hdd) / sum(b for _, b in per_hdd), 3) if len(per_hdd) >= 3 and sum(b for _, b in per_hdd) else None
+    heat_gal = sum(d["propane"]["heating"] for d in days if d.get("propane"))
+    n_prop = sum(1 for d in days if d.get("propane"))
+    return {"days": len(days), "heat_loss_btuh_f": ua, "efficiency_pct": eff, "gal_per_hdd": gal_hdd,
+            "heat_mbtu": round(sum(d["heat_kbtu"] for d in days) / 1000, 2),
+            "heating_gal": round(heat_gal, 1) if n_prop else None,
+            "heating_cost_per_day": round(heat_gal / n_prop * price, 2) if n_prop and price is not None else None,
+            "loss_days": len(loss), "burned_days": len(burned)}
+
+
+def sizing(s, ua, eff_pct=None):
+    """The heat the house needs on the design day (heat loss x (indoor - design temperature)) against what the
+    boiler can put out and what the slab can deliver; None until the heat loss is known and the design temperature
+    entered."""
+    try:
+        design_c = float(s.get("design_c"))
+    except (TypeError, ValueError):
+        return None
+    if ua is None:
+        return None
+    need = round(ua * (float(s.get("indoor_c") or 20) - design_c) * 9 / 5)
+    boiler = round(float(s.get("boiler_max_btuh") or 0) * (eff_pct / 100 if eff_pct else 0.95))
+    slab = None
+    try:
+        area = float(s.get("floor_area_ft2") or 0)
+    except (TypeError, ValueError):
+        area = 0
+    if area > 0:
+        slab = (round(area * SLAB_BTUH_FT2[0]), round(area * SLAB_BTUH_FT2[1]))
+    limits = [("the boiler", boiler)] + ([("the slab", slab[1])] if slab else [])
+    first = min(limits, key=lambda x: x[1])
+    return {"need_btuh": need, "boiler_btuh": boiler, "slab_btuh": slab, "short": need > first[1], "first": first[0],
+            "margin_pct": round(100 * (first[1] - need) / need) if need > 0 else None}
+
+
+def short_cycling(runs, now, span=7 * 86400):
+    """Heating runs in the last `span`: how many, their median length, and the share under 10 minutes."""
+    heat = sorted(r["minutes"] for r in runs if r.get("class") == "heating" and now - r["start"] < span)
+    if not heat:
+        return None
+    return {"runs": len(heat), "median_min": heat[len(heat) // 2],
+            "short_pct": round(100 * sum(1 for m in heat if m < 10) / len(heat))}
 
 
 def vm_lines(stack, now=None):
