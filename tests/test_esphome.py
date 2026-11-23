@@ -6,8 +6,8 @@ import re
 import unittest
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "esphome")
-PROBES = ("Floor supply", "Floor return", "Boiler supply", "Boiler return", "Hot water outlet", "Slab near boiler",
-          "Slab far")
+REQUIRED = ("Floor supply", "Floor return", "Boiler supply")
+OPTIONAL = ("Boiler return", "Hot water outlet", "Slab near boiler", "Slab far")
 
 
 class ESPHome(unittest.TestCase):
@@ -17,15 +17,23 @@ class ESPHome(unittest.TestCase):
 
     def test_probe_names_and_addresses(self):
         live = "\n".join(line for line in self.cfg.splitlines() if not line.lstrip().startswith("#"))
-        for name in PROBES:
+        for name in REQUIRED:                                                # shipped: the three required probes
             self.assertIn(f"name: {name}\n", live)
+        for name in OPTIONAL:                                                # the rest: there, commented out
+            self.assertNotIn(f"name: {name}\n", live)
+            self.assertIn(f"#    name: {name}\n", self.cfg)
         addrs = re.findall(r"^  (addr_\w+): ", self.cfg, re.M)
-        self.assertEqual(len(addrs), len(PROBES))
+        self.assertEqual(len(addrs), len(REQUIRED) + len(OPTIONAL))
         for a in addrs:
-            self.assertIn("${" + a + "}", live)
+            self.assertIn("${" + a + "}", self.cfg)
         self.assertIn("name: boiler-probes", self.cfg)
-        self.assertEqual(live.count("one_wire_id: boiler_bus"), 5)
-        self.assertEqual(live.count("one_wire_id: slab_bus"), 2)
+        self.assertEqual(live.count("one_wire_id: boiler_bus"), 3)
+        self.assertIn("#    one_wire_id: slab_bus", self.cfg)
+        self.assertIn("#    id: slab_bus", self.cfg)                          # the slab bus only with its probes
+        with open(os.path.join(ROOT, "README.md")) as f:
+            readme = f.read()
+        for name in REQUIRED:
+            self.assertIn(f"| {name} | **Required** |", readme)
 
     def test_secrets_stay_out_of_git(self):
         with open(os.path.join(ROOT, ".gitignore")) as f:

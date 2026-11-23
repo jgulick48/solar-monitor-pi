@@ -1,7 +1,7 @@
 # Boiler probes (ESPHome)
 
 `boiler-probes.yaml` turns a **Waveshare ESP32-P4-ETH** (with its PoE module) into the temperature board for the
-boiler module: seven DS18B20 probes on two 1-Wire buses, powered and connected by a single Ethernet cable (PoE). It joins Home Assistant
+boiler module: three to seven DS18B20 probes on one or two 1-Wire buses, powered and connected by a single Ethernet cable (PoE). It joins Home Assistant
 through Home Assistant's ESPHome integration; the solar monitor box reads the readings from Home Assistant.
 The wiki's *Boiler, propane and notifications* page has the design.
 
@@ -11,8 +11,8 @@ The wiki's *Boiler, propane and notifications* page has the design.
 | --- | --- |
 | Waveshare ESP32-P4-ETH with the PoE module | ESP32-P4 with IP101 Ethernet; 2 × 20 header with the free GPIOs |
 | PoE switch port or injector | 802.3af |
-| 7 × DS18B20 waterproof probes | Stainless sleeve with **silicone** cable (rated to about 125 °C); 6 mm sleeves fit most wells |
-| 2 × 4.7 kΩ resistors | One 1-Wire pull-up per bus (about 2.2 kΩ for a bus over about 30 m in total) |
+| 3 to 7 × DS18B20 waterproof probes | Stainless sleeve with **silicone** cable (rated to about 125 °C); 6 mm sleeves fit most wells |
+| 1 or 2 × 4.7 kΩ resistors | One 1-Wire pull-up per bus in use (about 2.2 kΩ for a bus over about 30 m in total) |
 | Cat5/Cat6 cable, screw terminal block | For the probe bus |
 | Thermal paste, pipe clamps, pipe insulation | For the pipe-mounted probes |
 | Optional: isolated 24 VAC input module (optocoupler) | Wired call for heat from the Taco SR501 |
@@ -20,23 +20,27 @@ The wiki's *Boiler, propane and notifications* page has the design.
 
 ## Probes
 
-| # | Name in Home Assistant | Where | Read every |
-| --- | --- | --- | --- |
-| 1 | Floor supply | Manifold supply well, with paste | 15 s |
-| 2 | Floor return | Manifold return well, with paste | 15 s |
-| 3 | Boiler supply | Metal fitting at the boiler outlet, clamped with paste, insulated over | 15 s |
-| 4 | Boiler return | Boiler return fitting, as probe 3 | 15 s |
-| 5 | Hot water outlet | The combi's domestic hot-water outlet pipe, as probe 3 | 5 s |
-| 6 | Slab near boiler | Slab bus. A sensor conduit in the slab if one was poured (mid-floor, between two tubes), else the floor surface in an inside spot out of the sun | 60 s |
-| 7 | Slab far | Slab bus, as probe 6 but at the far end of the floor's loops (the coolest part of the slab) | 60 s |
+Three probes are the minimum; each further probe adds accuracy or a reading. The file ships with probes 1 to 3;
+to add one, uncomment its block in `boiler-probes.yaml` (for 6 and 7, the slab bus too), put in its address and
+flash again.
+
+| # | Name in Home Assistant | Needed? | What it gives the boiler module | Where | Read every |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Floor supply | **Required** | With 2: the heat delivered to the floor (the manifold's flow × the temperature difference) | Manifold supply well, with paste | 15 s |
+| 2 | Floor return | **Required** | See 1 | Manifold return well, with paste | 15 s |
+| 3 | Boiler supply | **Required** | Whether the boiler fires and how hot; the outdoor-reset check; the restart test | Metal fitting at the boiler outlet, clamped with paste, insulated over | 15 s |
+| 4 | Boiler return | Optional | Whether the boiler condenses (return under about 130 °F), and the boiler loop's own difference | Boiler return fitting, as probe 3 | 15 s |
+| 5 | Hot water outlet | Optional | Tells a hot-water draw from heating straight away; without it, the water pump's plug does | The combi's domestic hot-water outlet pipe, as probe 3 | 5 s |
+| 6 | Slab near boiler | Optional (slab bus) | How the floor itself responds and lags | A sensor conduit in the slab if one was poured (mid-floor, between two tubes), else the floor surface in an inside spot out of the sun | 60 s |
+| 7 | Slab far | Optional (slab bus) | With 6: how evenly the slab heats | As probe 6, at the far end of the floor's loops | 60 s |
 
 Probes 1 to 5 are on the **boiler bus**, 6 and 7 on the **slab bus**. 1-Wire has no five-probe limit (each probe
 has its own 64-bit address); what limits a bus is its total cable length, which is why the long run to the slab
 gets a bus of its own.
 
-The names are only what Home Assistant shows. The boiler module's setup has a picker for each role (floor
-supply, floor return, …) that lists Home Assistant's temperature sensors, so a probe can be renamed, and a
-sensor from another device can fill a role.
+The names are only what Home Assistant shows. The boiler module's setup has a picker for each role that lists
+Home Assistant's temperature sensors, with the three required roles marked; a probe can be renamed, and a sensor
+from another device can fill a role. The module shows what each missing optional role would add.
 
 The board also reports **Floor difference** (supply minus return), its uptime, IP address and status. The box
 applies its own learned offsets to each pair, zeroed while the pumps are off, since each DS18B20 is ±0.5 °C.
@@ -79,5 +83,5 @@ Optional inputs:
 5. Home Assistant finds the board by itself (Settings → Devices & services → *Discovered*: ESPHome) and asks for
    the key from `secrets.yaml`.
 
-Before installing, putting all seven probes in one cup of water for a few minutes shows how far apart they read;
+Before installing, putting all the probes in one cup of water for a few minutes shows how far apart they read;
 the box learns the same offsets on site, but this catches a bad probe early.
