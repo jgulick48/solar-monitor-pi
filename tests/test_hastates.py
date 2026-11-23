@@ -141,13 +141,21 @@ class Values(Base):
 
 class Package(Base):
     def test_statestream_lines(self):
-        self.assertEqual(hastates.package([]), [])
-        lines = hastates.package(["sensor.b", "sensor.a", "sensor.b"])
-        self.assertEqual(lines[:4], ["mqtt_statestream:", "  base_topic: solar/ha", "  publish_attributes: true", "  include:"])
-        self.assertEqual(lines[-2:], ["      - sensor.a", "      - sensor.b"])
-        pkg = ss.site_package({}, statestream=lines)
+        self.assertEqual(hastates.package([]), ([], []))
+        top, auto = hastates.package(["sensor.b", "sensor.a", "sensor.b"])
+        self.assertEqual(top[:4], ["mqtt_statestream:", "  base_topic: solar/ha", "  publish_attributes: true", "  include:"])
+        self.assertEqual(top[-2:], ["      - sensor.a", "      - sensor.b"])
+        pkg = ss.site_package({}, "wid", statestream=(top, auto))
         self.assertIn("mqtt_statestream:\n  base_topic: solar/ha", pkg)
+        self.assertEqual(pkg.count("\nautomation:\n"), 1)                # one automation key, shared
+        self.assertIn("  - id: solar_statestream_refresh", pkg)
+        self.assertIn("            - sensor.a\n            - sensor.b\n", pkg)
+        self.assertIn('topic: "solar/ha/{{ repeat.item | replace(\'.\', \'/\') }}/state"', pkg)
         self.assertNotIn("mqtt_statestream", ss.site_package({}))
+        import yaml
+        doc = yaml.safe_load(pkg)
+        self.assertEqual(doc["mqtt_statestream"]["include"]["entities"], ["sensor.a", "sensor.b"])
+        self.assertEqual([a["id"] for a in doc["automation"]], ["solar_statestream_refresh", "solar_test_notification"])
 
 
 class History(Base):

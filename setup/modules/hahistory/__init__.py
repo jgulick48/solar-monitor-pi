@@ -50,7 +50,7 @@ def form_section(stack):
     lines = ""
     for i, ent in enumerate(ents + [""] * SLOTS):
         cur = hastates.get(stack, ent) if ent else None
-        now = (f" <small>{e(str(cur.get('state')))}{' ' + e(cur['unit']) if cur.get('unit') else ''}, {_age(cur.get('at'))}</small>"
+        now = (f" <small>{e(str(cur.get('state')))}{' ' + e(cur['unit']) if cur.get('unit') else ''}, changed {_age(cur.get('at'))}</small>"
                if cur else (" <small>no value yet</small>" if ent else ""))
         lines += (f"<div class='row'><label>Entity <input name='hh_entity{i}' value='{e(ent)}' list='hh_known' "
                   f"placeholder='sensor.boiler_probes_floor_supply' style='min-width:22em'></label>{now}</div>")

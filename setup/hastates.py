@@ -62,12 +62,39 @@ def entities(stack):
 
 
 def package(ents):
-    """The mqtt_statestream lines for packages/site.yaml ([] when nothing is read)."""
+    """(top-level lines, automation lines) for packages/site.yaml; ([], []) when nothing is read.
+
+    mqtt_statestream publishes changes only, so something that rarely changes (a plug that stays on, a setting)
+    would never reach the box: the automation also publishes each one's state when Home Assistant starts and every
+    10 minutes, retained, on the same topics."""
     ents = sorted(set(ents))
     if not ents:
-        return []
-    return (["mqtt_statestream:", f"  base_topic: {BASE}", "  publish_attributes: true", "  include:", "    entities:"]
-            + [f"      - {e}" for e in ents])
+        return [], []
+    top = (["mqtt_statestream:", f"  base_topic: {BASE}", "  publish_attributes: true", "  include:", "    entities:"]
+           + [f"      - {e}" for e in ents])
+    auto = [
+        "  - id: solar_statestream_refresh",
+        "    alias: \"Solar: publish the box's entities\"",
+        "    mode: single",
+        "    triggers:",
+        "      - trigger: homeassistant",
+        "        event: start",
+        "      - trigger: time_pattern",
+        "        minutes: \"/10\"",
+        "    actions:",
+        "      - repeat:",
+        "          for_each:",
+    ] + [f"            - {e}" for e in ents] + [
+        "          sequence:",
+        "            - condition: template",
+        "              value_template: \"{{ states(repeat.item) not in ['unknown', 'unavailable'] }}\"",
+        "            - action: mqtt.publish",
+        "              data:",
+        f"                topic: \"{BASE}/{{{{ repeat.item | replace('.', '/') }}}}/state\"",
+        "                payload: \"{{ states(repeat.item) }}\"",
+        "                retain: true",
+    ]
+    return top, auto
 
 
 def apply(stack):
