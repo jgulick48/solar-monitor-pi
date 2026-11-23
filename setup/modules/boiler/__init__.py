@@ -24,8 +24,15 @@ def chosen(stack):
     return sorted({v for v in settings(stack)["roles"].values() if v})
 
 
-def _us(stack):
-    return ss.load_json(f"{stack}/state/site.json", {}).get("units", "us_customary") == "us_customary"
+def _us(stack, site=None):
+    site = site if site is not None else ss.load_json(f"{stack}/state/site.json", {})
+    return site.get("units", "us_customary") == "us_customary"
+
+
+def _btu(v):
+    if v is None:
+        return "&ndash;"
+    return f"{v / 1000:,.1f}k BTU/h" if v < 100000 else f"{v / 1000:,.0f}k BTU/h"
 
 
 def _t(c, us, digits=1):
@@ -83,6 +90,8 @@ def form_section(stack):
     need = (f"<p><b>Still needed:</b> {e(', '.join(missing))}. The module watches nothing until the three required "
             f"temperatures are chosen.</p>" if missing else "")
     unit = "°F" if us else "°C"
+    fluids = "".join(f"<option value='{k}'{' selected' if s.get('fluid', 'water') == k else ''}>{e(t)} ({f})</option>"
+                     for k, t, f in engine.FLUIDS)
     conv = (lambda c: round(c * 9 / 5 + 32)) if us else (lambda c: round(c, 1))
     lv = engine.levels(engine.load(stack), s)
     learned = (f"learned: controls only about {lv.get('idle', '?')} W, pump {lv.get('pump', '?')} W, burner {lv.get('burner', '?')} W"
@@ -100,6 +109,10 @@ freeze risk, sensors offline)</label></div>
 <label>Freeze risk below ({unit}) <input name="bo_freeze" type="number" step="any" value="{conv(float(s['freeze_c']))}"></label></div>
 <small>The pump panel is rated for 150 °F (66 °C), and with no mixing valve the floor gets the boiler's own water.</small>
 <label>Burner on above (W) <input name="bo_burner_w" value="{e(str(s.get('burner_w') or ''))}" placeholder="{e(learned)}"></label>
+<div class="row"><label>Floor flow (GPM) <input name="bo_floor_gpm" type="number" step="any" min="0" value="{e(str(s.get('floor_gpm') or ''))}" placeholder="the manifold's flow meters added up"></label>
+<label>Heating fluid <select name="bo_fluid">{fluids}</select></label></div>
+<small>With the floor flow (the total of the manifold's loop flow meters while the floors heat), the box estimates the heat
+delivered to the floor: factor &times; GPM &times; the floor difference in °F (water 500; glycol less).</small>
 <small>Changing which entities are watched restarts Home Assistant once (about a minute).</small>
 </fieldset>"""
 
@@ -128,6 +141,13 @@ def _parse(stack, form):
            "freeze_c": temp("bo_freeze", 0, 20), "burner_w": (form.get("bo_burner_w") or "").strip()}
     if out["burner_w"] and not re.match(r"^\d+(\.\d+)?$", out["burner_w"]):
         raise FieldError("bo_burner_w", "watts, like 120, or empty to learn it")
+    gpm = (form.get("bo_floor_gpm") or "").strip()
+    if gpm and (not re.match(r"^\d+(\.\d+)?$", gpm) or not 0.1 <= float(gpm) <= 100):
+        raise FieldError("bo_floor_gpm", "gallons per minute, like 4.5, or empty")
+    fluid = form.get("bo_fluid") or "water"
+    if fluid not in engine.FLUID:
+        raise FieldError("bo_fluid", "pick the heating fluid")
+    out.update(floor_gpm=gpm, fluid=fluid)
     return out
 
 
@@ -231,6 +251,8 @@ def page(stack, form):
 <p>{_headline(stack, s, v, us)}{(' &middot; floor difference ' + _dt(last['floor_diff'], us)) if last.get('floor_diff') is not None else ''}
 {(' &middot; outdoor ' + _t(last['outdoor'], us, 0)) if last.get('outdoor') is not None else ''}
 &middot; call for heat: {'yes' if last.get('calling') else 'no' if last.get('calling') is False else 'unknown'}
+{(' &middot; heat to the floor about ' + _btu(last['output']) + ', ' + format(v['today'].get('heat_kbtu', 0), ',.0f') + 'k BTU today') if last.get('output') is not None else ''}
+&middot; burner {v['burner_last_hour']:g} min in the last hour
 &middot; updated {_ago(last.get('t'), now) or 'never'}</p>
 <p><small>{since}Monitoring only: the fault rules are logged here and nothing is reset; the reset automation comes after
 a week of this has been checked for false faults.</small></p>
@@ -255,7 +277,53 @@ def ha_fields(stack, site):
     fresh = v["age"] is not None and v["age"] < 300
     return {"boiler_state": last.get("state") if fresh else None, "boiler_fault": v["fault"] or "",
             "boiler_floor_difference": last.get("floor_diff") if fresh else None,
-            "boiler_burner_minutes_today": round(v["today"].get("burner_min", 0)) if v["today"] else 0}
+            "boiler_burner_minutes_today": round(v["today"].get("burner_min", 0)) if v["today"] else 0,
+            "boiler_heat_output": last.get("output") if fresh else None}
+
+
+def _propane(stack):
+    """The propane module's days left and level, when it is on."""
+    import modules
+    if not any(m.id == "propane" for m in modules.enabled(stack)):
+        return None
+    import propane
+    return propane.summary(stack, modules.settings(stack, "propane"))
+
+
+def display_panel(stack, site):
+    s = settings(stack)
+    us = _us(stack, site)
+    t = lambda c: "--" if c is None else (f"{c * 9 / 5 + 32:.0f}°" if us else f"{c:.0f}°")  # noqa: E731
+    d = lambda c: "" if c is None else (f"{c * 9 / 5:+.0f}°F" if us else f"{c:+.1f}°C")       # noqa: E731
+    missing = [engine.ROLE[r][1] for r in engine.REQUIRED if not s["roles"].get(r)]
+    if missing:
+        return {"title": "Boiler", "level": "warn", "note": "Pick the boiler's sensors in setup: " + ", ".join(missing), "tiles": []}
+    v = engine.summary(stack, s)
+    last = v["last"] or {}
+    if not last or v["age"] is None or v["age"] > 300:
+        return {"title": "Boiler", "level": "warn", "note": "No boiler readings for 5 minutes", "tiles": []}
+    temps, today = last.get("temps") or {}, v["today"] or {}
+    state = last.get("state", "")
+    level = "bad" if v["fault"] or "freeze" in v["active"] else "warn" if state in ("offline", "unclear") or v["active"] else ""
+    tiles = [{"k": "Boiler", "v": state.capitalize(), "tone": "bad" if v["fault"] else "warn" if state == "heating"
+              else "load" if state == "hot water" else "fg",
+              "s": f"{today.get('runs', 0)} runs, {today.get('burner_min', 0):.0f} min today"},
+             {"k": "Burner, last hour", "v": f"{v['burner_last_hour'] / 60 * 100:.0f}%", "bar": v["burner_last_hour"] / 60 * 100,
+              "s": f"today: heat {today.get('heat_min', 0):.0f}, hot water {today.get('dhw_min', 0):.0f} min"},
+             {"k": "Floor supply / return", "v": f"{t(temps.get('floor_supply'))} / {t(temps.get('floor_return'))}",
+              "s": f"difference {d(last.get('floor_diff'))}" if last.get("floor_diff") is not None else ""}]
+    if last.get("output") is not None:
+        tiles.append({"k": "Heat to the floor", "v": f"{last['output'] / 1000:,.0f}k BTU/h" if last["output"] else "Off",
+                      "tone": "solar" if last["output"] else "fg", "s": f"{today.get('heat_kbtu', 0):,.0f}k BTU today"})
+    tiles.append({"k": "Boiler supply", "v": t(temps.get("boiler_supply")),
+                  "s": (f"outdoor {t(last['outdoor'])}" if last.get("outdoor") is not None else "")})
+    pr = _propane(stack)
+    if pr and pr.get("percent") is not None:
+        tiles.append({"k": "Propane", "v": f"{pr['days_left']} days" if pr.get("days_left") is not None else f"{pr['percent']:.0f}%",
+                      "tone": "bad" if pr.get("alert") else "fg", "bar": pr["percent"],
+                      "s": f"{pr['percent']:.0f}%, {pr['gallons']:,.0f} gal left" if pr.get("gallons") is not None else ""})
+    note = f"Fault: {v['fault']}" if v["fault"] else ""
+    return {"title": "Boiler", "level": level, "note": note, "tiles": tiles}
 
 
 def every_minute(stack):
@@ -288,5 +356,6 @@ MODULE = Module(
     routes={("GET", "/boiler"): page},
     ha_fields=ha_fields,
     ha_entities=chosen,
+    display_panel=display_panel,
     every={60: (every_minute, 60)},
 )

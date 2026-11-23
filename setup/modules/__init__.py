@@ -72,6 +72,10 @@ class Module:
     display_events: Optional[Callable] = None  # (stack) -> fields added to the wall display's fast poll (/display/events)
     ha_entities: Optional[Callable] = None  # (stack) -> Home Assistant entity ids it reads (hastates.get); each is
     #                                       also recorded in VictoriaMetrics
+    display_panel: Optional[Callable] = None  # (stack, site) -> its panel on the wall display, or None: data, never HTML:
+    #   {"title", "level": "" | "warn" | "bad", "note": "", "tiles": [{"k": label, "v": value, "s": below it,
+    #    "tone": "fg" | "solar" | "load" | "batt" | "gen" | "warn" | "bad" | "muted", "bar": 0-100 or None}]}
+    #   It rotates through the main panel with the solar chart, or fills the top tiles when it is the main panel.
 
 
 def log(*a):
@@ -328,6 +332,34 @@ def display_data(stack, site, now):
     out = {}
     for _, d in _each(stack, "display_data", site, now):
         out.update(d)
+    return out
+
+
+PANEL_TONES = ("fg", "solar", "load", "batt", "gen", "warn", "bad", "muted")
+
+
+def display_panels(stack, site):
+    """The enabled modules' wall-display panels, in module order: [{"id", "title", "level", "note", "tiles"}]. A
+    module whose panel fails is left out (and logged), so one module can't blank the screen."""
+    out = []
+    for m in enabled(stack):
+        if not m.display_panel:
+            continue
+        try:
+            p = m.display_panel(stack, site)
+        except Exception as e:  # noqa: BLE001 - keep the screen going
+            log(f"{m.title}: display panel failed:", e)
+            continue
+        if not p:
+            continue
+        tiles = []
+        for t in (p.get("tiles") or [])[:8]:
+            bar = t.get("bar")
+            tiles.append({"k": str(t.get("k") or ""), "v": str(t.get("v") if t.get("v") is not None else "--"),
+                          "s": str(t.get("s") or ""), "tone": t.get("tone") if t.get("tone") in PANEL_TONES else "fg",
+                          "bar": None if bar is None else max(0, min(100, round(float(bar))))})
+        out.append({"id": m.id, "title": str(p.get("title") or m.title), "note": str(p.get("note") or ""),
+                    "level": p.get("level") if p.get("level") in ("warn", "bad") else "", "tiles": tiles})
     return out
 
 

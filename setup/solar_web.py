@@ -366,12 +366,19 @@ def screen_power_form(form):
             "cec": form.get("cec") == "1", "off_from": "", "off_to": ""}
 
 
+def main_choices():
+    """What the wall display's main panel can be: solar, or an enabled module with a display panel."""
+    return [("solar", "Solar")] + [(m.id, m.title) for m in modules.enabled(STACK) if m.display_panel]
+
+
 def apply_display(form):
     """The screen's settings from the setup form. Returns messages; raises ValueError."""
     cur = display.load(STACK)
     d = {**cur, "enabled": form.get("display_enabled") == "1", **screen_power_form(form),
          "volume": max(0, min(100, int(form.get("volume") or 70) if str(form.get("volume") or "70").isdigit() else 70)),
-         "sound_quiet": form.get("sound_quiet") == "1"}       # the camera settings: the cameras module
+         "sound_quiet": form.get("sound_quiet") == "1",       # the camera settings: the cameras module
+         "main": form.get("display_main") if form.get("display_main") in [k for k, _ in main_choices()] else "solar",
+         "panel_s": int(form["panel_s"]) if str(form.get("panel_s", "")).isdigit() and int(form["panel_s"]) in display.PANEL_SECONDS else 15}
     def run(cmd):
         try:
             return subprocess.run(cmd, capture_output=True, text=True)
@@ -609,6 +616,10 @@ def setup_page(site, error="", done=None, error_field="", form=None, module_msgs
 4K TVs are run at 1920x1080, which they scale up.</small></p>
 <label><input type="checkbox" name="display_enabled" value="1" style="width:auto"{' checked' if dsp['enabled'] else ''}> Show the dashboard on a screen plugged into the HDMI port</label>
 {power_fields(dsp)}
+<p style="margin-top:16px"><b>Panels</b> <small style="display:inline">the main panel's tiles stay on screen; the other panels
+(the solar chart, and modules such as Boiler and Propane) take turns in the chart's place, and one with an alert comes first</small></p>
+<div class="row"><label>Main panel <select name="display_main">{''.join(f"<option value='{k}'{' selected' if dsp.get('main', 'solar') == k else ''}>{html.escape(t)}</option>" for k, t in main_choices())}</select></label>
+<label>Next panel every <select name="panel_s">{''.join(f"<option value='{n}'{' selected' if dsp.get('panel_s', 15) == n else ''}>{n} seconds</option>" for n in display.PANEL_SECONDS)}</select></label></div>
 <p style="margin-top:16px"><b>Sound</b> <small style="display:inline">through the screen's speakers (HDMI): camera chimes and voice announcements</small></p>
 <div class="row"><label>Volume <input type="range" name="volume" min="0" max="100" step="5" value="{dsp.get('volume', 70)}"></label>
 <label><input type="checkbox" name="sound_quiet" value="1"{' checked' if dsp.get('sound_quiet', True) else ''}> Not during the screen-off hours</label></div>

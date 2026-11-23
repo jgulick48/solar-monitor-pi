@@ -82,6 +82,13 @@ rest:
         unit_of_measurement: "°C"
         state_class: measurement   # no device_class: Home Assistant would convert a difference as a temperature
         icon: mdi:thermometer-lines
+      - name: Site floor heat output
+        unique_id: site_floor_heat_output
+        availability: "{{ value_json.boiler_heat_output is defined and value_json.boiler_heat_output is not none }}"
+        value_template: "{{ value_json.boiler_heat_output }}"
+        unit_of_measurement: BTU/h
+        state_class: measurement
+        icon: mdi:heat-wave
       - name: Site boiler burner today
         unique_id: site_boiler_burner_today
         availability: "{{ value_json.boiler_burner_minutes_today is defined }}"

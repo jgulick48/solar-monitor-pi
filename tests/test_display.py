@@ -186,8 +186,10 @@ class Display(unittest.TestCase):
         self.assertIn("/display/data", page)
         j = json.loads(urllib.request.urlopen(base + "/display/data").read())
         self.assertEqual(j["name"], "Test")
+        self.assertEqual((j["main"], j["panel_s"], j["panels"]), ("solar", 15, []))   # no module with a panel is on
         setup = urllib.request.urlopen(base + "/setup").read().decode()
         self.assertIn("<legend>Screen</legend>", setup)
+        self.assertIn("<select name=\"display_main\"><option value='solar' selected>Solar</option></select>", setup)
         self.assertIn("<legend>Cameras</legend>", setup)            # the cameras module: on, the box had cameras
         self.assertNotIn("TOK", setup)               # saved link is masked
         self.assertIn("rtsps://h:7441/••••OK", setup)
@@ -200,7 +202,8 @@ class Display(unittest.TestCase):
                     power_mode="hours", hours1_days="weekdays", hours1_on="6:00", hours1_off="22:00",
                     hours2_days="weekends", hours2_on="08:00", hours2_off="01:00", wake_doorbell="1", cec="1",
                     module_cameras_shown="1", cam1_name="Drive", cam1_url="",
-                    cam2_name="Door", cam2_url="rtsps://10.1.1.1:7441/SECRET2?enableSrtp")
+                    cam2_name="Door", cam2_url="rtsps://10.1.1.1:7441/SECRET2?enableSrtp",
+                    display_main="boiler", panel_s="20")   # boiler isn't on: the main panel stays solar
         post = lambda f: urllib.request.urlopen(urllib.request.Request(  # noqa: E731
             base + "/setup", data=urllib.parse.urlencode(f).encode(), method="POST"))
         post(form).read()
@@ -209,6 +212,7 @@ class Display(unittest.TestCase):
         self.assertEqual((saved["power_mode"], saved["hours"]), ("hours", [{"days": "weekdays", "on": "06:00", "off": "22:00"},
                                                                            {"days": "weekends", "on": "08:00", "off": "01:00"}]))
         self.assertEqual((saved["wake"]["doorbell"], saved["wake"]["person"], saved["cec"]), (True, False, True))
+        self.assertEqual((saved["main"], saved["panel_s"]), ("solar", 20))
         # occupancy: needs sensors; with them, Home Assistant gets an automation that reports to /display/presence
         with self.assertRaises(urllib.error.HTTPError) as e:
             post(dict(form, power_mode="occupied")).read()

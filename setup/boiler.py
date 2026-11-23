@@ -60,7 +60,12 @@ PAIRS = (("floor", "floor_supply", "floor_return"), ("boiler", "boiler_supply", 
 KINDS = {"temperature": (("sensor",), "temperature"), "power": (("sensor",), "power"), "current": (("sensor",), "current"),
          "climate": (("climate",), None), "binary_sensor": (("binary_sensor",), None), "switch": (("switch",), None)}
 
-DEFAULTS = {"roles": {r[0]: "" for r in ROLES}, "alerts": True, "floor_max_c": 50.0, "freeze_c": 10.0, "burner_w": ""}
+# the heating fluid's factor in BTU/h = factor x GPM x difference (°F): from its density and heat capacity (approximate)
+FLUIDS = (("water", "Water", 500), ("pg30", "Propylene glycol 30%", 477), ("pg40", "Propylene glycol 40%", 466),
+          ("pg50", "Propylene glycol 50%", 452), ("eg50", "Ethylene glycol 50%", 428))
+FLUID = {k: f for k, _, f in FLUIDS}
+DEFAULTS = {"roles": {r[0]: "" for r in ROLES}, "alerts": True, "floor_max_c": 50.0, "freeze_c": 10.0, "burner_w": "",
+            "floor_gpm": "", "fluid": "water"}
 
 HIST_S = 3600                   # temperatures kept for rises and baselines
 QUIET_S = 30 * 60               # no heat flowing this long before the probe pairs are zeroed
@@ -200,6 +205,29 @@ def levels(st, s):
     return st.get("levels")
 
 
+def heat_output(s, floor_diff_c, flowing):
+    """Heat delivered to the floor, BTU/h: factor x GPM x the floor difference in °F, while the floor pump runs; None
+    when the floor flow isn't entered."""
+    try:
+        gpm = float(s.get("floor_gpm") or 0)
+    except (TypeError, ValueError):
+        gpm = 0
+    if gpm <= 0 or floor_diff_c is None:
+        return None
+    if not flowing:
+        return 0.0
+    return round(FLUID.get(s.get("fluid"), 500) * gpm * max(0.0, floor_diff_c) * 9 / 5)
+
+
+def burner_minutes(st, now, span=3600):
+    """Minutes the burner ran in the last `span` seconds (finished runs and the one running now)."""
+    total = 0.0
+    for run in st["runs"] + ([st["run"]] if st["run"] else []):
+        end = run.get("end") or now
+        total += max(0.0, min(end, now) - max(run["start"], now - span))
+    return round(total / 60, 1)
+
+
 def offset(st, pair):
     return (st["offsets"].get(pair) or {}).get("c", 0.0)
 
@@ -285,6 +313,12 @@ def step(stack, s, r, now=None, outdoor=None, alert=None):
     else:                                  # no plug: from the temperatures alone
         state = "heating" if (calling is not False and floor_diff is not None and floor_diff >= 2) else "idle"
 
+    # --- heat delivered to the floor (while the floor pump runs: the pump clamp, else the call for heat)
+    floor_pump = val("floor_pump_current")
+    flowing = (floor_pump >= PUMP_ON_A) if floor_pump is not None else bool(calling) if calling is not None \
+        else state == "heating"
+    output = heat_output(s, floor_diff, flowing)
+
     # --- probe offsets, while no heat flows
     still = False
     old = _hist_at(st, now, 600)
@@ -310,6 +344,9 @@ def step(stack, s, r, now=None, outdoor=None, alert=None):
     # --- burner runs, and the call
     day = st["days"].setdefault(time.strftime("%Y-%m-%d", time.localtime(now)),
                                 {"burner_min": 0.0, "heat_min": 0.0, "dhw_min": 0.0, "runs": 0, "faults": 0})
+    day.setdefault("heat_kbtu", 0.0)
+    if output:
+        day["heat_kbtu"] = round(day["heat_kbtu"] + output * dt / 60 / 1000, 2)
     if burner:
         run = st["run"]
         if run is None:
@@ -398,6 +435,7 @@ def step(stack, s, r, now=None, outdoor=None, alert=None):
     st["last"] = {"t": now, "state": state, "burner": burner, "calling": calling, "pumps": pumps, "dhw": dhw,
                   "power": power, "outdoor": outdoor, "temps": {k: round(v, 2) for k, v in t.items()},
                   "floor_diff": None if floor_diff is None else round(floor_diff, 2), "missing": missing,
+                  "output": output, "flowing": flowing,
                   "offline": offline}
     save(stack, st)
     return msgs
@@ -423,7 +461,7 @@ def vm_lines(stack, now=None):
         return []
     lines = [f"boiler_state {STATES.get(last['state'], 3)}"]
     for k, metric in (("burner", "boiler_burner_on"), ("calling", "boiler_call_for_heat"), ("dhw", "boiler_hot_water_draw"),
-                      ("floor_diff", "boiler_floor_difference_c")):
+                      ("floor_diff", "boiler_floor_difference_c"), ("output", "boiler_heat_output_btuh")):
         if last.get(k) is not None:
             lines.append(f"{metric} {float(last[k]):g}")
     for k, v in last["temps"].items():
@@ -447,6 +485,7 @@ def summary(stack, s, now=None):
     st = load(stack)
     today = st["days"].get(time.strftime("%Y-%m-%d", time.localtime(now))) or {}
     return {"last": st["last"], "age": (now - st["last"]["t"]) if st["last"] else None, "today": today,
+            "burner_last_hour": burner_minutes(st, now),
             "levels": levels(st, s), "learned_levels": st.get("levels"), "power_samples": sum(st["power_bins"].values()),
             "offsets": st["offsets"], "curve": st["curve"], "runs": st["runs"], "run": st["run"], "days": st["days"],
             "log": st["log"], "active": st["active"], "since": st["since"],
