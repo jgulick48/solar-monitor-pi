@@ -83,6 +83,7 @@ class Zigbee(Base):
         self.assertEqual(zigbee.MODULE.compose_profiles(self.stack), ["zigbee"])
         cfg = json.load(open(os.path.join(self.stack, "zigbee2mqtt", "configuration.yaml")))
         self.assertEqual(cfg["advanced"]["channel"], 20)
+        self.assertEqual(cfg["version"], 5)
         self.assertEqual(cfg["advanced"]["network_key"], "GENERATE")
         self.assertTrue(cfg["homeassistant"]["enabled"])
         self.assertEqual(cfg["frontend"]["auth_token"], zigbee.ui_token(self.stack))

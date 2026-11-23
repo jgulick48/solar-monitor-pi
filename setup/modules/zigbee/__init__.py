@@ -40,7 +40,7 @@ def seed(stack):
         return False
     s = settings(stack)
     cfg = {
-        "version": 4,
+        "version": 5,                    # Zigbee2MQTT 2.14 settings format (4 is migrated on start)
         "homeassistant": {"enabled": True},
         "mqtt": {"base_topic": "zigbee2mqtt"},
         "frontend": {"enabled": True, "port": 8080, "auth_token": ui_token(stack)},
