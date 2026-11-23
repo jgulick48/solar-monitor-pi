@@ -5,8 +5,10 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
+import unittest.mock
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "setup"))
@@ -149,7 +151,7 @@ class Step(Base):
         msgs = self.run_for(2, **{**IDLE, "thermostat": True})
         self.assertTrue(any("Not running on demand" in m for m in msgs), msgs)
         e = self.st()["log"][-1]
-        self.assertEqual((e["rule"], e["kind"], e["action"]), ("no_run", "fault", "logged; resets are not on yet"))
+        self.assertEqual((e["rule"], e["kind"], e["action"]), ("no_run", "fault", "logged; resets are off"))
         self.assertEqual(self.sent, [])
         self.assertEqual(mod.engine.summary(self.stack, S)["fault"], boiler.RULE["no_run"][3])
         self.run_for(1, **IDLE)
@@ -213,6 +215,125 @@ class Output(Base):
         st = {"runs": [{"start": T0 - 7200, "end": T0 - 5400}, {"start": T0 - 1800, "end": T0 - 1200}],
               "run": {"start": T0 - 300}}
         self.assertEqual(boiler.burner_minutes(st, T0), 15.0)
+
+
+SR = {**S, "roles": {**S["roles"], "boiler_switch": "switch.boiler_plug"}, "resets": True}
+CALL = {**IDLE, "thermostat": True, "boiler_switch": True}     # calling, the plug at controls only: "not running on demand"
+
+
+class Resets(Base):
+    ctx = {"propane": None, "season": True}
+
+    def go(self, minutes, s=SR, ctx=None, **v):
+        msgs = []
+        for _ in range(minutes):
+            self.t += 60
+            vals = {k: (x(self.t) if callable(x) else x) for k, x in v.items()}
+            msgs += boiler.step(self.stack, s, r(**vals), self.t, 0.0, self.alert, ctx or self.ctx)
+        return msgs
+
+    def last(self):
+        return self.st()["last"]
+
+    def test_allowed_then_started_then_heat_back(self):
+        self.go(2, **{**IDLE, "boiler_switch": True})
+        self.assertFalse(self.last()["reset_allowed"])
+        self.go(16, **CALL)
+        self.assertTrue(self.last()["reset_allowed"], self.last()["reset_why"])
+        self.assertEqual(self.sent, [])                         # Home Assistant does the reset and its notices
+        with unittest.mock.patch.object(time, "time", return_value=self.t + 5):
+            self.assertEqual(boiler.start_reset(self.stack), "")
+            self.assertEqual(boiler.start_reset(self.stack), "a reset is running")
+        self.go(1, **CALL)
+        self.assertEqual(self.last()["reset_state"], "resetting")
+        self.assertFalse(self.last()["reset_allowed"])
+        start = self.t
+        heat = {**CALL, "boiler_power": 180.0, "boiler_supply": lambda t: 24 + (t - start) / 60 * 3,
+                "floor_supply": lambda t: 25.3 + (t - start) / 60 * 0.3}
+        msgs = self.go(4, **heat)
+        self.assertTrue(any("heat back" in m for m in msgs), msgs)
+        self.assertEqual(self.last()["reset_state"], "heat back")
+        a = self.st()["resets"]["attempts"][-1]
+        self.assertEqual((a["fault"], a["result"]), (boiler.RULE["no_run"][3], "heat back"))
+
+    def test_failed_then_limits_and_lock(self):
+        self.go(16, **CALL)
+        with unittest.mock.patch.object(time, "time", return_value=self.t):
+            boiler.start_reset(self.stack)
+        msgs = self.go(22, **CALL)                              # no heat for 20 minutes after the plug is back on
+        self.assertTrue(any("failed" in m for m in msgs), msgs)
+        self.assertEqual(self.last()["reset_state"], "failed")
+        # the fault is still there: one reset in the last 6 hours -> not reset, a critical alert (once)
+        self.assertEqual(self.last()["reset_why"], "1 reset in the last 6 hours")
+        self.assertEqual(self.sent.count(("boiler_fault", "critical")), 1)
+        self.go(5, **CALL)
+        self.assertEqual(self.sent.count(("boiler_fault", "critical")), 1)
+        # 6 hours on (still faulted): a second reset may run; after it, the 24-hour limit locks
+        self.go(6 * 60, **CALL)
+        self.assertTrue(self.last()["reset_allowed"])
+        with unittest.mock.patch.object(time, "time", return_value=self.t):
+            boiler.start_reset(self.stack)
+        n = self.sent.count(("boiler_fault", "critical"))
+        self.go(25, **CALL)                                     # fails again: 2 in 24 hours locks at once
+        self.assertTrue(self.last()["reset_locked"])
+        self.assertEqual(self.sent.count(("boiler_fault", "critical")), n + 1)
+        self.go(6 * 60, **CALL)
+        self.assertTrue(self.last()["reset_locked"])
+        self.assertIn("press Clear", self.last()["reset_why"])
+        # Clear (the boiler was checked)
+        boiler.note_request(self.stack, "cleared", self.t)
+        self.go(1, **CALL)
+        self.assertFalse(self.last()["reset_locked"])
+
+    def test_unlocks_after_a_day_without_faults(self):
+        self.go(16, **CALL)
+        st = self.st()
+        st["resets"]["locked"] = self.t
+        boiler.save(self.stack, st)
+        self.go(10, **{**IDLE, "boiler_switch": True})
+        self.assertTrue(self.st()["resets"]["locked"])
+        self.go(24 * 60, **{**IDLE, "boiler_switch": True})
+        self.assertFalse(self.st()["resets"]["locked"])
+
+    def test_blocked(self):
+        cases = [({**SR, "roles": {**SR["roles"], "boiler_switch": ""}}, self.ctx, "no boiler plug switch chosen"),
+                 (SR, {"propane": {"percent": 8.0, "reading_age": 60}, "season": True}, "propane low (8%)"),
+                 (SR, {"propane": {"percent": 50.0, "reading_age": 9 * 3600}, "season": True}, "no recent propane reading"),
+                 (SR, {"propane": None, "season": False}, "\"Boiler automatic resets\" switch is off")]
+        for s, ctx, why in cases:
+            with self.subTest(why=why):
+                self.tearDown(); self.setUp()
+                self.go(16, s=s, ctx=ctx, **CALL)
+                self.assertFalse(self.last()["reset_allowed"])
+                self.assertIn(why, self.last()["reset_why"])
+                self.assertIn(("boiler_fault", "critical"), self.sent)
+                self.go(1, s=s, ctx=ctx, **{**IDLE, "boiler_switch": True})
+                self.assertIn(("boiler_fault", "clear"), self.sent)
+        self.tearDown(); self.setUp()
+        self.go(16, **{**CALL, "boiler_switch": None})
+        self.assertIn("no reading from Boiler plug switch", self.last()["reset_why"])
+
+    def test_resets_off_only_logs(self):
+        self.go(16, s={**SR, "resets": False}, **CALL)
+        self.assertFalse(self.last()["reset_allowed"])
+        self.assertEqual(self.last()["reset_why"], "")
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.st()["log"][-1]["action"], "logged; resets are off")
+
+    def test_not_started_by_home_assistant(self):
+        self.go(16, **CALL)
+        self.go(9, **CALL)
+        self.assertEqual(self.sent, [])
+        self.go(2, **CALL)
+        self.assertEqual(self.sent, [("boiler_fault", "critical")])
+        self.assertIn("hasn't started one", self.st()["resets"]["alerted"])
+
+    def test_start_refused_when_not_allowed_or_stale(self):
+        self.go(2, **{**IDLE, "boiler_switch": True})
+        with unittest.mock.patch.object(time, "time", return_value=self.t):
+            self.assertIn("no fault", boiler.start_reset(self.stack))
+        with unittest.mock.patch.object(time, "time", return_value=self.t + 600):
+            self.assertEqual(boiler.start_reset(self.stack), "the boiler module has no recent state")
 
 
 class ModuleTest(Base):
@@ -312,6 +433,42 @@ class ModuleTest(Base):
         with mock.patch.object(hastates, "apply", return_value=False):
             mod.form_save(self.stack, self.form(bo_floor_gpm="4.5", bo_fluid="pg30"))
         self.assertEqual((mod.settings(self.stack)["floor_gpm"], mod.settings(self.stack)["fluid"]), ("4.5", "pg30"))
+
+    def test_reset_package_and_route(self):
+        with self.assertRaises(FieldError) as e:
+            mod.form_check(self.stack, self.form(bo_resets="on", bo_boiler_switch=""))
+        self.assertIn("Boiler plug switch", str(e.exception))
+        os.makedirs(os.path.join(self.stack, "homeassistant", "packages"))
+        pkg = os.path.join(self.stack, "homeassistant", "packages", "solar_boiler.yaml")
+        with mock.patch.object(hastates, "apply", return_value=False), mock.patch.object(mod.subprocess, "run") as run:
+            modules.set_enabled(self.stack, "boiler", True)
+            self.assertIn("resets are off", open(pkg).read())
+            msgs = mod.form_save(self.stack, self.form(bo_resets="on", bo_boiler_switch="switch.boiler_plug"))
+            self.assertTrue(msgs)
+            for t in threading.enumerate():
+                if t is not threading.current_thread() and t.daemon:
+                    t.join(2)
+            self.assertTrue(run.called)                      # Home Assistant restarted for the new automation
+        import yaml
+        d = yaml.safe_load(open(pkg))
+        self.assertEqual([a["id"] for a in d["automation"]], ["solar_boiler_reset", "solar_boiler_reset_plug_back_on"])
+        acts = d["automation"][0]["actions"]
+        self.assertEqual(acts[0]["action"], "rest_command.solar_boiler_reset_started")
+        self.assertEqual([a.get("action") for a in acts if a.get("action", "").startswith("switch.")],
+                         ["switch.turn_off", "switch.turn_on"])
+        self.assertEqual(acts[3]["target"]["entity_id"], "switch.boiler_plug")
+        auth = d["rest_command"]["solar_boiler_reset_started"]["headers"]["Authorization"]
+        self.assertEqual(auth, "Bearer " + mod.token(self.stack))
+        self.assertIn("input_boolean.solar_boiler_resets", mod.chosen(self.stack))
+        # the route: token from the Authorization header only
+        self.assertEqual(mod.reset_started(self.stack, {}).code, 403)
+        self.assertEqual(mod.reset_started(self.stack, {"token": mod.token(self.stack)}).code, 403)
+        r409 = mod.reset_started(self.stack, {"_bearer": mod.token(self.stack)})
+        self.assertEqual((r409.code, r409.body), (409, "the boiler module has no recent state"))
+        # turning the module off leaves no automation behind
+        with mock.patch.object(hastates, "apply", return_value=False), mock.patch.object(mod.subprocess, "run"):
+            modules.set_enabled(self.stack, "boiler", False)
+        self.assertIn("resets are off", open(pkg).read())
 
     def test_ha_entities_in_statestream(self):
         with mock.patch.object(hastates, "apply", return_value=False):
