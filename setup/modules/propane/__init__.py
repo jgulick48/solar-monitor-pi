@@ -199,6 +199,29 @@ def ha_fields(stack, site):
                                                                   if v["last_fill"] else None)}
 
 
+def display_panel(stack, site):
+    s = settings(stack)
+    v = engine.summary(stack, s)
+    if v["percent"] is None:
+        return {"title": "Propane", "level": "warn", "note": "No reading from the tank sensor yet", "tiles": []}
+    tone = "bad" if v["alert"] == "critical" else "warn" if v["alert"] else "fg"
+    tiles = [{"k": "Tank", "v": f"{v['percent']:.0f}%", "tone": tone, "bar": v["percent"],
+              "s": f"{v['gallons']:,.0f} gal" if v["gallons"] is not None else ""},
+             {"k": "Days left", "v": str(v["days_left"]) if v["days_left"] is not None else "--",
+              "s": f"to the {s['reserve']}% reserve" if v["days_left"] is not None else "after a week of readings"},
+             {"k": "Used today", "v": _fmt(v["used_today"], " gal", 1),
+              "s": f"yesterday {_fmt(v['used_yesterday'], ' gal', 1)}"}]
+    if v["last_fill"]:
+        f = v["last_fill"]
+        tiles.append({"k": "Last fill", "v": time.strftime("%b %-d", time.localtime(f["at"])),
+                      "s": f"+{f['added']:,.0f} gal"})
+    note = "Propane low: order a delivery" if v["alert"] else ""
+    if v["reading_age"] is not None and v["reading_age"] > 3600:
+        note = f"No tank reading for {v['reading_age'] // 3600} h"
+    return {"title": "Propane", "level": "bad" if v["alert"] == "critical" else "warn" if (v["alert"] or note) else "",
+            "note": note, "tiles": tiles}
+
+
 def every_minute(stack):
     return sample(stack)
 
@@ -219,6 +242,7 @@ MODULE = Module(
     nav=("/propane", "Propane", "Propane"),
     routes={("GET", "/propane"): page},
     ha_fields=ha_fields,
+    display_panel=display_panel,
     compose_profiles=lambda stack: ["propane"],
     env=env,
     every={60: (every_minute, 60)},

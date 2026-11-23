@@ -90,6 +90,18 @@ class Modules(unittest.TestCase):
         modules.set_enabled(self.stack, "backup", True)
         self.assertIsNotNone(modules.route(self.stack, "GET", "/backup")[1])
 
+    def test_display_panels_are_cleaned_and_failures_left_out(self):
+        good = Module(id="aa", title="AA", default_enabled=True, display_panel=lambda st, site: {
+            "title": "AA", "level": "odd", "tiles": [{"k": "x", "v": 3, "tone": "<script>", "bar": 140}] * 10})
+        bad = Module(id="bb", title="BB", default_enabled=True, display_panel=lambda st, site: 1 / 0)
+        none = Module(id="cc", title="CC", default_enabled=True, display_panel=lambda st, site: None)
+        modules._ALL = [good, bad, none]
+        p = modules.display_panels(self.stack, {})
+        self.assertEqual([x["id"] for x in p], ["aa"])
+        self.assertEqual(p[0]["level"], "")
+        self.assertEqual(len(p[0]["tiles"]), 8)
+        self.assertEqual(p[0]["tiles"][0], {"k": "x", "v": "3", "s": "", "tone": "fg", "bar": 100})
+
     def test_ha_fields_need_the_module_prefix(self):
         self.add(Module(id="demo", title="Demo", default_enabled=True, ha_fields=lambda s, site: {"level": 1}))
         with self.assertRaises(ValueError):

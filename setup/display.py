@@ -50,7 +50,11 @@ DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
             # how often sounds may play: the same alert (camera + kind) is repeated at most every sound_cooldown s,
             # and two sounds are at least sound_gap s apart; doorbell rings always (the highlight isn't limited)
             "sound_cooldown": 60, "sound_gap": 5, "doorbell_always": True,
-            "speak_template": "{object} at the {camera}", "speak_doorbell": "Someone's at the {camera}"}
+            "speak_template": "{object} at the {camera}", "speak_doorbell": "Someone's at the {camera}",
+            # the main panel: "solar" or a module with a display panel (its tiles on top); the others rotate in the
+            # chart's place every panel_s seconds
+            "main": "solar", "panel_s": 15}
+PANEL_SECONDS = (10, 15, 20, 30, 60)
 KIOSK_USER = "solar-display"
 
 
@@ -384,6 +388,7 @@ def data(stack, site):
         "speak": False, "speak_mode": "after",           # the voice module (when it's on)
         "expected": expected, "forecast": forecast_summary(fc, now, tz), "battery_high": high,
         "weather": None, "wx_days": 7, "wx_page": 8,    # weather: the weather module (when it's on)
+        "main": d.get("main", "solar"), "panel_s": d.get("panel_s", 15), "panels": _module_panels(stack, site),
         **_module_display(stack, site, now),
     }
 
@@ -574,6 +579,11 @@ def ha_status(stack, site):
 def _module_display(stack, site, now):
     import modules  # here: keeps the module light for the kiosk
     return modules.display_data(stack, site, now)
+
+
+def _module_panels(stack, site):
+    import modules
+    return modules.display_panels(stack, site)
 
 
 def _modules_rev(stack):

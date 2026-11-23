@@ -56,6 +56,20 @@ background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot
 #chart .k{color:var(--muted);font-size:calc(var(--u)*1);display:flex;gap:calc(var(--u)*1.4)}
 #chart svg{flex:1;width:100%;min-height:0}
 .dot{display:inline-block;width:calc(var(--u)*.8);height:calc(var(--u)*.8);border-radius:50%;margin-right:calc(var(--u)*.35);vertical-align:middle}
+/* Panels: the main module's tiles (#mtiles, in place of the solar tiles), and the other panels taking turns in the chart's place */
+#mtiles{display:none;grid-template-columns:repeat(min(var(--n,3),3),1fr);gap:calc(var(--u)*1)}.nocam #mtiles{grid-template-columns:repeat(min(var(--n,5),5),1fr)}
+#mpanel{flex:1;display:none;flex-direction:column;gap:calc(var(--u)*.7);background:var(--panel);border-radius:14px;
+padding:calc(var(--u)*.8) calc(var(--u)*1);min-height:calc(var(--u)*7);border-left:calc(var(--u)*.4) solid transparent;overflow:hidden}
+#mpanel.warn{border-left-color:var(--warn)}#mpanel.bad{border-left-color:var(--bad)}
+#mpanel .hd{display:flex;gap:calc(var(--u)*1.2);align-items:baseline;font-size:calc(var(--u)*1.3);font-weight:600}
+#mpanel .hd span{font-weight:400;color:var(--muted);font-size:calc(var(--u)*1.05)}#mpanel.bad .hd span{color:var(--bad)}#mpanel.warn .hd span{color:var(--warn)}
+#mpanel .g{display:grid;grid-template-columns:repeat(auto-fit,minmax(calc(var(--u)*12),1fr));gap:calc(var(--u)*.8);align-content:start}
+#mpanel .tile,#mtiles .tile{background:var(--bg)}#mtiles .tile{background:var(--panel)}
+.pbar{height:calc(var(--u)*.6);border-radius:calc(var(--u)*.3);background:var(--line);margin-top:calc(var(--u)*.4);overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--batt)}
+#rotdots{display:none;justify-content:center;gap:calc(var(--u)*.35);margin-top:calc(var(--u)*-.6)}#rotdots.on{display:flex}
+#rotdots b{width:calc(var(--u)*.45);height:calc(var(--u)*.45);border-radius:50%;background:var(--line)}#rotdots b.on{background:var(--muted)}
+#rotdots b.warn{background:var(--warn)}#rotdots b.bad{background:var(--bad)}
 #notes{display:flex;flex-direction:column;gap:calc(var(--u)*.6)}
 .note{border-radius:12px;padding:calc(var(--u)*.8) calc(var(--u)*1.1);font-size:calc(var(--u)*1.25);background:var(--panel);border-left:calc(var(--u)*.5) solid var(--muted)}
 .note.warn{border-left-color:var(--warn);background:#2a1d12}.note.bad{border-left-color:var(--bad);background:#2e1414}.note.ok{border-left-color:var(--batt)}
@@ -84,11 +98,13 @@ background:var(--warn);border-radius:8px;padding:.1em .5em;display:none}.cam.hot
   <div class="tile" id="bat"><div class="k">Battery power</div><div class="v">--</div><div class="s"></div></div>
   <div class="tile" id="gen"><div class="k">Generator</div><div class="v" style="color:var(--gen)">--</div><div class="s"></div></div>
  </div>
+ <div id="mtiles"></div>
  <div id="wx"><div id="wxtop"><div id="wxnow"></div><div id="wxdays"></div></div><div id="wxdots"></div><div id="wxhours"></div></div>
  <div id="chart"><div class="k"><span><span class="dot" style="background:var(--solar)"></span>Solar</span>
   <span><span class="dot" style="background:var(--load)"></span>House</span>
   <span><span class="dot" style="background:var(--batt)"></span>Battery %</span><span style="margin-left:auto">last 24 hours</span></div>
   <svg id="svg" viewBox="0 0 1000 300" preserveAspectRatio="none"></svg></div>
+ <div id="mpanel"></div><div id="rotdots"></div>
  <div id="notes"></div>
  <div id="foot"><span id="upd"></span><span>solar-monitor</span></div>
 </div></div><div id="blank"></div>
@@ -311,6 +327,53 @@ function weather(w,cfg){
     pop(hrs,h)+`<span>${h.wind!=null?warrow(h.deg)+" "+h.wind+(h.gust>h.wind?"&ndash;"+h.gust:""):""}</span></div>`).join("");
   }
 }
+// Panels. The main panel's tiles stay on top: solar's own, or a module's (setup: Screen > Panels). The other
+// panels take turns in the chart's place: the solar chart (and, when a module is the main panel, the solar
+// figures), then each module's panel; a panel with an alert comes first, and one that turns red is shown at once.
+const TONE={fg:"var(--fg)",solar:"var(--solar)",load:"var(--load)",batt:"var(--batt)",gen:"var(--gen)",warn:"var(--warn)",bad:"var(--bad)",muted:"var(--muted)"};
+let rotList=[], rotIdx=0, rotAt=Date.now(), rotSecs=15, lastPanels={}, mainId="solar", solarTiles=[];
+function esc(x){return String(x).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function tileHtml(t){
+  return `<div class="tile"><div class="k">${esc(t.k)}</div><div class="v" style="color:${TONE[t.tone]||TONE.fg}">${esc(t.v)}</div>`+
+    (t.bar!=null?`<div class="pbar"><i style="width:${t.bar}%;background:${t.tone==="bad"?"var(--bad)":t.tone==="warn"?"var(--warn)":"var(--batt)"}"></i></div>`:"")+
+    `<div class="s">${esc(t.s||"")}</div></div>`;
+}
+function panelsFrom(d){
+  const panels=d.panels||[], main=panels.find(p=>p.id===d.main);
+  mainId=main?main.id:"solar"; rotSecs=Math.max(5,+d.panel_s||15);
+  let list=[];
+  if(mainId!=="solar")list.push({id:"solar",title:d.name||"Solar",level:"",note:"",tiles:solarTiles});
+  list.push({id:"chart",level:""});
+  for(const p of panels)if(p.id!==mainId)list.push(p);
+  // panels with an alert first (red, then orange), the rest in their own order
+  const rank=p=>p.level==="bad"?0:p.level==="warn"?1:2;
+  list=list.map((p,i)=>[p,i]).sort((x,y)=>rank(x[0])-rank(y[0])||x[1]-y[1]).map(x=>x[0]);
+  const cur=rotList[rotIdx]; rotList=list;
+  const turnedRed=list.find(p=>p.level==="bad"&&lastPanels[p.id]!=="bad");
+  lastPanels={}; for(const p of list)lastPanels[p.id]=p.level||"";
+  if(turnedRed){rotIdx=list.indexOf(turnedRed);rotAt=Date.now();}
+  else{const i=cur?list.findIndex(p=>p.id===cur.id):-1; rotIdx=i>=0?i:0;}
+  if(pinPanel&&list.some(p=>p.id===pinPanel))rotIdx=list.findIndex(p=>p.id===pinPanel);
+  // the main module's tiles in place of the solar tiles
+  $("tiles").style.display=mainId==="solar"?"":"none";
+  $("mtiles").style.display=mainId==="solar"?"none":"grid";
+  $("mtiles").innerHTML=main?main.tiles.map(tileHtml).join(""):"";
+  $("mtiles").style.setProperty("--n",main?Math.max(1,main.tiles.length):3);
+  return main;
+}
+const pinPanel=new URLSearchParams(location.search).get("panel");     // ?panel=chart|solar|<module id> pins one (testing)
+function nextPanel(){ if(rotList.length<2||pinPanel)return; rotIdx=(rotIdx+1)%rotList.length; rotAt=Date.now(); showPanel(); }
+function showPanel(){
+  const p=rotList[rotIdx]||{id:"chart"}, chartOn=p.id==="chart";
+  $("chart").style.display=chartOn?"":"none"; $("mpanel").style.display=chartOn?"none":"flex";
+  if(!chartOn){
+    const m=$("mpanel"); m.className=p.level||"";
+    m.innerHTML=`<div class="hd">${esc(p.title)}<span>${esc(p.note||"")}</span></div><div class="g">${(p.tiles||[]).map(tileHtml).join("")}</div>`;
+  }
+  const dots=$("rotdots"); dots.classList.toggle("on",rotList.length>1);
+  dots.innerHTML=rotList.length>1?rotList.map((x,i)=>`<b class="${i===rotIdx?"on":x.level||""}"></b>`).join(""):"";
+}
+setInterval(()=>{if(rotList.length>1&&Date.now()-rotAt>=rotSecs*1000)nextPanel()},1000);
 async function tick(){
   let d;try{const r=await fetch("/display/data",{cache:"no-store"});d=await r.json()}catch(e){$("upd").textContent="Waiting for the monitor...";return}
   if(rev!==null&&d.rev!==rev){location.reload();return} rev=d.rev;
@@ -338,9 +401,17 @@ async function tick(){
     b==null?null:b>50?"var(--batt)":b<-50?"var(--warn)":"var(--fg)");
   $("gen").style.display=(d.generator==="none"&&!(n.gen>0))?"none":"";
   setTile("gen",(n.gen||0)>50?kw(n.gen):"Off",(n.gen||0)>50?"charging the battery":(d.generator==="manual"?"started by hand":""));
+  solarTiles=[{k:"Battery",v:soc==null?"--":Math.round(soc)+"%",bar:soc==null?null:soc,tone:soc!=null&&soc<=low?"bad":"fg",s:kwhLeft},
+    {k:"Solar",v:kw(n.pv),tone:"solar",s:n.pv_today!=null?n.pv_today.toFixed(1)+" kWh today":""},
+    {k:"House",v:kw(n.load),tone:"load",s:n.used_today!=null?n.used_today.toFixed(1)+" kWh today":""},
+    {k:"Battery power",v:kw(b==null?null:Math.abs(b)),tone:b==null?"fg":b>50?"batt":b<-50?"warn":"fg",s:b==null?"":b>50?"charging":b<-50?"discharging":"idle"}];
+  if(!(d.generator==="none"&&!(n.gen>0)))solarTiles.push({k:"Generator",v:(n.gen||0)>50?kw(n.gen):"Off",tone:"gen",s:""});
+  const mainPanel=panelsFrom(d); showPanel();
   chart(d.series||{});
   weather(d.weather,{days:d.wx_days,page:d.wx_page});
   const notes=[...(d.alerts||[])]; if(d.advice)notes.push(d.advice);
+  // a module's alert stays in sight while its panel waits its turn (and the main module's note, always)
+  for(const p of d.panels||[])if(p.note&&(p.level==="bad"||(mainPanel&&p.id===mainPanel.id)))notes.unshift({level:p.level||"",text:p.title+": "+p.note});
   for(const a of (d.weather&&d.weather.alerts)||[]){         // National Weather Service alerts
     const until=a.ends?new Date(a.ends):null;
     notes.unshift({level:/Extreme|Severe/.test(a.severity)?"bad":"warn",

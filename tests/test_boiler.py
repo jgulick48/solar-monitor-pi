@@ -193,6 +193,28 @@ class Step(Base):
         self.assertIn('boiler_rule_active{rule="no_run",kind="fault"} 0', lines)
 
 
+class Output(Base):
+    def test_heat_output(self):
+        s = {**S, "floor_gpm": "4", "fluid": "water"}
+        self.assertIsNone(boiler.heat_output(S, 8.0, True))                 # no flow entered
+        self.assertEqual(boiler.heat_output(s, 15 * 5 / 9, True), 30000)     # the design's example: 4 GPM, 15 °F
+        self.assertEqual(boiler.heat_output(s, 15 * 5 / 9, False), 0.0)
+        self.assertEqual(boiler.heat_output({**s, "fluid": "pg40"}, 15 * 5 / 9, True), 27960)
+        # while heating with the floor flow entered: BTU/h now and kBTU over the day
+        self.run_for(2, s=s, **IDLE)
+        self.run_for(60, s=s, **{**IDLE, "thermostat": True, "boiler_power": 180.0, "boiler_supply": 50.0,
+                                 "floor_supply": 33.33, "floor_return": 25.0})
+        last = self.st()["last"]
+        self.assertTrue(29000 < last["output"] < 31000, last["output"])
+        self.assertTrue(29 < self.st()["days"]["2026-11-23"]["heat_kbtu"] < 31)
+        self.assertIn("boiler_heat_output_btuh", " ".join(boiler.vm_lines(self.stack)))
+
+    def test_burner_minutes(self):
+        st = {"runs": [{"start": T0 - 7200, "end": T0 - 5400}, {"start": T0 - 1800, "end": T0 - 1200}],
+              "run": {"start": T0 - 300}}
+        self.assertEqual(boiler.burner_minutes(st, T0), 15.0)
+
+
 class ModuleTest(Base):
     def form(self, **kw):
         f = {f"bo_{k}": v for k, v in ROLES.items()}
@@ -253,6 +275,43 @@ class ModuleTest(Base):
         self.assertEqual(f["boiler_state"], "idle")
         self.assertEqual(f["boiler_fault"], "")
         self.assertIn("Fault rules", page)
+
+    def test_display_panel(self):
+        self.assertIn("Pick the boiler's sensors", mod.display_panel(self.stack, {})["note"])
+        with mock.patch.object(hastates, "apply", return_value=False):
+            mod.form_save(self.stack, self.form(bo_floor_gpm="4", bo_burner_w="100"))
+        self.assertIn("No boiler readings", mod.display_panel(self.stack, {})["note"])
+        s = mod.settings(self.stack)
+        self.run_for(2, s=s, **IDLE)
+        self.run_for(10, s=s, **{**IDLE, "thermostat": True, "boiler_power": 180.0, "boiler_supply": 50.0,
+                                 "floor_supply": 33.33, "floor_return": 25.0})
+        with mock.patch.object(time, "time", return_value=self.t):
+            p = mod.display_panel(self.stack, {"units": "us_customary"})
+            metric = mod.display_panel(self.stack, {"units": "metric"})
+        tiles = {t["k"]: t for t in p["tiles"]}
+        self.assertEqual(p["level"], "")
+        self.assertEqual(tiles["Boiler"]["v"], "Heating")
+        self.assertEqual(tiles["Burner, last hour"]["v"], "15%")       # 9 of the last 60 minutes
+        self.assertEqual(tiles["Floor supply / return"]["v"], "92° / 77°")
+        self.assertEqual(tiles["Heat to the floor"]["v"], "30k BTU/h")
+        self.assertNotIn("Propane", tiles)                   # the propane module is off
+        self.assertEqual({t["k"]: t for t in metric["tiles"]}["Floor supply / return"]["v"], "33° / 25°")
+        # through the framework, once the module is on
+        with mock.patch.object(hastates, "apply", return_value=False):
+            modules.set_enabled(self.stack, "boiler", True)
+        with mock.patch.object(time, "time", return_value=self.t):
+            panels = modules.display_panels(self.stack, {})
+        self.assertEqual([x["id"] for x in panels], ["boiler"])
+        self.assertTrue(all(set(t) == {"k", "v", "s", "tone", "bar"} for t in panels[0]["tiles"]))
+
+    def test_form_flow(self):
+        with self.assertRaises(FieldError):
+            mod.form_check(self.stack, self.form(bo_floor_gpm="fast"))
+        with self.assertRaises(FieldError):
+            mod.form_check(self.stack, self.form(bo_fluid="mercury"))
+        with mock.patch.object(hastates, "apply", return_value=False):
+            mod.form_save(self.stack, self.form(bo_floor_gpm="4.5", bo_fluid="pg30"))
+        self.assertEqual((mod.settings(self.stack)["floor_gpm"], mod.settings(self.stack)["fluid"]), ("4.5", "pg30"))
 
     def test_ha_entities_in_statestream(self):
         with mock.patch.object(hastates, "apply", return_value=False):
