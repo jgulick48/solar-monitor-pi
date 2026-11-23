@@ -45,6 +45,25 @@ rest:
         device_class: power
         state_class: measurement
         icon: mdi:engine
+      # Propane module (level and gallons come straight from the tank sensor's own entities)
+      - name: Site propane days left
+        unique_id: site_propane_days_left
+        availability: "{{ value_json.propane_days_left is defined and value_json.propane_days_left is not none }}"
+        value_template: "{{ value_json.propane_days_left }}"
+        unit_of_measurement: d
+        icon: mdi:gas-cylinder
+      - name: Site propane used today
+        unique_id: site_propane_used_today
+        availability: "{{ value_json.propane_used_today is defined and value_json.propane_used_today is not none }}"
+        value_template: "{{ value_json.propane_used_today }}"
+        unit_of_measurement: gal
+        icon: mdi:gas-cylinder
+      - name: Site propane used yesterday
+        unique_id: site_propane_used_yesterday
+        availability: "{{ value_json.propane_used_yesterday is defined and value_json.propane_used_yesterday is not none }}"
+        value_template: "{{ value_json.propane_used_yesterday }}"
+        unit_of_measurement: gal
+        icon: mdi:gas-cylinder
       - name: Site solar today
         unique_id: site_solar_today
         value_template: "{{ value_json.solar_today }}"

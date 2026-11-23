@@ -507,6 +507,22 @@ def notify_package(stack, port=80):
         "                title: \"{{ trigger.json.title }}\"",
         "                message: \"{{ trigger.json.message }}\"",
         "                data: \"{{ trigger.json.data }}\"",
+        # alerts from the box's own modules (propane, boiler): through script.solar_notify like Home Assistant's
+        "  - id: solar_notify_from_box",
+        "    alias: \"Solar: alert from the box\"",
+        "    mode: queued",
+        "    triggers:",
+        "      - trigger: webhook",
+        f"        webhook_id: {js(notify.box_alert_webhook(stack))}",
+        "        allowed_methods: [POST]",
+        "        local_only: true",
+        "    actions:",
+        "      - action: script.solar_notify",
+        "        data:",
+        "          tag: \"{{ trigger.json.tag }}\"",
+        "          title: \"{{ trigger.json.title }}\"",
+        "          message: \"{{ trigger.json.message }}\"",
+        "          priority: \"{{ trigger.json.priority }}\"",
     ]
     return rest, deliver
 

@@ -247,6 +247,23 @@ def ha_webhook(stack):
     return ss.secret(stack, "ha_notify_webhook", lambda: "solar-notify-" + secrets.token_urlsafe(24))
 
 
+def box_alert_webhook(stack):
+    """The webhook the box's own modules raise alerts through (packages/site.yaml: solar_notify_from_box)."""
+    return ss.secret(stack, "ha_alert_webhook", lambda: "solar-alert-" + secrets.token_urlsafe(24))
+
+
+def alert(stack, tag, title, message, priority="warning"):
+    """Raise (or, with message "clear", remove) an alert from a module: it goes through Home Assistant's
+    script.solar_notify, so it shows in Home Assistant and is routed like every other alert. Returns an error text
+    or ""."""
+    try:
+        _post(f"http://127.0.0.1:8123/api/webhook/{box_alert_webhook(stack)}",
+              {"tag": tag, "title": title, "message": message, "priority": priority}, {})
+        return ""
+    except (OSError, ValueError) as e:
+        return str(getattr(e, "reason", e))
+
+
 def box_token(stack):
     """The token Home Assistant sends with each alert to /notify/send."""
     return ss.secret(stack, "notify_token", lambda: secrets.token_urlsafe(24))
