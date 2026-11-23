@@ -140,6 +140,44 @@ services:
       MQTT_USERNAME: homeassistant
       MQTT_PASSWORD: ${PROPANE_MQTT_PASSWORD:-}
 
+  # Zigbee: Zigbee2MQTT for a network (PoE/Ethernet) coordinator; devices reach Home Assistant through MQTT
+  # discovery. The connection comes from .env (the zigbee module); the rest from zigbee2mqtt/configuration.yaml,
+  # seeded once. Its web page (pairing) is on port 8081. Off unless the zigbee module is on.
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:2.14.3
+    profiles: [zigbee]
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      ZIGBEE2MQTT_CONFIG_SERIAL_PORT: ${ZIGBEE_PORT:-}
+      ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER: ${ZIGBEE_ADAPTER:-ember}
+      ZIGBEE2MQTT_CONFIG_MQTT_SERVER: "mqtt://mosquitto:1883"
+      ZIGBEE2MQTT_CONFIG_MQTT_USER: homeassistant
+      ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD: ${ZIGBEE_MQTT_PASSWORD:-}
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./zigbee2mqtt:/app/data
+    depends_on: [mosquitto]
+
+  # Z-Wave: Z-Wave JS UI for a network (PoE/Ethernet) controller. The controller's address comes from .env and
+  # the security keys, region and Home Assistant server from zwave/box-settings.json (the zwave module writes both).
+  # Host network: Home Assistant connects to its server on ws://127.0.0.1:3000; its web page is on port 8091.
+  # Off unless the zwave module is on.
+  zwave-js-ui:
+    image: zwavejs/zwave-js-ui:11.25.2
+    profiles: [zwave]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TZ: ${TZ:-UTC}
+      ZWAVE_PORT: ${ZWAVE_PORT:-}
+      ZWAVE_EXTERNAL_SETTINGS: /usr/src/app/store/box-settings.json
+      SESSION_SECRET: ${ZWAVE_SESSION_SECRET:-}
+      PORT: "8091"
+    volumes:
+      - ./zwave:/usr/src/app/store
+
   # Backups to a USB stick (setup/backup.py runs it; not a long-running service).
   backup:
     image: restic/restic:0.20.0

@@ -253,6 +253,9 @@ def run(stack):
             ensure_repo(stack, root)
             stage_ha_db(stack)
             paths = ["/data/stack/state", "/data/stack/homeassistant", "/data/stack/go2rtc"]
+            # the radios' networks (Zigbee network key and coordinator backup, Z-Wave security keys and node data):
+            # without them every device has to be paired again
+            paths += [f"/data/stack/{d}" for d in ("zigbee2mqtt", "zwave") if os.path.isdir(os.path.join(stack, d))]
             if cfg["history"]:
                 snap = vm_snapshot()
                 # The snapshot directory itself only holds symlinks (which restic stores as links); the
