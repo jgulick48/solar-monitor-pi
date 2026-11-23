@@ -2,7 +2,12 @@
 (monitoring only for now: faults are logged, nothing is reset). The work is setup/boiler.py; this is its switch,
 settings, pages and schedule."""
 import html
+import json
+import os
 import re
+import secrets
+import subprocess
+import threading
 import time
 
 import boiler as engine
@@ -21,7 +26,160 @@ def settings(stack):
 
 
 def chosen(stack):
-    return sorted({v for v in settings(stack)["roles"].values() if v})
+    s = settings(stack)
+    ents = {v for v in s["roles"].values() if v}
+    if s.get("resets"):
+        ents.add(engine.SEASON)              # Home Assistant's "Boiler automatic resets" switch: the box shows it
+    return sorted(ents)
+
+
+# --------------------------------------------------------------------------
+# The reset automation (Home Assistant: packages/solar_boiler.yaml)
+# --------------------------------------------------------------------------
+def token(stack):
+    return ss.secret(stack, "boiler_token", lambda: secrets.token_urlsafe(24))
+
+
+def package(stack, s, port=80):
+    """packages/solar_boiler.yaml. Home Assistant does the switching: when the box says a reset may run
+    (binary_sensor.site_boiler_reset_allowed) and the "Boiler automatic resets" switch is on, it asks the box to
+    start (the box records it, so it counts towards the limits, or refuses), turns the boiler's plug off for 30
+    seconds and on again, waits for the box's verdict and says how it went. A second automation turns the plug
+    back on if it is ever left off during a reset (Home Assistant restarted in the middle)."""
+    js = json.dumps
+    sw = (s.get("roles") or {}).get("boiler_switch") or ""
+    head = "# Written by the solar monitor (boiler module); edits are overwritten.\n"
+    if not s.get("resets") or not hastates.ENTITY_RE.match(sw) or not sw.startswith("switch."):
+        return head + "# Automatic boiler resets are off (Setup > Boiler).\n"
+    off = engine.RESET_OFF_S
+    wait = engine.RESET_OFF_S + engine.HEAT_BACK_S + 5 * 60
+    lines = [
+        "input_boolean:",
+        "  solar_boiler_resets:",
+        "    name: Boiler automatic resets",
+        "    icon: mdi:restart",
+        "rest_command:",
+        "  solar_boiler_reset_started:",
+        f"    url: \"http://127.0.0.1:{int(port)}/boiler/reset-started\"",
+        "    method: POST",
+        "    headers:",
+        f"      Authorization: {js('Bearer ' + token(stack))}",
+        "    timeout: 10",
+        "automation:",
+        "  - id: solar_boiler_reset",
+        "    alias: \"Solar: boiler reset\"",
+        "    description: \"Power-cycles the boiler when the solar monitor finds a fault it may reset (limits: 1 per 6 h, 2 per 24 h).\"",
+        "    mode: single",
+        "    max_exceeded: silent",
+        "    triggers:",
+        "      - trigger: state",
+        "        entity_id: binary_sensor.site_boiler_reset_allowed",
+        "        to: \"on\"",
+        "    conditions:",
+        "      - condition: state",
+        "        entity_id: input_boolean.solar_boiler_resets",
+        "        state: \"on\"",
+        "    actions:",
+        "      - action: rest_command.solar_boiler_reset_started",
+        "        response_variable: started",
+        "        continue_on_error: true",
+        "      - condition: template",
+        "        value_template: \"{{ started is defined and started.status == 200 }}\"",
+        "      - action: script.solar_notify",
+        "        data:",
+        "          tag: boiler_reset",
+        "          title: Boiler reset",
+        f"          message: \"{{{{ states('sensor.site_boiler_fault') }}}}: turning the boiler off for {off} seconds and on again.\"",
+        "          priority: warning",
+        "      - action: switch.turn_off",
+        f"        target: {{entity_id: {sw}}}",
+        f"      - delay: {{seconds: {off}}}",
+        "      - action: switch.turn_on",
+        f"        target: {{entity_id: {sw}}}",
+        "      - wait_template: \"{{ states('sensor.site_boiler_reset_state') in ['heat back', 'failed'] }}\"",
+        f"        timeout: {{seconds: {wait}}}",
+        "      - choose:",
+        "          - conditions: \"{{ is_state('sensor.site_boiler_reset_state', 'heat back') }}\"",
+        "            sequence:",
+        "              - action: script.solar_notify",
+        "                data:",
+        "                  tag: boiler_reset",
+        "                  title: Boiler running again",
+        "                  message: \"The boiler is heating again after the reset.\"",
+        "                  priority: info",
+        "        default:",
+        "          - action: script.solar_notify",
+        "            data:",
+        "              tag: boiler_reset",
+        "              title: Boiler did not restart",
+        "              message: \"No heat came back after the reset. Check the boiler (its display shows the fault code).\"",
+        "              priority: critical",
+        "  - id: solar_boiler_reset_plug_back_on",
+        "    alias: \"Solar: boiler plug back on after a reset\"",
+        "    mode: single",
+        "    triggers:",
+        "      - trigger: state",
+        f"        entity_id: {sw}",
+        "        to: \"off\"",
+        "        for: {minutes: 2}",
+        "      - trigger: time_pattern",          # also after a Home Assistant restart in the middle of a reset
+        "        minutes: \"/2\"",
+        "    conditions:",
+        "      - condition: state",
+        "        entity_id: sensor.site_boiler_reset_state",
+        "        state: resetting",
+        "      - condition: state",
+        f"        entity_id: {sw}",
+        "        state: \"off\"",
+        "    actions:",
+        "      - action: switch.turn_on",
+        f"        target: {{entity_id: {sw}}}",
+    ]
+    return head + "\n".join(lines) + "\n"
+
+
+def apply_package(stack, on=None):
+    """Write packages/solar_boiler.yaml; restart Home Assistant (in the background) if it changed. True if so.
+    on: whether the module is on (None: as it is now; on_disable runs while it still is)."""
+    import modules
+    s = settings(stack)
+    if on is None:
+        on = any(m.id == "boiler" for m in modules.enabled(stack))
+    p = os.path.join(stack, "homeassistant", "packages", "solar_boiler.yaml")
+    if not os.path.isdir(os.path.dirname(p)):
+        return False
+    if not ss.write_if_changed(p, package(stack, s if on else {**s, "resets": False}), 0o644):
+        return False
+    def run():
+        try:
+            subprocess.run(ss.compose_cmd(stack) + ["restart", "homeassistant"], capture_output=True, text=True)
+        except OSError:
+            pass
+    threading.Thread(target=run, daemon=True).start()
+    return True
+
+
+def reset_started(stack, form):
+    """POST /boiler/reset-started from Home Assistant's reset automation (its token in the Authorization header)."""
+    if not secrets.compare_digest(form.get("_bearer", ""), token(stack)):
+        return Response(403, body="forbidden", ctype="text/plain")
+    why = engine.start_reset(stack)
+    return Response(409, body=why, ctype="text/plain") if why else Response(body="ok", ctype="text/plain")
+
+
+def clear(stack, form):
+    """POST /boiler/clear: the reset limit is cleared (the boiler has been checked)."""
+    engine.note_request(stack, "cleared")
+    return Response(location="/boiler")
+
+
+def _on_enable(stack):
+    apply_package(stack, True)
+
+
+def _on_disable(stack):
+    if os.path.exists(os.path.join(stack, "homeassistant", "packages", "solar_boiler.yaml")):
+        apply_package(stack, False)
 
 
 def _us(stack, site=None):
@@ -90,6 +248,14 @@ def form_section(stack):
     need = (f"<p><b>Still needed:</b> {e(', '.join(missing))}. The module watches nothing until the three required "
             f"temperatures are chosen.</p>" if missing else "")
     unit = "°F" if us else "°C"
+    days = (time.time() - (engine.load(stack).get("since") or time.time())) / 86400
+    resets = (f"<div class='row'><label><input type='checkbox' name='bo_resets'{' checked' if s.get('resets') else ''}> "
+              f"Automatic resets: Home Assistant turns the boiler's plug off and on when it finds a fault (at most 1 per 6 hours, "
+              f"2 per 24 hours)</label></div><small>Needs the boiler plug's switch and power, and the thermostat. In Home "
+              f"Assistant, the <i>Boiler automatic resets</i> switch turns them off for the summer. "
+              + (f"<b>The boiler has been watched for {days:.1f} days: check a week of the fault log on the boiler page for "
+                 f"false faults before turning this on.</b>" if days < 7 else f"Watched for {days:.0f} days.")
+              + "</small>")
     fluids = "".join(f"<option value='{k}'{' selected' if s.get('fluid', 'water') == k else ''}>{e(t)} ({f})</option>"
                      for k, t, f in engine.FLUIDS)
     conv = (lambda c: round(c * 9 / 5 + 32)) if us else (lambda c: round(c, 1))
@@ -103,6 +269,7 @@ matter. Three temperatures are required; each other role adds a signal. Monitori
 nothing is reset. <a href="/boiler">Boiler page</a></small>
 {need}{''.join(lists.values())}
 {''.join(rows)}
+{resets}
 <div class="row"><label><input type="checkbox" name="bo_alerts"{' checked' if s.get('alerts') else ''}> Send alerts (floor too hot,
 freeze risk, sensors offline)</label></div>
 <div class="row"><label>Floor supply too hot above ({unit}) <input name="bo_floor_max" type="number" step="any" value="{conv(float(s['floor_max_c']))}"></label>
@@ -147,7 +314,13 @@ def _parse(stack, form):
     fluid = form.get("bo_fluid") or "water"
     if fluid not in engine.FLUID:
         raise FieldError("bo_fluid", "pick the heating fluid")
-    out.update(floor_gpm=gpm, fluid=fluid)
+    out.update(floor_gpm=gpm, fluid=fluid, resets=bool(form.get("bo_resets")))
+    if out["resets"]:
+        missing = [engine.ROLE[k][1] for k in ("boiler_switch", "boiler_power") if not roles.get(k)]
+        if not roles.get("thermostat") and not roles.get("heat_call"):
+            missing.append("Thermostat (or the wired call for heat)")
+        if missing:
+            raise FieldError("bo_resets", "automatic resets need: " + ", ".join(missing))
     return out
 
 
@@ -160,8 +333,9 @@ def form_save(stack, form):
     new = _parse(stack, form)
     before = chosen(stack)
     modules.save(stack, "boiler", new)
-    if chosen(stack) != before and hastates.apply(stack):
-        return ["Home Assistant restarting to publish the boiler's entities"]
+    restarted = chosen(stack) != before and hastates.apply(stack)
+    if apply_package(stack) or restarted:
+        return ["Home Assistant restarting for the boiler's entities and reset automation"]
     return []
 
 
@@ -260,6 +434,7 @@ a week of this has been checked for false faults.</small></p>
 <p><small><a href="/setup#boiler">Choose them in setup</a></small></p>
 <h2>Learned</h2><ul>{offs}<li>Boiler plug: {lvl}</li></ul>
 <h3>Outdoor reset (boiler supply while heating)</h3><table><tr><th>Outdoor</th><th>Boiler supply</th><th>Minutes</th></tr>{curve}</table>
+{_resets_html(s, v, us, when)}
 <h2>Burner runs</h2><table><tr><th>Started</th><th>Length</th><th>Kind</th><th>Boiler supply</th><th>Outdoor</th></tr>{runs}</table>
 <h2>Per day</h2><table><tr><th>Day</th><th>Runs</th><th>Burner (min)</th><th>Heating (min)</th><th>Hot water (min)</th><th>Faults</th></tr>{days}</table>
 <h2>Faults and alerts</h2><table><tr><th>When</th><th>Kind</th><th>What</th><th>Done</th><th>Cleared</th></tr>{log}</table>
@@ -270,6 +445,27 @@ burner ran, stopped, and the boiler supply fell to the floor return's temperatur
     return Response(title="Boiler", body=body)
 
 
+def _resets_html(s, v, us, when):
+    e = html.escape
+    rs, last = v["resets"], v["last"] or {}
+    if not s.get("resets"):
+        return "<h2>Resets</h2><p>Off: faults are logged only. <a href='/setup#boiler'>Turn on in setup</a>.</p>"
+    status = ("<b>The reset limit was reached</b>: faults only send alerts until the boiler has been checked. "
+              "<form method='post' action='/boiler/clear' style='display:inline'><button>Clear</button></form>"
+              if rs.get("locked") else
+              f"Waiting for Home Assistant to reset: {e(last.get('reset_fault', ''))}" if last.get("reset_allowed") else
+              f"Not resetting: {e(last['reset_why'])}" if last.get("reset_why") else "No fault.")
+    rows = "".join(f"<tr><td>{when(a['at'])}</td><td>{e(a.get('fault') or '')}</td><td>{e(a.get('result') or 'running')}</td>"
+                   f"<td>{_t(a.get('supply0'), us, 0)} &rarr; {_t((a.get('after') or {}).get('boiler_supply'), us, 0)}</td></tr>"
+                   for a in reversed(rs["attempts"][-20:])) or "<tr><td colspan=4>None yet.</td></tr>"
+    return (f"<h2>Resets</h2><p>{status} State: {e(last.get('reset_state', 'idle'))}.</p>"
+            f"<table><tr><th>When</th><th>Fault</th><th>Result</th><th>Boiler supply</th></tr>{rows}</table>"
+            f"<p><small>At most {engine.LIMITS[0][1]} reset per 6 hours and {engine.LIMITS[1][1]} per 24 hours; once the limit is "
+            f"reached, faults only alert until <i>Clear</i> or 24 hours without a fault. Heat is back when the burner runs, the "
+            f"boiler supply has risen 5 °C and the floor supply is climbing, within 20 minutes. Never while propane is under "
+            f"10%, a sensor is offline or Home Assistant's <i>Boiler automatic resets</i> switch is off.</small></p>")
+
+
 def ha_fields(stack, site):
     s = settings(stack)
     v = engine.summary(stack, s)
@@ -278,7 +474,13 @@ def ha_fields(stack, site):
     return {"boiler_state": last.get("state") if fresh else None, "boiler_fault": v["fault"] or "",
             "boiler_floor_difference": last.get("floor_diff") if fresh else None,
             "boiler_burner_minutes_today": round(v["today"].get("burner_min", 0)) if v["today"] else 0,
-            "boiler_heat_output": last.get("output") if fresh else None}
+            "boiler_heat_output": last.get("output") if fresh else None,
+            # the reset automation's inputs (packages/solar_boiler.yaml); never allowed from a stale state
+            "boiler_reset_allowed": bool(fresh and last.get("reset_allowed")
+                                         and time.time() - engine.reset_requests(stack).get("started", 0)
+                                         > engine.RESET_OFF_S + engine.HEAT_BACK_S),
+            "boiler_reset_state": last.get("reset_state", "idle") if fresh else "idle",
+            "boiler_reset_blocked": last.get("reset_why", "") if fresh else ""}
 
 
 def _propane(stack):
@@ -333,7 +535,12 @@ def every_minute(stack):
     def alert(tag, title, message, priority):
         return notify.alert(stack, tag, title, message, priority)
     now = time.time()
-    msgs = engine.step(stack, s, engine.readings(stack, s), now, engine.outdoor_c(stack, now), alert)
+    season = None
+    if s.get("resets"):
+        cur = hastates.get(stack, engine.SEASON)
+        season = None if not cur or cur.get("state") not in ("on", "off") else cur["state"] == "on"
+    ctx = {"propane": _propane(stack), "season": season}
+    msgs = engine.step(stack, s, engine.readings(stack, s), now, engine.outdoor_c(stack, now), alert, ctx)
     try:
         engine.vm_push(stack)
     except OSError:
@@ -353,7 +560,9 @@ MODULE = Module(
     form_save=form_save,
     card=card,
     nav=("/boiler", "Boiler", "Boiler"),
-    routes={("GET", "/boiler"): page},
+    routes={("GET", "/boiler"): page, ("POST", "/boiler/reset-started"): reset_started, ("POST", "/boiler/clear"): clear},
+    on_enable=_on_enable,
+    on_disable=_on_disable,
     ha_fields=ha_fields,
     ha_entities=chosen,
     display_panel=display_panel,

@@ -65,7 +65,19 @@ FLUIDS = (("water", "Water", 500), ("pg30", "Propylene glycol 30%", 477), ("pg40
           ("pg50", "Propylene glycol 50%", 452), ("eg50", "Ethylene glycol 50%", 428))
 FLUID = {k: f for k, _, f in FLUIDS}
 DEFAULTS = {"roles": {r[0]: "" for r in ROLES}, "alerts": True, "floor_max_c": 50.0, "freeze_c": 10.0, "burner_w": "",
-            "floor_gpm": "", "fluid": "water"}
+            "floor_gpm": "", "fluid": "water", "resets": False}
+
+# Resets (the Home Assistant automation in packages/solar_boiler.yaml switches the plug; the box decides whether it may)
+RESET_OFF_S = 30                # the plug is off this long
+HEAT_BACK_S = 20 * 60           # after it is back on, heat must be back within this
+HEAT_BACK_FLOOR_C = 0.5         # ... the floor supply climbing at least this much
+LIMITS = ((6 * 3600, 1), (24 * 3600, 2))   # at most 1 reset per 6 hours and 2 per 24 hours
+UNLOCK_S = 24 * 3600            # after the limit: faults only notify until Clear, or this long with no fault
+NOT_STARTED_S = 10 * 60         # allowed this long with no reset from Home Assistant: say so
+PROPANE_MIN = 10.0
+PROPANE_AGE_S = 6 * 3600
+SEASON = "input_boolean.solar_boiler_resets"   # Home Assistant's switch: "Boiler automatic resets" (the heating season)
+KEEP_ATTEMPTS = 100
 
 HIST_S = 3600                   # temperatures kept for rises and baselines
 QUIET_S = 30 * 60               # no heat flowing this long before the probe pairs are zeroed
@@ -253,9 +265,10 @@ def _hist_at(st, now, age):
 # --------------------------------------------------------------------------
 # Every minute
 # --------------------------------------------------------------------------
-def step(stack, s, r, now=None, outdoor=None, alert=None):
-    """One minute: learn, class, check the rules. `r` is readings(); `alert(tag, title, message, priority)` sends.
-    Returns messages to log."""
+def step(stack, s, r, now=None, outdoor=None, alert=None, ctx=None):
+    """One minute: learn, class, check the rules, and decide whether a reset may run. `r` is readings();
+    `alert(tag, title, message, priority)` sends; ctx = {"propane": the propane module's summary or None (module
+    off), "season": Home Assistant's resets switch (True, False, None = not known)}. Returns messages to log."""
     now = now if now is not None else time.time()
     st = load(stack)
     msgs = []
@@ -409,7 +422,7 @@ def step(stack, s, r, now=None, outdoor=None, alert=None):
                 st["active"][name] = now
                 detail = _detail(name, s, t, offline, roles)
                 entry = {"at": now, "rule": name, "kind": kind, "title": title, "detail": detail, "readings": snapshot,
-                         "action": "logged; resets are not on yet" if kind == "fault" else
+                         "action": ("see Resets" if s.get("resets") else "logged; resets are off") if kind == "fault" else
                                    ("alert sent" if kind == "alert" and s.get("alerts") else "logged")}
                 if kind == "fault":
                     day["faults"] += 1
@@ -431,14 +444,148 @@ def step(stack, s, r, now=None, outdoor=None, alert=None):
                     alert(f"boiler_{name}", "", "clear", "info")
                 msgs.append(f"cleared: {RULE[name][3]}")
 
+    reset = resets_step(stack, st, s, r, t, burner, now, alert, msgs, offline, ctx or {})
+
     st["days"] = dict(sorted(st["days"].items())[-KEEP_DAYS:])
-    st["last"] = {"t": now, "state": state, "burner": burner, "calling": calling, "pumps": pumps, "dhw": dhw,
+    st["last"] = {**reset, "t": now, "state": state, "burner": burner, "calling": calling, "pumps": pumps, "dhw": dhw,
                   "power": power, "outdoor": outdoor, "temps": {k: round(v, 2) for k, v in t.items()},
                   "floor_diff": None if floor_diff is None else round(floor_diff, 2), "missing": missing,
                   "output": output, "flowing": flowing,
                   "offline": offline}
     save(stack, st)
     return msgs
+
+
+def _started_file(stack):
+    return os.path.join(stack, "state", "boiler-reset.json")
+
+
+def reset_requests(stack):
+    """What the web service recorded for the collector: {"started": time of the last reset Home Assistant started,
+    "cleared": time of the last Clear}. Kept apart from boiler.json, which only the collector writes."""
+    return ss.load_json(_started_file(stack), {})
+
+
+def note_request(stack, key, now=None):
+    d = reset_requests(stack)
+    d[key] = now or time.time()
+    ss.write_if_changed(_started_file(stack), json.dumps(d) + "\n", 0o644)
+
+
+def _gate(st, s, r, now, offline, ctx):
+    """Why a reset may not run now ("" = it may)."""
+    rs = st["resets"]
+    roles = s.get("roles") or {}
+    if not roles.get("boiler_switch"):
+        return "no boiler plug switch chosen"
+    if rs["attempts"] and rs["attempts"][-1].get("result") is None:
+        return "a reset is running"
+    locked = "the reset limit was reached: press Clear on the boiler page once the boiler has been checked"
+    if rs.get("locked"):
+        return locked
+    for span, most in sorted(LIMITS, reverse=True):     # the longest first: reaching it locks
+        n = sum(1 for a in rs["attempts"] if now - a["at"] < span and a["at"] > rs.get("cleared", 0))  # Clear starts afresh
+        if n >= most:
+            if span == max(sp for sp, _ in LIMITS):
+                rs["locked"] = now
+                return locked
+            return f"{n} reset{'s' if n > 1 else ''} in the last {span // 3600} hours"
+    need = [k for k in REQUIRED + ("boiler_power", "boiler_switch", "thermostat", "heat_call") if roles.get(k)]
+    down = [ROLE[k][1] for k in need if k in offline or k not in r]
+    if down:
+        return "no reading from " + ", ".join(down)
+    pr = ctx.get("propane")
+    if pr is not None:
+        if pr.get("percent") is None or (pr.get("reading_age") or 0) > PROPANE_AGE_S:
+            return "no recent propane reading"
+        if pr["percent"] < PROPANE_MIN:
+            return f"propane low ({pr['percent']:.0f}%): a reset won't help"
+    if ctx.get("season") is False:
+        return "Home Assistant's \"Boiler automatic resets\" switch is off"
+    return ""
+
+
+def resets_step(stack, st, s, r, t, burner, now, alert, msgs, offline, ctx):
+    """Resets: record a reset Home Assistant started, judge whether heat came back, keep the limits, and decide
+    whether the next one may run. Returns the fields for st["last"]."""
+    rs = st.setdefault("resets", {"attempts": [], "locked": None, "last_fault": 0, "cleared": 0, "allowed_since": None})
+    req = reset_requests(stack)
+    fault = next((n for n in st["active"] if RULE[n][1] == "fault"), None)
+    if fault:
+        rs["last_fault"] = now
+    if req.get("cleared", 0) > rs.get("cleared", 0):
+        rs["cleared"] = req["cleared"]
+        if rs.get("locked"):
+            rs["locked"] = None
+            msgs.append("resets: cleared by hand")
+    if rs.get("locked") and now - rs.get("last_fault", 0) >= UNLOCK_S:
+        rs["locked"] = None
+        msgs.append("resets: 24 hours without a fault, limit cleared")
+    # a reset Home Assistant started (the web service noted it)
+    last_at = rs["attempts"][-1]["at"] if rs["attempts"] else 0
+    if req.get("started", 0) > last_at:
+        rs["attempts"].append({"at": req["started"], "fault": RULE[fault][3] if fault else "", "result": None,
+                               "supply0": t.get("boiler_supply"), "floor0": t.get("floor_supply"),
+                               "readings": {k: round(v, 1) for k, v in t.items()}})
+        rs["attempts"] = rs["attempts"][-KEEP_ATTEMPTS:]
+        msgs.append(f"resets: Home Assistant started a reset ({RULE[fault][3] if fault else 'no fault now'})")
+    att = rs["attempts"][-1] if rs["attempts"] and rs["attempts"][-1].get("result") is None else None
+    if att:
+        back_on = att["at"] + RESET_OFF_S
+        supply, floor = t.get("boiler_supply"), t.get("floor_supply")
+        if supply is not None and att.get("supply0") is None:
+            att["supply0"] = supply
+        if floor is not None and att.get("floor0") is None:
+            att["floor0"] = floor
+        heat = (now >= back_on and bool(burner) and supply is not None and floor is not None
+                and supply - att["supply0"] >= NO_HEAT_C and floor - att["floor0"] >= HEAT_BACK_FLOOR_C)
+        if heat or now - back_on >= HEAT_BACK_S:
+            att["result"], att["result_at"] = ("heat back" if heat else "failed"), now
+            att["after"] = {k: round(v, 1) for k, v in t.items()}
+            msgs.append(f"resets: {att['result']} after {(now - att['at']) / 60:.0f} min")
+    why = _gate(st, s, r, now, offline, ctx) if (fault and s.get("resets")) else ""
+    allowed = bool(fault and s.get("resets") and not why)
+    rs["allowed_since"] = (rs.get("allowed_since") or now) if allowed else None
+    # a fault that won't be reset is sent at once (with the reason); one Home Assistant never acts on, after 10 minutes
+    tag = "boiler_fault"
+    if fault and s.get("resets") and (why and why != "a reset is running"
+                                      or (allowed and now - rs["allowed_since"] >= NOT_STARTED_S)):
+        text = (f"{RULE[fault][3]}. Not reset: {why}." if why else
+                f"{RULE[fault][3]}. A reset is allowed but Home Assistant hasn't started one: check its \"Solar: boiler "
+                f"reset\" automation.")
+        if rs.get("alerted") != text and alert:
+            err = alert(tag, "Boiler fault", text, "critical")
+            rs["alerted"] = text if not err else None
+            msgs.append(f"resets: alert: {text}" + (f" (not sent: {err})" if err else ""))
+    elif not fault and rs.get("alerted"):
+        if alert:
+            alert(tag, "", "clear", "info")
+        rs["alerted"] = None
+    last_att = rs["attempts"][-1] if rs["attempts"] else None
+    if att and att.get("result") is None:
+        reset_state = "resetting"
+    elif last_att and now - last_att.get("result_at", 0) < 3600:
+        reset_state = last_att["result"]
+    else:
+        reset_state = "idle"
+    return {"reset_allowed": allowed, "reset_why": why, "reset_state": reset_state,
+            "reset_fault": RULE[fault][3] if fault else "", "reset_locked": bool(rs.get("locked"))}
+
+
+def start_reset(stack, now=None):
+    """Home Assistant asks to start a reset (POST /boiler/reset-started): "" if it may (and it is recorded, so
+    it counts towards the limits), else why not."""
+    now = now or time.time()
+    st = load(stack)
+    last = st["last"] or {}
+    if not last.get("t") or now - last["t"] > 180:
+        return "the boiler module has no recent state"
+    if not last.get("reset_allowed"):
+        return last.get("reset_why") or "no fault the box would reset"
+    if now - reset_requests(stack).get("started", 0) < RESET_OFF_S + HEAT_BACK_S:
+        return "a reset is running"
+    note_request(stack, "started", now)
+    return ""
 
 
 def _detail(name, s, t, offline, roles):
@@ -489,4 +636,5 @@ def summary(stack, s, now=None):
             "levels": levels(st, s), "learned_levels": st.get("levels"), "power_samples": sum(st["power_bins"].values()),
             "offsets": st["offsets"], "curve": st["curve"], "runs": st["runs"], "run": st["run"], "days": st["days"],
             "log": st["log"], "active": st["active"], "since": st["since"],
+            "resets": st.get("resets") or {"attempts": [], "locked": None},
             "fault": next((RULE[n][3] for n in st["active"] if RULE[n][1] == "fault"), None)}

@@ -89,6 +89,16 @@ rest:
         unit_of_measurement: BTU/h
         state_class: measurement
         icon: mdi:heat-wave
+      - name: Site boiler reset state
+        unique_id: site_boiler_reset_state
+        availability: "{{ value_json.boiler_reset_state is defined }}"
+        value_template: "{{ value_json.boiler_reset_state }}"
+        icon: mdi:restart
+      - name: Site boiler reset blocked
+        unique_id: site_boiler_reset_blocked
+        availability: "{{ value_json.boiler_reset_blocked is defined }}"
+        value_template: "{{ value_json.boiler_reset_blocked if value_json.boiler_reset_blocked else 'no' }}"
+        icon: mdi:restart-off
       - name: Site boiler burner today
         unique_id: site_boiler_burner_today
         availability: "{{ value_json.boiler_burner_minutes_today is defined }}"
@@ -276,6 +286,12 @@ rest:
         state_class: measurement
         icon: mdi:harddisk-remove
     binary_sensor:
+      # the boiler module: a fault it may reset now (packages/solar_boiler.yaml's automation does the reset)
+      - name: Site boiler reset allowed
+        unique_id: site_boiler_reset_allowed
+        availability: "{{ value_json.boiler_reset_allowed is defined }}"
+        value_template: "{{ value_json.boiler_reset_allowed }}"
+        icon: mdi:restart-alert
       - name: Site data stale
         unique_id: site_data_stale
         value_template: "{{ value_json.data_stale }}"

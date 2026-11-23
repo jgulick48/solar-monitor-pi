@@ -907,7 +907,12 @@ class Handler(BaseHTTPRequestHandler):
         mod, fn = modules.route(STACK, method, url_path)
         if not fn:
             return False
-        r = fn(STACK, self.form() if method == "POST" else {})
+        form = self.form() if method == "POST" else {}
+        auth = self.headers.get("Authorization") or ""
+        form.pop("_bearer", None)                 # only ever from the header
+        if auth.startswith("Bearer "):
+            form["_bearer"] = auth[7:].strip()    # a token from Home Assistant's rest_command (not in the logged payload)
+        r = fn(STACK, form)
         if r.location:
             self.send(303, "", extra={"Location": r.location})
         elif r.ctype:
