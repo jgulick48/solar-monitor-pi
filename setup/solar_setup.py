@@ -476,13 +476,16 @@ def notify_package(stack, port=80):
     phones through a webhook automation (local network only; the id is this box's secret)."""
     import notify
     js = json.dumps
-    payload = ("token=" + notify.box_token(stack) + "&tag={{ tag | urlencode }}&title={{ title | urlencode }}"
+    # the token goes in a header: Home Assistant logs a rest_command's payload when the call fails
+    payload = ("tag={{ tag | urlencode }}&title={{ title | urlencode }}"
                "&message={{ message | urlencode }}&priority={{ priority | default('') | urlencode }}")
     rest = [
         "rest_command:",
         "  solar_notify_box:",
         f"    url: \"http://127.0.0.1:{int(port)}/notify/send\"",
         "    method: POST",
+        "    headers:",
+        f"      Authorization: {js('Bearer ' + notify.box_token(stack))}",
         "    content_type: application/x-www-form-urlencoded",
         f"    payload: {js(payload)}",
         "    timeout: 5",

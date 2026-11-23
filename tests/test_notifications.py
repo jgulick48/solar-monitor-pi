@@ -192,7 +192,9 @@ class HomeAssistantHandOff(Base):
         pkg = ss.site_package({}, "solar-test-id", ss.notify_package(self.stack))
         self.assertEqual(pkg.count("\nautomation:\n"), 1)
         self.assertIn("rest_command:\n  solar_notify_box:\n    url: \"http://127.0.0.1:80/notify/send\"", pkg)
-        self.assertIn("token=" + notify.box_token(self.stack) + "&tag={{ tag | urlencode }}", pkg)
+        self.assertIn("payload: \"tag={{ tag | urlencode }}&title=", pkg)
+        self.assertNotIn("token=", pkg)                       # never in the payload Home Assistant logs
+        self.assertIn(f"      Authorization: \"Bearer {notify.box_token(self.stack)}\"", pkg)
         self.assertIn(f"webhook_id: \"{notify.ha_webhook(self.stack)}\"", pkg)
         self.assertIn("- id: solar_test_notification", pkg)
         self.assertIn("{{ trigger.json.phones | select('in', integration_entities('mobile_app')", pkg)
@@ -227,8 +229,38 @@ class HomeAssistantHandOff(Base):
                     break
                 time.sleep(0.02)
             self.assertEqual(got, [{"tag": "battery_low", "title": "Battery low", "message": "18%", "priority": ""}])
+            # the token in the Authorization header (solar_web puts it in _bearer); a wrong one isn't saved by the payload's
+            self.assertEqual(notifications.receive(self.stack, {"_bearer": notify.box_token(self.stack), "tag": "x"}).code, 200)
+            self.assertEqual(notifications.receive(self.stack, {"_bearer": "wrong", "token": notify.box_token(self.stack)}).code, 403)
         finally:
             notify.submit = old
+
+    def test_receive_through_the_web_service(self):
+        """The header reaches the route; a "_bearer" field in the payload is never taken for it."""
+        import urllib.error
+        import urllib.request
+        import solar_web
+        solar_web.STACK = self.stack
+        modules.set_enabled(self.stack, "notifications", True)
+        old = notify.submit
+        notify.submit = lambda stack, s, a, voice_on=False: None
+        web = http.server.ThreadingHTTPServer(("127.0.0.1", 0), solar_web.Handler)
+        threading.Thread(target=web.serve_forever, daemon=True).start()
+        def post(body, auth=None):
+            req = urllib.request.Request(f"http://127.0.0.1:{web.server_port}/notify/send", data=body.encode(), method="POST",
+                                         headers={"Authorization": auth} if auth else {})
+            try:
+                return urllib.request.urlopen(req).status
+            except urllib.error.HTTPError as e:
+                return e.code
+        try:
+            tok = notify.box_token(self.stack)
+            self.assertEqual(post("tag=x&title=t&message=m", "Bearer " + tok), 200)
+            self.assertEqual(post("tag=x&_bearer=" + tok), 403)
+            self.assertEqual(post("tag=x", "Bearer nope"), 403)
+        finally:
+            notify.submit = old
+            web.shutdown()
 
 
 class Settings(Base):
