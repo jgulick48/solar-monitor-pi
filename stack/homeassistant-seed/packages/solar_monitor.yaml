@@ -64,6 +64,30 @@ rest:
         value_template: "{{ value_json.propane_used_yesterday }}"
         unit_of_measurement: gal
         icon: mdi:gas-cylinder
+      # Boiler module (monitoring only; the probes, plugs and thermostat are Home Assistant's own entities)
+      - name: Site boiler state
+        unique_id: site_boiler_state
+        availability: "{{ value_json.boiler_state is defined and value_json.boiler_state is not none }}"
+        value_template: "{{ value_json.boiler_state }}"
+        icon: mdi:water-boiler
+      - name: Site boiler fault
+        unique_id: site_boiler_fault
+        availability: "{{ value_json.boiler_fault is defined }}"
+        value_template: "{{ value_json.boiler_fault if value_json.boiler_fault else 'none' }}"
+        icon: mdi:water-boiler-alert
+      - name: Site floor heat difference
+        unique_id: site_floor_heat_difference
+        availability: "{{ value_json.boiler_floor_difference is defined and value_json.boiler_floor_difference is not none }}"
+        value_template: "{{ value_json.boiler_floor_difference }}"
+        unit_of_measurement: "°C"
+        state_class: measurement   # no device_class: Home Assistant would convert a difference as a temperature
+        icon: mdi:thermometer-lines
+      - name: Site boiler burner today
+        unique_id: site_boiler_burner_today
+        availability: "{{ value_json.boiler_burner_minutes_today is defined }}"
+        value_template: "{{ value_json.boiler_burner_minutes_today }}"
+        unit_of_measurement: min
+        icon: mdi:fire
       - name: Site solar today
         unique_id: site_solar_today
         value_template: "{{ value_json.solar_today }}"

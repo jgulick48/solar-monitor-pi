@@ -1,0 +1,453 @@
+"""Boiler: watches the boiler and the floor heating, monitoring only (wiki: "Boiler, propane and notifications"). The
+boiler module (modules/boiler) is its switch and settings; this file does the work.
+
+Every reading comes from Home Assistant through the HA state feed (hastates.get): the probe board's temperatures, the
+thermostat, the boiler's and water pump's metering plugs, and the optional pump clamps and wired call for heat. The
+owner picks which Home Assistant entity fills each role; three are required (floor supply, floor return, boiler
+supply), the rest add accuracy or a signal. Every minute the collector calls step(), which:
+
+  * learns each probe pair's offset (floor supply/return, boiler supply/return) while no heat flows: both probes then
+    sit in the same still water, so the difference they show is their own error (DS18B20s are +-0.5 C each)
+  * learns the boiler plug's power levels (controls only, pump, pump + fan + burner) from a week of readings, so it
+    knows when the burner runs
+  * classes each minute and each burner run: heating, hot water (the hot-water outlet probe jumps, or the water pump
+    runs, while the burner fires), idle or unclear
+  * learns the boiler's supply temperature against the outdoor temperature (its outdoor reset curve)
+  * checks the three fault rules the reset automation will act on later (not running on demand, running but no heat,
+    stopped during a call) and LOGS them: nothing is switched in this step of the rollout
+  * sends the alerts that never reset anything: floor supply too hot, freeze risk, a device offline
+
+  state/boiler.json   {"since", "last", "hist", "offsets", "power_bins", "levels", "run", "call", "runs", "days",
+                       "curve", "timers", "active", "log", "dhw_last", "quiet_since"}
+"""
+import json
+import math
+import os
+import time
+import urllib.request
+
+import hastates
+import solar_setup as ss
+
+VM = "http://127.0.0.1:8428"
+
+# role, label, kind, need ("required" | "recommended" | "optional"), what it gives
+ROLES = (
+    ("floor_supply", "Floor supply", "temperature", "required",
+     "with floor return, the heat delivered to the floor; the floor-too-hot alert"),
+    ("floor_return", "Floor return", "temperature", "required", "see floor supply; the freeze-risk alert"),
+    ("boiler_supply", "Boiler supply", "temperature", "required",
+     "whether the boiler heats and how hot; its outdoor reset curve; the fault rules"),
+    ("boiler_return", "Boiler return", "temperature", "optional",
+     "whether the boiler condenses (return under about 54 °C / 130 °F), and the boiler loop's own difference"),
+    ("hot_water", "Hot water outlet", "temperature", "optional",
+     "tells a hot-water draw from heating at once (without it, the water pump's plug does)"),
+    ("slab_near", "Slab near boiler", "temperature", "optional", "how the floor itself responds and lags"),
+    ("slab_far", "Slab far", "temperature", "optional", "with slab near, how evenly the slab heats"),
+    ("thermostat", "Thermostat", "climate", "recommended", "the call for heat: the fault rules need it"),
+    ("heat_call", "Wired call for heat", "binary_sensor", "optional", "the call for heat without relying on the thermostat"),
+    ("boiler_power", "Boiler plug power", "power", "recommended", "whether the burner runs: the fault rules need it"),
+    ("boiler_switch", "Boiler plug switch", "switch", "optional", "recorded now; the reset automation (a later step) switches it"),
+    ("water_pump_power", "Water pump plug power", "power", "optional", "backs up the hot-water detection"),
+    ("boiler_pump_current", "Boiler pump current", "current", "optional", "the boiler pump really running"),
+    ("floor_pump_current", "Floor pump current", "current", "optional", "the floor pump really running"),
+)
+ROLE = {r[0]: r for r in ROLES}
+REQUIRED = tuple(r[0] for r in ROLES if r[3] == "required")
+TEMPS = tuple(r[0] for r in ROLES if r[2] == "temperature")
+PAIRS = (("floor", "floor_supply", "floor_return"), ("boiler", "boiler_supply", "boiler_return"))
+# what Home Assistant's entity registry offers for each kind of role: (domains, device_class)
+KINDS = {"temperature": (("sensor",), "temperature"), "power": (("sensor",), "power"), "current": (("sensor",), "current"),
+         "climate": (("climate",), None), "binary_sensor": (("binary_sensor",), None), "switch": (("switch",), None)}
+
+DEFAULTS = {"roles": {r[0]: "" for r in ROLES}, "alerts": True, "floor_max_c": 50.0, "freeze_c": 10.0, "burner_w": ""}
+
+HIST_S = 3600                   # temperatures kept for rises and baselines
+QUIET_S = 30 * 60               # no heat flowing this long before the probe pairs are zeroed
+STILL_C = 0.3                   # ... and both probes moved less than this over the last 10 minutes
+OFFSET_MAX_C = 2.0              # a pair further apart than this at rest is a probe problem, not an offset
+OFFSET_ALPHA = 0.05
+LEARN_SAMPLES = 24 * 60         # a day of plug readings before its power levels are trusted
+BIN_W = 5
+PUMP_ON_A = 0.3
+WATER_PUMP_ON_W = 30
+DHW_RISE_C = 8.0                # the hot-water outlet this far over its last hour's low: water is being drawn
+DHW_PAUSE_S = 600               # fault rules wait this long after a hot-water draw
+RUN_CHECK_S = 600               # a burner run must have raised the boiler supply by NO_HEAT_C within this
+NO_HEAT_C = 5.0
+CURVE_BIN_C = 5
+KEEP_RUNS, KEEP_LOG, KEEP_DAYS = 300, 200, 60
+
+STATES = {"idle": 0, "heating": 1, "hot water": 2, "unclear": 3, "offline": -1, "setup": -2}
+# (name, kind, hold seconds, title): kind "fault" = what the reset automation will act on (logged only for now);
+# "alert" = sent through the notifications module, never resets; "note" = logged only
+RULES = (
+    ("no_run", "fault", 15 * 60, "Not running on demand: the thermostat calls, the plug shows controls only"),
+    ("no_heat", "fault", 0, "Running but no heat: the burner draws power, the boiler supply hasn't risen 5 °C in 10 minutes"),
+    ("stopped", "fault", 10 * 60, "Stopped during a call: the burner stopped and the boiler supply is cold while the thermostat calls"),
+    ("floor_hot", "alert", 5 * 60, "Floor supply too hot"),
+    ("freeze", "alert", 5 * 60, "Freeze risk: floor return cold"),
+    ("offline", "alert", 30 * 60, "Boiler sensors offline"),
+    ("unexplained", "note", 30 * 60, "Burner running with no call for heat and no hot-water draw"),
+)
+RULE = {r[0]: r for r in RULES}
+
+
+def _path(stack):
+    return os.path.join(stack, "state", "boiler.json")
+
+
+def load(stack):
+    st = ss.load_json(_path(stack), {})
+    for k, v in (("since", None), ("last", {}), ("hist", []), ("offsets", {}), ("power_bins", {}), ("levels", None),
+                 ("run", None), ("call", None), ("runs", []), ("days", {}), ("curve", {}), ("timers", {}),
+                 ("active", {}), ("log", []), ("dhw_last", 0), ("quiet_since", None)):
+        st.setdefault(k, v)
+    return st
+
+
+def save(stack, st):
+    ss.write_if_changed(_path(stack), json.dumps(st, indent=1) + "\n", 0o644)
+
+
+# --------------------------------------------------------------------------
+# Readings
+# --------------------------------------------------------------------------
+def to_c(value, unit):
+    return (value - 32) * 5 / 9 if unit and "F" in str(unit) else value
+
+
+def reading(role, cur):
+    """One role's reading from its Home Assistant state: {"ok", "value", "raw"}; value in °C, W, A, or for the
+    thermostat and the call for heat True while calling."""
+    if not cur or cur.get("state") in (None, "unavailable", "unknown", ""):
+        return {"ok": False, "value": None, "raw": (cur or {}).get("state")}
+    kind, raw = ROLE[role][2], cur.get("state")
+    if kind == "climate":
+        action = str((cur.get("attributes") or {}).get("hvac_action") or "").lower()
+        return {"ok": True, "value": action in ("heating", "preheating") if action else None, "raw": action or raw}
+    if kind in ("binary_sensor", "switch"):
+        return {"ok": True, "value": str(raw).lower() == "on", "raw": raw}
+    v = hastates.number(raw)
+    if v is None:
+        return {"ok": False, "value": None, "raw": raw}
+    unit = cur.get("unit") or ""
+    if kind == "temperature":
+        v = to_c(v, unit)
+    elif kind == "power" and unit.lower() == "kw":
+        v *= 1000
+    return {"ok": True, "value": v, "raw": raw}
+
+
+def readings(stack, s):
+    roles = s.get("roles") or {}
+    return {r: reading(r, hastates.get(stack, roles[r])) for r in ROLE if roles.get(r)}
+
+
+def outdoor_c(stack, now=None):
+    """The outdoor temperature from the forecast the box already fetches (Open-Meteo), if fresh."""
+    fc = ss.load_json(os.path.join(stack, "state", "wx-forecast.json"), {})
+    t = (fc.get("current") or {}).get("temperature_2m")
+    if t is None or (now or time.time()) - fc.get("fetched", 0) > 3 * 3600:
+        return None
+    return round(to_c(t, "°F" if fc.get("units_us") else "°C"), 1)
+
+
+# --------------------------------------------------------------------------
+# Learning
+# --------------------------------------------------------------------------
+def power_levels(bins):
+    """Three power levels (controls only, pump, pump + fan + burner) from a histogram of plug readings, by k-means on
+    one dimension; None until there's a day of readings and three clearly separate levels."""
+    pts = sorted((float(k), n) for k, n in bins.items() if n)
+    total = sum(n for _, n in pts)
+    if total < LEARN_SAMPLES:
+        return None
+    def pct(p):
+        acc = 0
+        for v, n in pts:
+            acc += n
+            if acc >= p * total:
+                return v
+        return pts[-1][0]
+    c = [pct(0.05), pct(0.5), pct(0.95)]
+    for _ in range(30):
+        groups = [[0.0, 0], [0.0, 0], [0.0, 0]]
+        for v, n in pts:
+            i = min(range(3), key=lambda j: abs(v - c[j]))
+            groups[i][0] += v * n
+            groups[i][1] += n
+        new = [g[0] / g[1] if g[1] else c[i] for i, g in enumerate(groups)]
+        if new == c:
+            break
+        c = new
+    c = sorted(c)
+    weights = [sum(n for v, n in pts if min(range(3), key=lambda j: abs(v - c[j])) == i) for i in range(3)]
+    if c[2] - c[0] < 30 or min(weights) < 0.02 * total:
+        return None
+    return {"idle": round(c[0] + BIN_W / 2), "pump": round(c[1] + BIN_W / 2), "burner": round(c[2] + BIN_W / 2),
+            "burner_on": round((c[1] + c[2]) / 2 + BIN_W / 2), "idle_max": round((c[0] + c[1]) / 2 + BIN_W / 2),
+            "samples": total}
+
+
+def levels(st, s):
+    """The learned levels, or the owner's own burner threshold."""
+    if str(s.get("burner_w") or "").strip():
+        w = float(s["burner_w"])
+        lv = dict(st.get("levels") or {})
+        lv.update(burner_on=w, idle_max=min(lv.get("idle_max", w / 2), w), manual=True)
+        return lv
+    return st.get("levels")
+
+
+def offset(st, pair):
+    return (st["offsets"].get(pair) or {}).get("c", 0.0)
+
+
+def corrected(st, r):
+    """Temperatures in °C with each pair's learned offset applied to its return probe."""
+    out = {k: r[k]["value"] for k in TEMPS if k in r and r[k]["ok"]}
+    for pair, sup, ret in PAIRS:
+        if ret in out:
+            out[ret] = out[ret] + offset(st, pair)
+    return out
+
+
+def _hist_at(st, now, age):
+    """The temperatures kept about `age` seconds ago (the oldest sample not newer than that), or None."""
+    best = None
+    for h in st["hist"]:
+        if h["t"] <= now - age:
+            best = h
+    return best
+
+
+# --------------------------------------------------------------------------
+# Every minute
+# --------------------------------------------------------------------------
+def step(stack, s, r, now=None, outdoor=None, alert=None):
+    """One minute: learn, class, check the rules. `r` is readings(); `alert(tag, title, message, priority)` sends.
+    Returns messages to log."""
+    now = now if now is not None else time.time()
+    st = load(stack)
+    msgs = []
+    st["since"] = st["since"] or now
+    last_t = st["last"].get("t")
+    dt = min(max(now - last_t, 0), 180) / 60 if last_t else 1.0
+    roles = s.get("roles") or {}
+    raw = {k: r[k]["value"] for k in TEMPS if k in r and r[k]["ok"]}
+    t = corrected(st, r)
+
+    def val(role):
+        return r[role]["value"] if role in r and r[role]["ok"] else None
+
+    # --- signals
+    power = val("boiler_power")
+    if power is not None:
+        b = str(int(power // BIN_W * BIN_W))
+        st["power_bins"][b] = st["power_bins"].get(b, 0) + 1
+        st["levels"] = power_levels(st["power_bins"])
+    lv = levels(st, s)
+    burner = (power >= lv["burner_on"]) if (power is not None and lv) else None
+    calls = [v for v in (val("thermostat"), val("heat_call")) if v is not None]
+    calling = any(calls) if calls else None
+    currents = [v for v in (val("boiler_pump_current"), val("floor_pump_current")) if v is not None]
+    pumps = any(a >= PUMP_ON_A for a in currents) if currents else calling
+
+    st["hist"].append({"t": now, **{k: round(v, 3) for k, v in raw.items()}})
+    st["hist"] = [h for h in st["hist"] if h["t"] >= now - HIST_S]
+
+    dhw = False
+    if "hot_water" in raw:
+        low = min(h.get("hot_water", raw["hot_water"]) for h in st["hist"])
+        prev = _hist_at(st, now, 110) or {}
+        rising = raw["hot_water"] - prev.get("hot_water", raw["hot_water"]) >= 1.0
+        dhw = raw["hot_water"] - low >= DHW_RISE_C and (rising or bool(burner))
+    elif val("water_pump_power") is not None:
+        dhw = val("water_pump_power") >= WATER_PUMP_ON_W and bool(burner)
+    if dhw:
+        st["dhw_last"] = now
+    recent_dhw = now - st["dhw_last"] < DHW_PAUSE_S
+
+    missing = [k for k in REQUIRED if not roles.get(k)]
+    offline = [k for k in roles if roles.get(k) and k in r and not r[k]["ok"]]
+    floor_diff = (t["floor_supply"] - t["floor_return"]) if {"floor_supply", "floor_return"} <= t.keys() else None
+    if missing:
+        state = "setup"
+    elif any(k in offline for k in REQUIRED):
+        state = "offline"
+    elif dhw:
+        state = "hot water"
+    elif burner:
+        state = "heating" if calling or (calling is None and floor_diff is not None and floor_diff >= 2) else "unclear"
+    elif burner is False:
+        state = "idle"
+    else:                                  # no plug: from the temperatures alone
+        state = "heating" if (calling is not False and floor_diff is not None and floor_diff >= 2) else "idle"
+
+    # --- probe offsets, while no heat flows
+    still = False
+    old = _hist_at(st, now, 600)
+    if old and "floor_supply" in raw and "floor_supply" in old:
+        still = abs(raw["floor_supply"] - old["floor_supply"]) < STILL_C and \
+            all(abs(raw[k] - old[k]) < STILL_C for k in ("floor_return", "boiler_supply", "boiler_return") if k in raw and k in old)
+    quiet = still and not burner and not pumps and not dhw and state not in ("heating", "hot water")
+    if calling is None and not currents:     # nothing says the pumps are off: only trust a small, still difference
+        quiet = quiet and floor_diff is not None and abs(raw["floor_supply"] - raw["floor_return"]) < OFFSET_MAX_C
+    st["quiet_since"] = (st["quiet_since"] or now) if quiet else None
+    if quiet and now - st["quiet_since"] >= QUIET_S:
+        for pair, sup, ret in PAIRS:
+            if sup in raw and ret in raw:
+                d = raw[sup] - raw[ret]
+                if abs(d) <= OFFSET_MAX_C:
+                    o = st["offsets"].setdefault(pair, {"c": d, "n": 0})
+                    o["c"] = round(o["c"] + OFFSET_ALPHA * (d - o["c"]) if o["n"] else d, 3)
+                    o["n"] += 1
+                    o["at"] = now
+                else:
+                    st["offsets"].setdefault(pair, {"c": 0.0, "n": 0})["wide"] = round(d, 2)
+
+    # --- burner runs, and the call
+    day = st["days"].setdefault(time.strftime("%Y-%m-%d", time.localtime(now)),
+                                {"burner_min": 0.0, "heat_min": 0.0, "dhw_min": 0.0, "runs": 0, "faults": 0})
+    if burner:
+        run = st["run"]
+        if run is None:
+            run = st["run"] = {"start": now, "heat_min": 0.0, "dhw_min": 0.0, "other_min": 0.0,
+                               "supply_start": t.get("boiler_supply"), "supply_max": t.get("boiler_supply"),
+                               "outdoor": outdoor}
+            day["runs"] += 1
+        cls = "dhw_min" if dhw else "heat_min" if state == "heating" else "other_min"
+        run[cls] = round(run[cls] + dt, 2)
+        if t.get("boiler_supply") is not None:
+            run["supply_max"] = max(run["supply_max"] if run["supply_max"] is not None else -99, t["boiler_supply"])
+            if run["supply_start"] is None:
+                run["supply_start"] = t["boiler_supply"]
+        day["burner_min"] = round(day["burner_min"] + dt, 2)
+        if cls != "other_min":
+            day[cls] = round(day[cls] + dt, 2)
+        # the outdoor reset curve: the supply after 10 minutes of steady heating
+        if state == "heating" and not recent_dhw and outdoor is not None and now - run["start"] >= RUN_CHECK_S \
+                and t.get("boiler_supply") is not None:
+            b = str(int(math.floor(outdoor / CURVE_BIN_C) * CURVE_BIN_C))
+            c = st["curve"].setdefault(b, {"c": t["boiler_supply"], "n": 0})
+            c["c"] = round(c["c"] + 0.1 * (t["boiler_supply"] - c["c"]), 2)
+            c["n"] += 1
+    elif burner is False and st["run"]:
+        run = st["run"]
+        run["end"] = now
+        run["minutes"] = round((now - run["start"]) / 60, 1)
+        run["class"] = ("hot water" if run["dhw_min"] >= max(run["heat_min"], run["other_min"]) else
+                        "heating" if run["heat_min"] >= run["other_min"] else "unclear")
+        st["runs"] = (st["runs"] + [run])[-KEEP_RUNS:]
+        st["run"] = None
+        msgs.append(f"burner run: {run['class']}, {run['minutes']} min")
+    if calling:
+        st["call"] = st["call"] or {"start": now, "burned": False}
+        if burner:
+            st["call"]["burned"] = True
+    else:
+        st["call"] = None
+
+    # --- rules
+    run = st["run"]
+    rules_ready = calling is not None and burner is not None
+    cond = {
+        "no_run": rules_ready and calling and not recent_dhw and burner is False and not (st["call"] or {}).get("burned"),
+        "stopped": rules_ready and calling and not recent_dhw and burner is False and bool((st["call"] or {}).get("burned"))
+        and "boiler_supply" in t and "floor_return" in t and t["boiler_supply"] < t["floor_return"] + 2,
+        "no_heat": bool(burner) and not recent_dhw and run is not None and now - run["start"] >= RUN_CHECK_S
+        and run.get("supply_start") is not None and (run.get("supply_max") or -99) - run["supply_start"] < NO_HEAT_C,
+        "floor_hot": t.get("floor_supply") is not None and t["floor_supply"] > float(s["floor_max_c"]),
+        "freeze": t.get("floor_return") is not None and t["floor_return"] < float(s["freeze_c"]),
+        "offline": bool(offline),
+        "unexplained": bool(burner) and calling is False and not recent_dhw,
+    }
+    snapshot = {k: round(v, 1) for k, v in t.items()}
+    snapshot.update(power=power, calling=calling, outdoor=outdoor, state=state)
+    for name, kind, hold, title in RULES:
+        if cond[name]:
+            since = st["timers"].setdefault(name, now)
+            if now - since >= hold and name not in st["active"]:
+                st["active"][name] = now
+                detail = _detail(name, s, t, offline, roles)
+                entry = {"at": now, "rule": name, "kind": kind, "title": title, "detail": detail, "readings": snapshot,
+                         "action": "logged; resets are not on yet" if kind == "fault" else
+                                   ("alert sent" if kind == "alert" and s.get("alerts") else "logged")}
+                if kind == "fault":
+                    day["faults"] += 1
+                if kind == "alert" and s.get("alerts") and alert:
+                    err = alert(f"boiler_{name}", title, detail, "critical" if name == "freeze" else "warning")
+                    if err:
+                        entry["action"] = f"alert not sent: {err}"
+                st["log"] = (st["log"] + [entry])[-KEEP_LOG:]
+                msgs.append(f"{kind}: {title} ({detail})")
+        else:
+            st["timers"].pop(name, None)
+            if name in st["active"]:
+                started = st["active"].pop(name)
+                for e in reversed(st["log"]):
+                    if e["rule"] == name and e["at"] == started:
+                        e["cleared"] = now
+                        break
+                if kind == "alert" and s.get("alerts") and alert:
+                    alert(f"boiler_{name}", "", "clear", "info")
+                msgs.append(f"cleared: {RULE[name][3]}")
+
+    st["days"] = dict(sorted(st["days"].items())[-KEEP_DAYS:])
+    st["last"] = {"t": now, "state": state, "burner": burner, "calling": calling, "pumps": pumps, "dhw": dhw,
+                  "power": power, "outdoor": outdoor, "temps": {k: round(v, 2) for k, v in t.items()},
+                  "floor_diff": None if floor_diff is None else round(floor_diff, 2), "missing": missing,
+                  "offline": offline}
+    save(stack, st)
+    return msgs
+
+
+def _detail(name, s, t, offline, roles):
+    f = lambda c: f"{c:.1f} °C ({c * 9 / 5 + 32:.0f} °F)"  # noqa: E731
+    if name == "floor_hot":
+        return f"Floor supply {f(t['floor_supply'])}, over {f(float(s['floor_max_c']))}: check the boiler's outdoor reset settings."
+    if name == "freeze":
+        return f"Floor return {f(t['floor_return'])}, under {f(float(s['freeze_c']))}: check the boiler is heating."
+    if name == "offline":
+        return "No reading from: " + ", ".join(ROLE[k][1] for k in offline) + "."
+    if name in ("no_run", "stopped", "no_heat") and "boiler_supply" in t:
+        return f"Boiler supply {f(t['boiler_supply'])}."
+    return ""
+
+
+def vm_lines(stack, now=None):
+    st = load(stack)
+    last = st["last"]
+    if not last:
+        return []
+    lines = [f"boiler_state {STATES.get(last['state'], 3)}"]
+    for k, metric in (("burner", "boiler_burner_on"), ("calling", "boiler_call_for_heat"), ("dhw", "boiler_hot_water_draw"),
+                      ("floor_diff", "boiler_floor_difference_c")):
+        if last.get(k) is not None:
+            lines.append(f"{metric} {float(last[k]):g}")
+    for k, v in last["temps"].items():
+        lines.append(f'boiler_temperature_c{{role="{k}"}} {v:g}')
+    for pair, o in st["offsets"].items():
+        lines.append(f'boiler_probe_offset_c{{pair="{pair}"}} {o.get("c", 0):g}')
+    for name, kind, _, _ in RULES:
+        lines.append(f'boiler_rule_active{{rule="{name}",kind="{kind}"}} {1 if name in st["active"] else 0}')
+    return lines
+
+
+def vm_push(stack):
+    lines = vm_lines(stack)
+    if lines:
+        req = urllib.request.Request(f"{VM}/api/v1/import/prometheus", data=("\n".join(lines) + "\n").encode(), method="POST")
+        urllib.request.urlopen(req, timeout=10).read()
+
+
+def summary(stack, s, now=None):
+    now = now or time.time()
+    st = load(stack)
+    today = st["days"].get(time.strftime("%Y-%m-%d", time.localtime(now))) or {}
+    return {"last": st["last"], "age": (now - st["last"]["t"]) if st["last"] else None, "today": today,
+            "levels": levels(st, s), "learned_levels": st.get("levels"), "power_samples": sum(st["power_bins"].values()),
+            "offsets": st["offsets"], "curve": st["curve"], "runs": st["runs"], "run": st["run"], "days": st["days"],
+            "log": st["log"], "active": st["active"], "since": st["since"],
+            "fault": next((RULE[n][3] for n in st["active"] if RULE[n][1] == "fault"), None)}
