@@ -282,8 +282,10 @@ script:
   solar_notify:
     alias: Solar monitor notification
     description: >-
-      Shows a notification in Home Assistant and sends it to every phone with the Home Assistant
-      app signed in to this box. message "clear" removes it again.
+      Shows a notification in Home Assistant and hands it to the solar monitor box, whose Notifications
+      settings decide where it goes (phones, ntfy, the wall display) by its priority. If the box doesn't
+      take it (Notifications turned off, or the box not answering), it goes to every phone with the
+      Home Assistant app. message "clear" removes it again.
     mode: queued
     fields:
       tag:
@@ -292,6 +294,8 @@ script:
         description: Title
       message:
         description: The text, or clear to remove the notification
+      priority:
+        description: critical, warning or info (left out, the box picks one from the tag)
     sequence:
       - if: "{{ message == 'clear' }}"
         then:
@@ -300,18 +304,28 @@ script:
         else:
           - action: persistent_notification.create
             data: {notification_id: "solar_{{ tag }}", title: "{{ title }}", message: "{{ message }}"}
-      # The app's notify action is named after the phone, like its device_tracker entity.
-      - repeat:
-          for_each: >-
-            {{ integration_entities('mobile_app') | select('match', 'device_tracker\.')
-               | map('replace', 'device_tracker.', '') | list }}
-          sequence:
-            - action: notify.mobile_app_{{ repeat.item }}
-              continue_on_error: true
-              data:
-                title: "{{ title }}"
-                message: "{{ 'clear_notification' if message == 'clear' else message }}"
-                data: {tag: "solar_{{ tag }}", group: solar}
+      - action: rest_command.solar_notify_box
+        continue_on_error: true
+        response_variable: box
+        data:
+          tag: "{{ tag }}"
+          title: "{{ title }}"
+          message: "{{ message }}"
+          priority: "{{ priority | default('') }}"
+      - if: "{{ box is not defined or box.status != 200 or (box.content | string) != 'ok' }}"
+        then:
+          # The app's notify action is named after the phone, like its device_tracker entity.
+          - repeat:
+              for_each: >-
+                {{ integration_entities('mobile_app') | select('match', 'device_tracker\.')
+                   | map('replace', 'device_tracker.', '') | list }}
+              sequence:
+                - action: notify.mobile_app_{{ repeat.item }}
+                  continue_on_error: true
+                  data:
+                    title: "{{ title }}"
+                    message: "{{ 'clear_notification' if message == 'clear' else message }}"
+                    data: {tag: "solar_{{ tag }}", group: solar}
 
 automation:
   - id: solar_battery_low

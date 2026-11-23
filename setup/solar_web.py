@@ -293,7 +293,7 @@ def apply_site(site):
     """Write HA core settings + site package and restart what changed."""
     msgs = []
     ha_changed = write_core(site)
-    ha_changed |= ss.write_if_changed(path("homeassistant", "packages", "site.yaml"), ss.site_package(site, ss.ha_webhook_id(STACK)))
+    ha_changed |= ss.write_if_changed(path("homeassistant", "packages", "site.yaml"), ss.site_package(site, ss.ha_webhook_id(STACK), ss.notify_package(STACK)))
     # System time zone (used by Grafana via .env and by the host clock display)
     if site["time_zone"] != ss.host_timezone():
         r = subprocess.run(["timedatectl", "set-timezone", site["time_zone"]], capture_output=True, text=True)
@@ -776,6 +776,14 @@ def phones_line():
     if not p:
         return ("<b>No phone is signed in yet</b>: install the Home Assistant app, sign in to this box with your account "
                 "and allow notifications. Alerts and the daily summary go to every phone signed in.")
+    if any(m.id == "notifications" for m in modules.enabled(STACK)):
+        import notify
+        s = modules.settings(STACK, "notifications")
+        names = {x["id"]: x["name"] for x in notify.phones(STACK)}
+        chosen = [names[i] for i in notify.chosen_phones(STACK, s)] if s.get("ha_app") else []
+        extra = " and ntfy" if s.get("ntfy") and s.get("ntfy_topic") else ""
+        return ("Alerts go to: " + (", ".join(html.escape(x) for x in chosen) or "no phone") + extra
+                + ' (<a href="/setup#notifications">change</a>).')
     return "Alerts go to: " + ", ".join(html.escape(x) for x in p) + "."
 
 

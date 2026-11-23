@@ -453,18 +453,67 @@ def seed_homeassistant(stack, sec):
     return True
 
 
-def ha_webhook_id(stack):
-    """This box's secret webhook id for the setup page's "send a test notification" (kept in state/secrets.json)."""
+def secret(stack, key, make):
+    """A value kept in state/secrets.json, made with make() the first time."""
     path = os.path.join(stack, "state", "secrets.json")
     s = load_json(path, {})
-    if not s.get("ha_webhook"):
-        s["ha_webhook"] = "solar-" + secrets.token_urlsafe(24)
+    if not s.get(key):
+        s[key] = make()
         write_if_changed(path, json.dumps(s, indent=2) + "\n", 0o600)
-    return s["ha_webhook"]
+    return s[key]
 
 
-def site_package(site, webhook_id=None):
-    """packages/site.yaml: the site's sizes, the daily summary settings and the test notification."""
+def ha_webhook_id(stack):
+    """This box's secret webhook id for the setup page's "send a test notification" (kept in state/secrets.json)."""
+    return secret(stack, "ha_webhook", lambda: "solar-" + secrets.token_urlsafe(24))
+
+
+def notify_package(stack, port=80):
+    """The parts of packages/site.yaml the notifications go through: script.solar_notify (packages/solar_monitor.yaml)
+    hands each alert to this box (rest_command.solar_notify_box, with its token), and the box delivers to the chosen
+    phones through a webhook automation (local network only; the id is this box's secret)."""
+    import notify
+    js = json.dumps
+    payload = ("token=" + notify.box_token(stack) + "&tag={{ tag | urlencode }}&title={{ title | urlencode }}"
+               "&message={{ message | urlencode }}&priority={{ priority | default('') | urlencode }}")
+    rest = [
+        "rest_command:",
+        "  solar_notify_box:",
+        f"    url: \"http://127.0.0.1:{int(port)}/notify/send\"",
+        "    method: POST",
+        "    content_type: application/x-www-form-urlencoded",
+        f"    payload: {js(payload)}",
+        "    timeout: 5",
+    ]
+    deliver = [
+        "  - id: solar_notify_deliver",
+        "    alias: \"Solar: deliver a notification to the chosen phones\"",
+        "    mode: queued",
+        "    triggers:",
+        "      - trigger: webhook",
+        f"        webhook_id: {js(notify.ha_webhook(stack))}",
+        "        allowed_methods: [POST]",
+        "        local_only: true",
+        "    actions:",
+        # only phones the app still has (a missing notify action would stop the loop, error or not)
+        "      - repeat:",
+        "          for_each: >-",
+        "            {{ trigger.json.phones | select('in', integration_entities('mobile_app')",
+        "               | select('match', 'device_tracker\\.') | map('replace', 'device_tracker.', '') | list) | list }}",
+        "          sequence:",
+        "            - action: notify.mobile_app_{{ repeat.item }}",
+        "              continue_on_error: true",
+        "              data:",
+        "                title: \"{{ trigger.json.title }}\"",
+        "                message: \"{{ trigger.json.message }}\"",
+        "                data: \"{{ trigger.json.data }}\"",
+    ]
+    return rest, deliver
+
+
+def site_package(site, webhook_id=None, notify=None):
+    """packages/site.yaml: the site's sizes, the daily summary settings, the test notification and the notification
+    hand-off (notify = notify_package(stack))."""
     js = json.dumps
     on = site.get("summary_enabled", True)
     at = site.get("summary_time") or "00:00"
@@ -482,10 +531,15 @@ def site_package(site, webhook_id=None):
         "    has_time: true",
         f"    initial: {js(at + ':00')}",
     ]
+    if notify:
+        pkg += notify[0]
+    if webhook_id or notify:
+        pkg.append("automation:")
+    if notify:
+        pkg += notify[1]
     if webhook_id:
         # the setup page's "Send a test notification" (local network only; the id is this box's secret)
         pkg += [
-            "automation:",
             "  - id: solar_test_notification",
             "    alias: \"Solar: test notification\"",
             "    triggers:",
@@ -545,7 +599,7 @@ def sync_homeassistant(stack):
     """Copy the image-owned HA files in; True if any changed."""
     site = load_json(os.path.join(stack, "state", "site.json"), {})
     changed = write_if_changed(os.path.join(stack, "homeassistant", "packages", "site.yaml"),
-                               site_package(site, ha_webhook_id(stack)), 0o644)
+                               site_package(site, ha_webhook_id(stack), notify_package(stack)), 0o644)
     for rel in HA_OWNED:
         src = os.path.join(stack, "homeassistant-seed", rel)
         if os.path.exists(src):

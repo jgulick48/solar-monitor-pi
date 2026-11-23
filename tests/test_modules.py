@@ -76,7 +76,8 @@ class Modules(unittest.TestCase):
         self.assertEqual(modules.settings(self.stack, "backup")["history"], True)      # the default
 
     def test_disabled_module_contributes_nothing(self):
-        modules.set_enabled(self.stack, "generator", False)          # its page too; this test is about backups
+        modules.set_enabled(self.stack, "generator", False)          # their pages too; this test is about backups
+        modules.set_enabled(self.stack, "notifications", False)
         self.assertEqual(modules.nav(self.stack), [("/backup", "Backups", "Backups")])
         self.assertIn("Backups", modules.cards(self.stack))
         self.assertIsNotNone(modules.route(self.stack, "GET", "/backup")[1])
