@@ -25,6 +25,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import threading
 import re
 import secrets
 import shutil
@@ -191,7 +192,8 @@ def write_if_changed(path: str, content: str, mode: int = 0o644) -> bool:
     except FileNotFoundError:
         pass
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
+    # a temporary name of its own: two processes (the web page and the collector) may write the same file at once
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w") as f:
         f.write(content)
     os.chmod(tmp, mode)
@@ -527,9 +529,17 @@ def notify_package(stack, port=80):
     return rest, deliver
 
 
-def site_package(site, webhook_id=None, notify=None):
-    """packages/site.yaml: the site's sizes, the daily summary settings, the test notification and the notification
-    hand-off (notify = notify_package(stack))."""
+def site_yaml(stack, site=None):
+    """packages/site.yaml for this box as it is set up now."""
+    import hastates
+    site = site if site is not None else load_json(os.path.join(stack, "state", "site.json"), {})
+    return site_package(site, ha_webhook_id(stack), notify_package(stack), hastates.package(hastates.entities(stack)))
+
+
+def site_package(site, webhook_id=None, notify=None, statestream=None):
+    """packages/site.yaml: the site's sizes, the daily summary settings, the test notification, the notification
+    hand-off (notify = notify_package(stack)) and the entities Home Assistant publishes to the box (statestream =
+    hastates.package(...): its top-level lines and its automations)."""
     js = json.dumps
     on = site.get("summary_enabled", True)
     at = site.get("summary_time") or "00:00"
@@ -547,12 +557,15 @@ def site_package(site, webhook_id=None, notify=None):
         "    has_time: true",
         f"    initial: {js(at + ':00')}",
     ]
+    stream_top, stream_auto = statestream or ([], [])
+    pkg += stream_top
     if notify:
         pkg += notify[0]
-    if webhook_id or notify:
+    if webhook_id or notify or stream_auto:
         pkg.append("automation:")
     if notify:
         pkg += notify[1]
+    pkg += stream_auto
     if webhook_id:
         # the setup page's "Send a test notification" (local network only; the id is this box's secret)
         pkg += [
@@ -614,8 +627,7 @@ HA_OWNED = ["packages/solar_monitor.yaml", "dashboards/solar.yaml"]
 def sync_homeassistant(stack):
     """Copy the image-owned HA files in; True if any changed."""
     site = load_json(os.path.join(stack, "state", "site.json"), {})
-    changed = write_if_changed(os.path.join(stack, "homeassistant", "packages", "site.yaml"),
-                               site_package(site, ha_webhook_id(stack), notify_package(stack)), 0o644)
+    changed = write_if_changed(os.path.join(stack, "homeassistant", "packages", "site.yaml"), site_yaml(stack, site), 0o644)
     for rel in HA_OWNED:
         src = os.path.join(stack, "homeassistant-seed", rel)
         if os.path.exists(src):

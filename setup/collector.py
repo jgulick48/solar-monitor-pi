@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """solar-collector: sunlight data for the advisor, written to VictoriaMetrics.
 
+  * All the time, in its own threads: the Home Assistant states the modules read (hastates.py), kept in
+    state/ha-states.json and recorded in VictoriaMetrics (ha_state, ha_attribute).
+
   * Every minute, if a local weather station is configured (state/weather.json
     {"source": "station", "station": {...}}), its solar radiation and outdoor
     temperature: site_solar_radiation_wm2, site_outdoor_temp_c.
@@ -27,6 +30,7 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import solar_setup as ss  # noqa: E402
 import modules  # noqa: E402
+import hastates  # noqa: E402
 import weather  # noqa: E402
 import wx  # noqa: E402
 
@@ -134,6 +138,8 @@ def main():
     marker = os.path.join(args.stack, "state", "openmeteo-backfilled")
     last_om = 0.0
     hooks = {}
+    if not args.once:
+        hastates.start(args.stack)                  # Home Assistant states for the modules, recorded in VictoriaMetrics
     while True:
         try:
             station_sample(args.stack)

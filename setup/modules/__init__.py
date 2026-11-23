@@ -70,6 +70,8 @@ class Module:
     compose_profiles: Optional[Callable] = None  # (stack) -> Compose profiles (optional services) to run now
     env: Optional[Callable] = None      # (stack) -> ["NAME=value", ...] for the stack's .env (its services' settings)
     display_events: Optional[Callable] = None  # (stack) -> fields added to the wall display's fast poll (/display/events)
+    ha_entities: Optional[Callable] = None  # (stack) -> Home Assistant entity ids it reads (hastates.get); each is
+    #                                       also recorded in VictoriaMetrics
 
 
 def log(*a):
@@ -153,6 +155,9 @@ def set_enabled(stack, module_id, on):
     _write(stack, module_id, {**cur, "enabled": bool(on)})
     if m.compose_profiles or m.env:
         ss.write_env(stack, ss.ensure_secrets(stack))
+    if m.ha_entities:                    # what Home Assistant publishes to the box changes with it
+        import hastates
+        hastates.apply(stack)
     if on and m.on_enable:
         m.on_enable(stack)
 
@@ -231,6 +236,14 @@ def ha_core(stack):
     for _, d in _each(stack, "ha_core"):
         out.update(d)
     return out
+
+
+def ha_entities(stack):
+    """Every Home Assistant entity the enabled modules read, sorted (hastates: published to the box, recorded)."""
+    out = set()
+    for _, ents in _each(stack, "ha_entities"):
+        out.update(e for e in ents if e)
+    return sorted(out)
 
 
 def nav(stack):
