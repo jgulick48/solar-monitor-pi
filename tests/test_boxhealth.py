@@ -102,9 +102,14 @@ class TestNotification(unittest.TestCase):
             solar_web.STACK = stack
             try:
                 self.assertIn("No phone is signed in", solar_web.phones_line())
-                json.dump({"data": {"entries": [{"domain": "mqtt", "title": "broker"}, {"domain": "mobile_app", "title": "Pixel 8"},
-                                                {"domain": "mobile_app", "title": "Jane's iPhone"}]}},
+                json.dump({"data": {"entries": [{"domain": "mqtt", "title": "broker"},
+                                                {"entry_id": "p8", "domain": "mobile_app", "title": "Pixel 8"},
+                                                {"entry_id": "ji", "domain": "mobile_app", "title": "Jane's iPhone"}]}},
                           open(os.path.join(stack, "homeassistant", ".storage", "core.config_entries"), "w"))
+                with open(os.path.join(stack, "homeassistant", ".storage", "core.entity_registry"), "w") as f:
+                    json.dump({"data": {"entities": [
+                        {"entity_id": "device_tracker.pixel_8", "platform": "mobile_app", "config_entry_id": "p8"},
+                        {"entity_id": "device_tracker.janes_iphone", "platform": "mobile_app", "config_entry_id": "ji"}]}}, f)
                 self.assertEqual(solar_web.phones(), ["Pixel 8", "Jane's iPhone"])
                 self.assertIn("Jane&#x27;s iPhone", solar_web.phones_line())
             finally:
