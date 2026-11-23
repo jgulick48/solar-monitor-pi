@@ -293,7 +293,7 @@ def apply_site(site):
     """Write HA core settings + site package and restart what changed."""
     msgs = []
     ha_changed = write_core(site)
-    ha_changed |= ss.write_if_changed(path("homeassistant", "packages", "site.yaml"), ss.site_package(site, ss.ha_webhook_id(STACK), ss.notify_package(STACK)))
+    ha_changed |= ss.write_if_changed(path("homeassistant", "packages", "site.yaml"), ss.site_yaml(STACK, site))
     # System time zone (used by Grafana via .env and by the host clock display)
     if site["time_zone"] != ss.host_timezone():
         r = subprocess.run(["timedatectl", "set-timezone", site["time_zone"]], capture_output=True, text=True)
