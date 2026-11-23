@@ -1,0 +1,229 @@
+# Boiler and floor-heating probes for the solar monitor's boiler module (wiki: "Boiler, propane and notifications").
+#
+# Board: Waveshare ESP32-P4-ETH with its PoE module (ESP32-P4, IP101 Ethernet), running ESPHome and added to Home
+# Assistant through its ESPHome integration. Three DS18B20 probes at minimum (floor supply and return, boiler
+# supply), up to seven: two more in the boiler room, and two in the slab on a second 1-Wire bus. Two optional
+# inputs further down (the wired call for heat, and current clamps on the pump panel's two pumps).
+#
+# Setup (esphome/README.md has the wiring and the details):
+#   1. Copy secrets.example.yaml to secrets.yaml and fill it in.
+#   2. Flash once over USB: esphome run boiler-probes.yaml
+#   3. The log lists every probe's address ("Found 1-Wire device ... 0x..."): warm one probe in your hand, note
+#      which address rises, and put each address in the substitutions below; then flash again (over the network).
+#
+# The names below are only what Home Assistant shows: the boiler module's setup picks which Home Assistant
+# temperature sensor is which, so renaming a probe or using another board's sensors is fine.
+
+substitutions:
+  name: boiler-probes
+  friendly_name: Boiler probes
+  # the 1-Wire bus pins (the slab bus only with the slab probes): any free header GPIO (check its silkscreen)
+  pin_boiler_bus: GPIO20
+  pin_slab_bus: GPIO21
+  # each probe's 1-Wire address, from the log after the first flash (only the probes in use)
+  addr_floor_supply: "0x0000000000000000"
+  addr_floor_return: "0x0000000000000000"
+  addr_boiler_supply: "0x0000000000000000"
+  addr_boiler_return: "0x0000000000000000"
+  addr_hot_water: "0x0000000000000000"
+  addr_slab_near: "0x0000000000000000"
+  addr_slab_far: "0x0000000000000000"
+  probe_interval: 15s
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.0
+
+esp32:
+  board: esp32-p4-evboard
+  variant: esp32p4
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+ethernet:
+  type: IP101
+  mdc_pin: GPIO31
+  mdio_pin: GPIO52
+  power_pin: GPIO51
+  clk:
+    pin: GPIO50
+    mode: CLK_EXT_IN
+  phy_addr: 1
+
+logger:
+  level: INFO
+  hardware_uart: UART0
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# A page on the board itself (http://boiler-probes.local) showing every reading, handy while labelling probes.
+web_server:
+  port: 80
+  version: 3
+
+# Probes 1 to 3 are the minimum the boiler module needs; each optional one (4 to 7) adds accuracy or a reading.
+# To add one, uncomment its block (and, for the slab probes, the slab bus), put in its address and flash again.
+# 1-Wire has no five-probe limit; what limits a bus is its total cable length, so the long run to the slab gets
+# a bus of its own.
+one_wire:
+  - platform: gpio
+    pin: ${pin_boiler_bus}
+    id: boiler_bus
+# --- optional: the slab bus, for probes 6 and 7 ---
+#  - platform: gpio
+#    pin: ${pin_slab_bus}
+#    id: slab_bus
+
+sensor:
+  # --- required ---
+  # 1. Floor supply: with 2, the heat delivered to the floor (manifold flow x temperature difference)
+  - platform: dallas_temp
+    one_wire_id: boiler_bus
+    address: ${addr_floor_supply}
+    name: Floor supply
+    id: floor_supply
+    update_interval: ${probe_interval}
+    resolution: 12
+    accuracy_decimals: 2
+  # 2. Floor return
+  - platform: dallas_temp
+    one_wire_id: boiler_bus
+    address: ${addr_floor_return}
+    name: Floor return
+    id: floor_return
+    update_interval: ${probe_interval}
+    resolution: 12
+    accuracy_decimals: 2
+  # 3. Boiler supply: whether the boiler fires, how hot, and the outdoor-reset check
+  - platform: dallas_temp
+    one_wire_id: boiler_bus
+    address: ${addr_boiler_supply}
+    name: Boiler supply
+    id: boiler_supply
+    update_interval: ${probe_interval}
+    resolution: 12
+    accuracy_decimals: 2
+
+  # --- optional: uncomment to add ---
+  # 4. Boiler return: whether the boiler condenses (return under about 130 F), and the primary loop's difference
+#  - platform: dallas_temp
+#    one_wire_id: boiler_bus
+#    address: ${addr_boiler_return}
+#    name: Boiler return
+#    id: boiler_return
+#    update_interval: ${probe_interval}
+#    resolution: 12
+#    accuracy_decimals: 2
+  # 5. Hot water outlet: tells a hot-water draw from heating at once (without it, the water pump's plug does)
+#  - platform: dallas_temp
+#    one_wire_id: boiler_bus
+#    address: ${addr_hot_water}
+#    name: Hot water outlet
+#    id: hot_water
+#    update_interval: 5s
+#    resolution: 12
+#    accuracy_decimals: 2
+  # 6, 7. Slab, near the boiler and at the far end of the loops (slab bus): how the floor itself responds
+#  - platform: dallas_temp
+#    one_wire_id: slab_bus
+#    address: ${addr_slab_near}
+#    name: Slab near boiler
+#    id: slab_near
+#    update_interval: 60s
+#    resolution: 12
+#    accuracy_decimals: 2
+#  - platform: dallas_temp
+#    one_wire_id: slab_bus
+#    address: ${addr_slab_far}
+#    name: Slab far
+#    id: slab_far
+#    update_interval: 60s
+#    resolution: 12
+#    accuracy_decimals: 2
+
+  # The floor's supply-minus-return difference, as the board sees it (the box applies its learned offsets itself).
+  - platform: template
+    name: Floor difference
+    id: floor_difference
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: ${probe_interval}
+    lambda: |-
+      if (isnan(id(floor_supply).state) || isnan(id(floor_return).state)) return NAN;
+      return id(floor_supply).state - id(floor_return).state;
+
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: ethernet_info
+    ip_address:
+      name: IP address
+      entity_category: diagnostic
+
+binary_sensor:
+  - platform: status
+    name: Status
+
+# ---------------------------------------------------------------------------------------------------------------
+# Optional: the wired call for heat (the Taco SR501's 24 VAC call to the boiler) through an isolated optocoupler
+# input whose output pulls ${pin_heat_call} to ground while 24 VAC is present. Uncomment, and add a
+# pin_heat_call substitution (a free header GPIO), to use.
+# ---------------------------------------------------------------------------------------------------------------
+#  - platform: gpio
+#    name: Call for heat
+#    id: heat_call
+#    pin:
+#      number: ${pin_heat_call}
+#      mode:
+#        input: true
+#        pullup: true
+#      inverted: true
+#    filters:
+#      - delayed_on: 2s          # AC through an optocoupler flickers: hold before changing
+#      - delayed_off: 2s
+
+# ---------------------------------------------------------------------------------------------------------------
+# Optional: current clamps on the pump panel's boiler and floor pumps (SCT-013 style clamps with a built-in burden,
+# 1 V at full scale, biased to mid-supply; esphome/README.md). Add these under `sensor:`, and the
+# pin_boiler_pump / pin_floor_pump substitutions (ADC pins: GPIO16 to GPIO23 on the ESP32-P4), to use them.
+# ---------------------------------------------------------------------------------------------------------------
+#  - platform: adc
+#    pin: ${pin_boiler_pump}
+#    id: adc_boiler_pump
+#    attenuation: 12db
+#    update_interval: never
+#  - platform: ct_clamp
+#    sensor: adc_boiler_pump
+#    name: Boiler pump current
+#    update_interval: 10s
+#    sample_duration: 200ms
+#    filters:
+#      - calibrate_linear:
+#          - 0 -> 0
+#          - 0.03 -> 1.0         # calibrate against a clamp meter: measured ADC value -> amps
+#  - platform: adc
+#    pin: ${pin_floor_pump}
+#    id: adc_floor_pump
+#    attenuation: 12db
+#    update_interval: never
+#  - platform: ct_clamp
+#    sensor: adc_floor_pump
+#    name: Floor pump current
+#    update_interval: 10s
+#    sample_duration: 200ms
+#    filters:
+#      - calibrate_linear:
+#          - 0 -> 0
+#          - 0.03 -> 1.0
