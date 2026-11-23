@@ -165,6 +165,23 @@ def card(stack):
             f"<a href='/propane'>use and fill-ups</a></div>")
 
 
+def _boiler_split(stack, days):
+    """{date: {"heating", "hot_water", "other"}} from the boiler module's burner time, when it is on."""
+    import modules
+    if not any(m.id == "boiler" for m in modules.enabled(stack)):
+        return {}
+    import boiler
+    st = boiler.load(stack)
+    out = {}
+    for d in days:
+        rec = st["days"].get(d["date"])
+        if rec:
+            f = boiler.day_figures(d["date"], rec, d["used"])
+            if f["propane"]:
+                out[d["date"]] = f["propane"]
+    return out
+
+
 def page(stack, form):
     s = settings(stack)
     v = engine.summary(stack, s)
@@ -173,7 +190,13 @@ def page(stack, form):
         return "" if price is None or g is None else f" (${g * price:,.2f})"
     when = lambda t: time.strftime("%b %d %H:%M", time.localtime(t))  # noqa: E731
     lr = v["last_reading"]
-    days = "".join(f"<tr><td>{d['date']}</td><td>{d['used']:g} gal{cost(d['used'])}</td><td>{d['filled']:g}</td>"
+    split = _boiler_split(stack, v["days"][-31:])
+    def parts(d):
+        p = split.get(d["date"])
+        if not split:
+            return ""
+        return "<td>&ndash;</td>" * 3 if not p else f"<td>{p['heating']:g}</td><td>{p['hot_water']:g}</td><td>{p['other']:g}</td>"
+    days = "".join(f"<tr><td>{d['date']}</td><td>{d['used']:g} gal{cost(d['used'])}</td>{parts(d)}<td>{d['filled']:g}</td>"
                    f"<td>{_fmt(d.get('hdd'), '', 1)}</td></tr>" for d in reversed(v["days"][-31:])) or "<tr><td colspan=4>No full day yet.</td></tr>"
     fills = "".join(f"<tr><td>{when(f['at'])}</td><td>+{f['added']:g} gal{cost(f['added'])}</td><td>{f['before']:g} &rarr; {f['after']:g} gal "
                     f"({f['percent_after']:g}%)</td></tr>" for f in reversed(v["fills"])) or "<tr><td colspan=3>None yet.</td></tr>"
@@ -185,7 +208,8 @@ def page(stack, form):
 tank {_fmt(lr.get('tempCelsius'), ' &deg;C')}, battery {_fmt(lr.get('batteryVoltage'), ' V', 2)},
 last reading {('%d s ago' % v['reading_age']) if v['reading_age'] is not None else 'none'}.</small></p>
 <h2>Fill-ups</h2><table><tr><th>When</th><th>Added</th><th>Level</th></tr>{fills}</table>
-<h2>Use per day</h2><table><tr><th>Day</th><th>Used</th><th>Filled (gal)</th><th>Degree days</th></tr>{days}</table>
+<h2>Use per day</h2><table><tr><th>Day</th><th>Used</th>{'<th>Heating</th><th>Hot water</th><th>Other</th>' if split else ''}<th>Filled (gal)</th><th>Degree days</th></tr>{days}</table>
+{'<p><small>Heating, hot water and other: the day&#39;s use split by the boiler&#39;s burner time (the boiler module).</small></p>' if split else ''}
 <p><small>Use per day is the drop in level plus what was filled that day. Days to empty use heating degree days (65 &deg;F)
 once there are 14 days to learn from: use = a base amount + an amount per degree day, against the coming week's forecast.</small></p>"""
     return Response(title="Propane", body=body)

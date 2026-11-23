@@ -89,6 +89,27 @@ rest:
         unit_of_measurement: BTU/h
         state_class: measurement
         icon: mdi:heat-wave
+      - name: Site floor heat today
+        unique_id: site_floor_heat_today
+        availability: "{{ value_json.boiler_heat_today is defined and value_json.boiler_heat_today is not none }}"
+        value_template: "{{ value_json.boiler_heat_today }}"
+        unit_of_measurement: kBTU
+        state_class: total_increasing
+        icon: mdi:heat-wave
+      - name: Site house heat loss
+        unique_id: site_house_heat_loss
+        availability: "{{ value_json.boiler_heat_loss is defined and value_json.boiler_heat_loss is not none }}"
+        value_template: "{{ value_json.boiler_heat_loss }}"
+        unit_of_measurement: BTU/h/°F
+        state_class: measurement
+        icon: mdi:home-thermometer-outline
+      - name: Site boiler efficiency
+        unique_id: site_boiler_efficiency
+        availability: "{{ value_json.boiler_efficiency is defined and value_json.boiler_efficiency is not none }}"
+        value_template: "{{ value_json.boiler_efficiency }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:fire-circle
       - name: Site boiler reset state
         unique_id: site_boiler_reset_state
         availability: "{{ value_json.boiler_reset_state is defined }}"

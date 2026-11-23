@@ -217,6 +217,55 @@ class Output(Base):
         self.assertEqual(boiler.burner_minutes(st, T0), 15.0)
 
 
+def fake_day(heat_kbtu=600.0, indoor=20.0, outdoor=-5.0, heat_min=480, dhw_min=60, burner_min=600, runs=30):
+    """A finished day as boiler.json keeps it (one sample of each mean)."""
+    return {"heat_kbtu": heat_kbtu, "in_sum": indoor, "in_n": 1, "out_sum": outdoor, "out_n": 1, "heat_min": heat_min,
+            "dhw_min": dhw_min, "burner_min": burner_min, "runs": runs, "faults": 0}
+
+
+class Efficiency(Base):
+    def test_indoor_from_the_thermostat(self):
+        cur = {"state": "heat", "attributes": {"hvac_action": "idle", "current_temperature": 68}}
+        self.assertAlmostEqual(boiler.reading("thermostat", cur, "°F")["indoor"], 20.0)
+        self.assertEqual(boiler.reading("thermostat", cur, "°C")["indoor"], 68)
+        self.run_for(3, outdoor=-5.0, **{**IDLE, "thermostat": False})
+        day = self.st()["days"]["2026-11-23"]
+        self.assertEqual((day["out_n"], day.get("in_n", 0)), (3, 0))          # r() has no indoor: only outdoor counted
+
+    def test_day_figures_and_split(self):
+        f = boiler.day_figures("2026-11-20", fake_day(), 9.0)
+        self.assertEqual((f["outdoor_c"], f["indoor_c"], f["hdd"]), (-5.0, 20.0, 42.0))
+        self.assertEqual(f["propane"], {"heating": 7.2, "hot_water": 0.9, "other": 0.9})
+        self.assertIsNone(boiler.day_figures("2026-11-20", fake_day(), None)["propane"])
+
+    def test_efficiency_heat_loss_and_sizing(self):
+        days = [boiler.day_figures(f"2026-11-{10 + i}", fake_day(), 9.0) for i in range(7)]
+        self.assertIsNone(boiler.efficiency(days[:2], S)["heat_loss_btuh_f"])        # under 3 days
+        w = boiler.efficiency(days, S, price=2.5)
+        self.assertEqual(w["heat_loss_btuh_f"], round(600000 / (24 * 45)))         # 556 BTU/h per °F
+        self.assertEqual(w["efficiency_pct"], round(100 * 600000 / (7.2 * 91500), 1))   # 91.1%
+        self.assertEqual(w["gal_per_hdd"], round(7.2 / 42, 3))
+        self.assertEqual((w["heating_gal"], w["heating_cost_per_day"]), (50.4, 18.0))
+        # a mild day (under 5 °F apart) doesn't count for heat loss
+        mild = boiler.day_figures("2026-11-30", fake_day(outdoor=18.0), 9.0)
+        self.assertEqual(boiler.efficiency(days[:2] + [mild], S)["loss_days"], 2)
+        s = {**S, "design_c": -23.33, "indoor_c": 20.0, "floor_area_ft2": 2000, "boiler_max_btuh": 120000}
+        sz = boiler.sizing(s, 556, 91.1)
+        self.assertEqual(sz["need_btuh"], round(556 * 43.33 * 9 / 5))
+        self.assertEqual((sz["boiler_btuh"], sz["slab_btuh"]), (109320, (50000, 70000)))
+        self.assertEqual((sz["first"], sz["short"]), ("the slab", False))
+        self.assertTrue(boiler.sizing({**s, "floor_area_ft2": 1000}, 556, 91.1)["short"])
+        self.assertIsNone(boiler.sizing({**s, "design_c": ""}, 556))
+        self.assertIsNone(boiler.sizing(s, None))
+
+    def test_short_cycling(self):
+        runs = [{"class": "heating", "start": T0 - 3600 * i, "minutes": m} for i, m in enumerate([4, 6, 8, 30, 5])]
+        runs.append({"class": "hot water", "start": T0, "minutes": 3})
+        c = boiler.short_cycling(runs, T0 + 60)
+        self.assertEqual((c["runs"], c["median_min"], c["short_pct"]), (5, 6, 80))
+        self.assertIsNone(boiler.short_cycling([], T0))
+
+
 SR = {**S, "roles": {**S["roles"], "boiler_switch": "switch.boiler_plug"}, "resets": True}
 CALL = {**IDLE, "thermostat": True, "boiler_switch": True}     # calling, the plug at controls only: "not running on demand"
 
@@ -469,6 +518,45 @@ class ModuleTest(Base):
         with mock.patch.object(hastates, "apply", return_value=False), mock.patch.object(mod.subprocess, "run"):
             modules.set_enabled(self.stack, "boiler", False)
         self.assertIn("resets are off", open(pkg).read())
+
+    def test_efficiency_page_and_propane_split(self):
+        from modules import propane as pmod
+        with mock.patch.object(hastates, "apply", return_value=False), mock.patch.object(mod.subprocess, "run"):
+            mod.form_save(self.stack, self.form(bo_floor_gpm="4", bo_area="2000", bo_indoor="68", bo_design="-10",
+                                                bo_min_btuh="18000", bo_max_btuh="120000"))
+            modules.set_enabled(self.stack, "boiler", True)
+        s = mod.settings(self.stack)
+        self.assertEqual((s["floor_area_ft2"], round(s["indoor_c"], 1), round(s["design_c"], 1)), (2000, 20.0, -23.3))
+        with self.assertRaises(FieldError):
+            mod.form_check(self.stack, self.form(bo_min_btuh="200000", bo_max_btuh="120000"))
+        st = boiler.load(self.stack)
+        st["days"] = {f"2026-11-{10 + i}": fake_day() for i in range(7)}
+        boiler.save(self.stack, st)
+        # propane on, with each day's use
+        import propane
+        pst = propane.load(self.stack)
+        pst["days"] = [{"date": f"2026-11-{10 + i}", "used": 9.0, "filled": 0.0} for i in range(7)]
+        propane.save(self.stack, pst)
+        with mock.patch.object(pmod, "start"):
+            modules.set_enabled(self.stack, "propane", True)
+        with mock.patch.object(time, "time", return_value=T0 + 3600):
+            a = mod.analysis(self.stack, s)
+            page = mod.page(self.stack, {}).body
+            f = mod.ha_fields(self.stack, {})
+            ppage = pmod.page(self.stack, {}).body
+        self.assertEqual(a["week"]["heat_loss_btuh_f"], 556)
+        self.assertEqual(a["week"]["efficiency_pct"], 91.1)
+        self.assertIn("556 BTU/h per °F", page)
+        self.assertIn("91.1%", page)
+        self.assertIn("the house needs about", page)
+        self.assertEqual((f["boiler_heat_loss"], f["boiler_efficiency"]), (556, 91.1))
+        self.assertIn("<th>Heating</th><th>Hot water</th><th>Other</th>", ppage)
+        self.assertIn("<td>7.2</td><td>0.9</td><td>0.9</td>", ppage)
+
+    def test_efficiency_needs_the_flow(self):
+        with mock.patch.object(hastates, "apply", return_value=False):
+            mod.form_save(self.stack, self.form())
+        self.assertIn("Enter the floor flow", mod._efficiency_html(self.stack, mod.settings(self.stack), True))
 
     def test_ha_entities_in_statestream(self):
         with mock.patch.object(hastates, "apply", return_value=False):
