@@ -155,8 +155,11 @@ def test(stack, form):
 # Alerts from Home Assistant (script.solar_notify) and the alerts page
 # --------------------------------------------------------------------------
 def receive(stack, form):
-    """POST /notify/send from Home Assistant: answers "ok" at once and delivers in the background."""
-    if not secrets.compare_digest(form.get("token", ""), notify.box_token(stack)):
+    """POST /notify/send from Home Assistant: answers "ok" at once and delivers in the background. The token comes
+    in the Authorization header; in the payload only from a Home Assistant that hasn't restarted since this box
+    updated (its site.yaml is rewritten and Home Assistant restarted within the update)."""
+    tok = form.get("_bearer") or form.get("token", "")
+    if not secrets.compare_digest(tok, notify.box_token(stack)):
         return Response(403, body="forbidden", ctype="text/plain")
     import threading
     s, voice_on = settings(stack), _voice_on(stack)
