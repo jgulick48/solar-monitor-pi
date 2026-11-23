@@ -1,0 +1,193 @@
+# Boiler and floor-heating probes for the solar monitor's boiler module (wiki: "Boiler, propane and notifications").
+#
+# Board: Olimex ESP32-POE-ISO (PoE, isolated Ethernet), running ESPHome and added to Home Assistant through its
+# ESPHome integration. Six DS18B20 probes on one 1-Wire bus; two optional inputs further down (the wired call for
+# heat from the Taco SR501, and current clamps on the pump panel's two pumps).
+#
+# Setup (esphome/README.md has the wiring and the details):
+#   1. Copy secrets.example.yaml to secrets.yaml and fill it in.
+#   2. Flash once over USB: esphome run boiler-probes.yaml
+#   3. The log lists every probe's address ("Found 1-Wire device ... 0x..."): warm one probe in your hand, note
+#      which address rises, and put each address in the substitutions below; then flash again (over the network).
+#
+# Entity names are what the boiler module looks for (sensor.boiler_probes_floor_supply and so on); keep them.
+
+substitutions:
+  name: boiler-probes
+  friendly_name: Boiler probes
+  # each probe's 1-Wire address, from the log after the first flash
+  addr_floor_supply: "0x0000000000000000"
+  addr_floor_return: "0x0000000000000000"
+  addr_boiler_supply: "0x0000000000000000"
+  addr_boiler_return: "0x0000000000000000"
+  addr_hot_water: "0x0000000000000000"
+  addr_slab: "0x0000000000000000"
+  probe_interval: 15s
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.0
+
+esp32:
+  board: esp32-poe-iso
+  framework:
+    type: esp-idf
+
+ethernet:
+  type: LAN8720
+  mdc_pin: GPIO23
+  mdio_pin: GPIO18
+  clk:
+    pin: GPIO17
+    mode: CLK_OUT
+  phy_addr: 0
+  power_pin: GPIO12
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# A page on the board itself (http://boiler-probes.local) showing every reading, handy while labelling probes.
+web_server:
+  port: 80
+  version: 3
+
+one_wire:
+  - platform: gpio
+    pin: GPIO4
+    id: probes
+
+sensor:
+  - platform: dallas_temp
+    one_wire_id: probes
+    address: ${addr_floor_supply}
+    name: Floor supply
+    id: floor_supply
+    update_interval: ${probe_interval}
+    resolution: 12
+    accuracy_decimals: 2
+  - platform: dallas_temp
+    one_wire_id: probes
+    address: ${addr_floor_return}
+    name: Floor return
+    id: floor_return
+    update_interval: ${probe_interval}
+    resolution: 12
+    accuracy_decimals: 2
+  - platform: dallas_temp
+    one_wire_id: probes
+    address: ${addr_boiler_supply}
+    name: Boiler supply
+    id: boiler_supply
+    update_interval: ${probe_interval}
+    resolution: 12
+    accuracy_decimals: 2
+  - platform: dallas_temp
+    one_wire_id: probes
+    address: ${addr_boiler_return}
+    name: Boiler return
+    id: boiler_return
+    update_interval: ${probe_interval}
+    resolution: 12
+    accuracy_decimals: 2
+  - platform: dallas_temp
+    one_wire_id: probes
+    address: ${addr_hot_water}
+    name: Hot water outlet
+    id: hot_water
+    update_interval: 5s           # the hot-water probe tells a draw from heating: read it more often
+    resolution: 12
+    accuracy_decimals: 2
+  - platform: dallas_temp
+    one_wire_id: probes
+    address: ${addr_slab}
+    name: Slab
+    id: slab
+    update_interval: 60s
+    resolution: 12
+    accuracy_decimals: 2
+
+  # The floor's supply-minus-return difference, as the board sees it (the box applies its learned offsets itself).
+  - platform: template
+    name: Floor difference
+    id: floor_difference
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: ${probe_interval}
+    lambda: |-
+      if (isnan(id(floor_supply).state) || isnan(id(floor_return).state)) return NAN;
+      return id(floor_supply).state - id(floor_return).state;
+
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: ethernet_info
+    ip_address:
+      name: IP address
+      entity_category: diagnostic
+
+binary_sensor:
+  - platform: status
+    name: Status
+
+# ---------------------------------------------------------------------------------------------------------------
+# Optional: the wired call for heat (the Taco SR501's 24 VAC call to the boiler) through an isolated optocoupler
+# input whose output pulls GPIO32 to ground while 24 VAC is present. Uncomment to use.
+# ---------------------------------------------------------------------------------------------------------------
+#  - platform: gpio
+#    name: Call for heat
+#    id: heat_call
+#    pin:
+#      number: GPIO32
+#      mode:
+#        input: true
+#        pullup: true
+#      inverted: true
+#    filters:
+#      - delayed_on: 2s          # AC through an optocoupler flickers: hold before changing
+#      - delayed_off: 2s
+
+# ---------------------------------------------------------------------------------------------------------------
+# Optional: current clamps on the pump panel's boiler and floor pumps (SCT-013 style clamps with a built-in burden,
+# 1 V at full scale, biased to mid-supply; esphome/README.md). Add these under `sensor:` to use them.
+# ---------------------------------------------------------------------------------------------------------------
+#  - platform: adc
+#    pin: GPIO34
+#    id: adc_boiler_pump
+#    attenuation: 12db
+#    update_interval: never
+#  - platform: ct_clamp
+#    sensor: adc_boiler_pump
+#    name: Boiler pump current
+#    update_interval: 10s
+#    sample_duration: 200ms
+#    filters:
+#      - calibrate_linear:
+#          - 0 -> 0
+#          - 0.03 -> 1.0         # calibrate against a clamp meter: measured ADC value -> amps
+#  - platform: adc
+#    pin: GPIO35
+#    id: adc_floor_pump
+#    attenuation: 12db
+#    update_interval: never
+#  - platform: ct_clamp
+#    sensor: adc_floor_pump
+#    name: Floor pump current
+#    update_interval: 10s
+#    sample_duration: 200ms
+#    filters:
+#      - calibrate_linear:
+#          - 0 -> 0
+#          - 0.03 -> 1.0
