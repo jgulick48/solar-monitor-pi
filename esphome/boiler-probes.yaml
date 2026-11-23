@@ -1,8 +1,9 @@
 # Boiler and floor-heating probes for the solar monitor's boiler module (wiki: "Boiler, propane and notifications").
 #
-# Board: Olimex ESP32-POE-ISO (PoE, isolated Ethernet), running ESPHome and added to Home Assistant through its
-# ESPHome integration. Six DS18B20 probes on one 1-Wire bus; two optional inputs further down (the wired call for
-# heat from the Taco SR501, and current clamps on the pump panel's two pumps).
+# Board: Waveshare ESP32-P4-ETH with its PoE module (ESP32-P4, IP101 Ethernet), running ESPHome and added to Home
+# Assistant through its ESPHome integration. DS18B20 probes on two 1-Wire buses: one in the boiler room, one run out
+# to the slab further from the boiler. Two optional inputs further down (the wired call for heat, and current clamps
+# on the pump panel's two pumps).
 #
 # Setup (esphome/README.md has the wiring and the details):
 #   1. Copy secrets.example.yaml to secrets.yaml and fill it in.
@@ -10,18 +11,23 @@
 #   3. The log lists every probe's address ("Found 1-Wire device ... 0x..."): warm one probe in your hand, note
 #      which address rises, and put each address in the substitutions below; then flash again (over the network).
 #
-# Entity names are what the boiler module looks for (sensor.boiler_probes_floor_supply and so on); keep them.
+# The names below are only what Home Assistant shows: the boiler module's setup picks which Home Assistant
+# temperature sensor is which, so renaming a probe or using another board's sensors is fine.
 
 substitutions:
   name: boiler-probes
   friendly_name: Boiler probes
+  # the two 1-Wire bus pins: any free GPIO on the board's header (check its silkscreen)
+  pin_boiler_bus: GPIO20
+  pin_slab_bus: GPIO21
   # each probe's 1-Wire address, from the log after the first flash
   addr_floor_supply: "0x0000000000000000"
   addr_floor_return: "0x0000000000000000"
   addr_boiler_supply: "0x0000000000000000"
   addr_boiler_return: "0x0000000000000000"
   addr_hot_water: "0x0000000000000000"
-  addr_slab: "0x0000000000000000"
+  addr_slab_near: "0x0000000000000000"
+  addr_slab_far: "0x0000000000000000"
   probe_interval: 15s
 
 esphome:
@@ -30,22 +36,25 @@ esphome:
   min_version: 2026.1.0
 
 esp32:
-  board: esp32-poe-iso
+  board: esp32-p4-evboard
+  variant: esp32p4
+  flash_size: 16MB
   framework:
     type: esp-idf
 
 ethernet:
-  type: LAN8720
-  mdc_pin: GPIO23
-  mdio_pin: GPIO18
+  type: IP101
+  mdc_pin: GPIO31
+  mdio_pin: GPIO52
+  power_pin: GPIO51
   clk:
-    pin: GPIO17
-    mode: CLK_OUT
-  phy_addr: 0
-  power_pin: GPIO12
+    pin: GPIO50
+    mode: CLK_EXT_IN
+  phy_addr: 1
 
 logger:
   level: INFO
+  hardware_uart: UART0
 
 api:
   encryption:
@@ -60,14 +69,19 @@ web_server:
   port: 80
   version: 3
 
+# Two buses: the boiler room's five probes, and a separate run to the slab (a long run on its own bus keeps the
+# boiler room's short bus clean). 1-Wire itself has no five-probe limit; what limits a bus is its total cable length.
 one_wire:
   - platform: gpio
-    pin: GPIO4
-    id: probes
+    pin: ${pin_boiler_bus}
+    id: boiler_bus
+  - platform: gpio
+    pin: ${pin_slab_bus}
+    id: slab_bus
 
 sensor:
   - platform: dallas_temp
-    one_wire_id: probes
+    one_wire_id: boiler_bus
     address: ${addr_floor_supply}
     name: Floor supply
     id: floor_supply
@@ -75,7 +89,7 @@ sensor:
     resolution: 12
     accuracy_decimals: 2
   - platform: dallas_temp
-    one_wire_id: probes
+    one_wire_id: boiler_bus
     address: ${addr_floor_return}
     name: Floor return
     id: floor_return
@@ -83,7 +97,7 @@ sensor:
     resolution: 12
     accuracy_decimals: 2
   - platform: dallas_temp
-    one_wire_id: probes
+    one_wire_id: boiler_bus
     address: ${addr_boiler_supply}
     name: Boiler supply
     id: boiler_supply
@@ -91,7 +105,7 @@ sensor:
     resolution: 12
     accuracy_decimals: 2
   - platform: dallas_temp
-    one_wire_id: probes
+    one_wire_id: boiler_bus
     address: ${addr_boiler_return}
     name: Boiler return
     id: boiler_return
@@ -99,7 +113,7 @@ sensor:
     resolution: 12
     accuracy_decimals: 2
   - platform: dallas_temp
-    one_wire_id: probes
+    one_wire_id: boiler_bus
     address: ${addr_hot_water}
     name: Hot water outlet
     id: hot_water
@@ -107,10 +121,18 @@ sensor:
     resolution: 12
     accuracy_decimals: 2
   - platform: dallas_temp
-    one_wire_id: probes
-    address: ${addr_slab}
-    name: Slab
-    id: slab
+    one_wire_id: slab_bus
+    address: ${addr_slab_near}
+    name: Slab near boiler
+    id: slab_near
+    update_interval: 60s
+    resolution: 12
+    accuracy_decimals: 2
+  - platform: dallas_temp
+    one_wire_id: slab_bus
+    address: ${addr_slab_far}
+    name: Slab far
+    id: slab_far
     update_interval: 60s
     resolution: 12
     accuracy_decimals: 2
@@ -144,13 +166,14 @@ binary_sensor:
 
 # ---------------------------------------------------------------------------------------------------------------
 # Optional: the wired call for heat (the Taco SR501's 24 VAC call to the boiler) through an isolated optocoupler
-# input whose output pulls GPIO32 to ground while 24 VAC is present. Uncomment to use.
+# input whose output pulls ${pin_heat_call} to ground while 24 VAC is present. Uncomment, and add a
+# pin_heat_call substitution (a free header GPIO), to use.
 # ---------------------------------------------------------------------------------------------------------------
 #  - platform: gpio
 #    name: Call for heat
 #    id: heat_call
 #    pin:
-#      number: GPIO32
+#      number: ${pin_heat_call}
 #      mode:
 #        input: true
 #        pullup: true
@@ -161,10 +184,11 @@ binary_sensor:
 
 # ---------------------------------------------------------------------------------------------------------------
 # Optional: current clamps on the pump panel's boiler and floor pumps (SCT-013 style clamps with a built-in burden,
-# 1 V at full scale, biased to mid-supply; esphome/README.md). Add these under `sensor:` to use them.
+# 1 V at full scale, biased to mid-supply; esphome/README.md). Add these under `sensor:`, and the
+# pin_boiler_pump / pin_floor_pump substitutions (ADC pins: GPIO16 to GPIO23 on the ESP32-P4), to use them.
 # ---------------------------------------------------------------------------------------------------------------
 #  - platform: adc
-#    pin: GPIO34
+#    pin: ${pin_boiler_pump}
 #    id: adc_boiler_pump
 #    attenuation: 12db
 #    update_interval: never
@@ -178,7 +202,7 @@ binary_sensor:
 #          - 0 -> 0
 #          - 0.03 -> 1.0         # calibrate against a clamp meter: measured ADC value -> amps
 #  - platform: adc
-#    pin: GPIO35
+#    pin: ${pin_floor_pump}
 #    id: adc_floor_pump
 #    attenuation: 12db
 #    update_interval: never
