@@ -202,7 +202,7 @@ class HomeAssistantHandOff(Base):
         except ImportError:
             return
         d = yaml.safe_load(pkg)
-        self.assertEqual([a["id"] for a in d["automation"]], ["solar_notify_deliver", "solar_test_notification"])
+        self.assertEqual([a["id"] for a in d["automation"]], ["solar_notify_deliver", "solar_notify_from_box", "solar_test_notification"])
 
     def test_script_falls_back_to_every_phone(self):
         with open(os.path.join(ROOT, "stack", "homeassistant-seed", "packages", "solar_monitor.yaml")) as f:

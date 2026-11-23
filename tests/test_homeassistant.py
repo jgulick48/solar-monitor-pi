@@ -85,6 +85,8 @@ class HomeAssistant(unittest.TestCase):
         for kind in ("sensor", "binary_sensor"):
             for e in rest[kind]:
                 for k in re.findall(r"value_json\.(\w+)", e["value_template"]):
+                    if f"value_json.{k} is defined" in e.get("availability", ""):
+                        continue                    # an optional module's field: unavailable while it is off
                     self.assertIn(k, keys, e["name"])
                 for k in e.get("json_attributes", []):
                     self.assertIn(k, keys, e["name"])

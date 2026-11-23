@@ -122,6 +122,24 @@ services:
     volumes:
       - tts-data:/data
 
+  # Propane tank level from a Mopeka Pro Check over Bluetooth (setup/propane.py reads its /sensors on
+  # 127.0.0.1:9811). Scans with a raw HCI socket, so host network and NET_RAW/NET_ADMIN; publishes the
+  # tank to Home Assistant through MQTT discovery. Off unless the propane module is on.
+  propane:
+    image: jgulick48/pro-check-server:2026.11.17-2216
+    profiles: [propane]
+    restart: unless-stopped
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    environment:
+      LISTEN_ADDRESS: "127.0.0.1:9811"
+      TANKS: ${PROPANE_TANKS:-}
+      DEFAULT_TANK_TYPE: ${PROPANE_TANK_TYPE:-500g_h}
+      MQTT_BROKER: "tcp://127.0.0.1:1883"
+      MQTT_CLIENT_ID: solar-propane
+      MQTT_USERNAME: homeassistant
+      MQTT_PASSWORD: ${PROPANE_MQTT_PASSWORD:-}
+
   # Backups to a USB stick (setup/backup.py runs it; not a long-running service).
   backup:
     image: restic/restic:0.20.0
