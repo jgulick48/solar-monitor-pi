@@ -66,7 +66,8 @@ def setup_section(stack, msg=""):
 <form method="post" action="/tunnel"><fieldset><legend>Cloudflare Tunnel</legend>
 <p><small>Reach Home Assistant, and the Home Assistant phone app, away from home through your own Cloudflare account and domain,
 without opening anything on the router. Only Home Assistant is published (it has its own login; turn on two-factor authentication
-in your Home Assistant profile). This setup page, Grafana and the cameras stay on the local network.</small></p>
+in your Home Assistant profile), plus ntfy when Notifications use ntfy on this box. This setup page, Grafana and the
+cameras stay on the local network.</small></p>
 <label>Cloudflare account ID {inp('cf_account', d['account_id'], "placeholder='32 letters and digits'")}</label>
 <small>On the Cloudflare dashboard: the domain's overview page, right-hand column, <i>Account ID</i>.</small>
 <div class="row"><label>Name {inp('cf_name', d['name'], "placeholder='solar'")}</label>
@@ -96,6 +97,12 @@ def apply_core_change(stack):
     return ["Home Assistant restarted"] if r.returncode == 0 else [f"Home Assistant restart failed: {r.stderr.strip()[-200:]}"]
 
 
+def _ntfy(stack):
+    """ntfy on this box follows remote access: its address, or stopping without it."""
+    import ntfyserver
+    return ntfyserver.apply(stack) if ntfyserver.chosen(stack) else []
+
+
 def turn_on(stack, form):
     cur = engine.settings(stack)
     try:
@@ -104,7 +111,7 @@ def turn_on(stack, form):
         return Response(400, setup_msg=f"Not saved: {e}.")
     try:
         d = engine.enable(stack, d, prev=cur)
-        msgs = ["remote access on at " + engine.public_url(stack)] + apply_core_change(stack)
+        msgs = ["remote access on at " + engine.public_url(stack)] + apply_core_change(stack) + _ntfy(stack)
         if d["message"]:
             msgs.append(d["message"])
     except engine.CFError as e:
@@ -114,7 +121,7 @@ def turn_on(stack, form):
 
 
 def turn_off(stack, form):
-    msgs = engine.disable(stack, remove=form.get("remove") == "1") + apply_core_change(stack)
+    msgs = engine.disable(stack, remove=form.get("remove") == "1") + apply_core_change(stack) + _ntfy(stack)
     return Response(setup_msg="; ".join(msgs) + ".")
 
 

@@ -10,7 +10,8 @@ Home Assistant's script.solar_notify posts it to /notify/send. By priority:
 
 The same tag with the same text is sent once in 30 minutes. message "clear" removes an alert: from the phones
 (HA app), from the held ones and from the repeats. Channels: the Home Assistant app on the chosen phones (through a
-webhook automation in packages/site.yaml), ntfy (any server: ntfy.sh or your own), and the wall display (spoken by
+webhook automation in packages/site.yaml), ntfy (ntfy.sh, another server, or ntfy on this box behind its remote
+access: setup/ntfyserver.py), and the wall display (spoken by
 the voice module, critical only).
 
   state/notify-state.json   {"held": [...], "active": {tag: {...}}, "recent": {tag+text: time}}
@@ -44,8 +45,8 @@ DEDUPE_S = 1800
 LOG_MAX = 100
 TOPIC_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
-DEFAULTS = {"ha_app": True, "phones": "all", "ntfy": False, "ntfy_server": "https://ntfy.sh", "ntfy_topic": "",
-            "ntfy_token": "", "wall": True, "quiet_from": "22:00", "quiet_to": "07:00"}
+DEFAULTS = {"ha_app": True, "phones": "all", "ntfy": False, "ntfy_box": False, "ntfy_server": "https://ntfy.sh",
+            "ntfy_topic": "", "ntfy_token": "", "wall": True, "quiet_from": "22:00", "quiet_to": "07:00"}
 
 _lock = threading.Lock()
 
@@ -148,12 +149,25 @@ def priority_of(alert):
     return p if p in PRIORITIES else TAG_PRIORITY.get(alert.get("tag", ""), "warning")
 
 
+def ntfy_target(stack, s):
+    """(server, topic, token) the ntfy channel posts to, or None when it isn't set up. ntfy on this box: over
+    localhost, with the box user's token, and only while remote access reaches it (the phones can't otherwise)."""
+    if not s.get("ntfy"):
+        return None
+    if s.get("ntfy_box"):
+        import ntfyserver
+        if not ntfyserver.host(stack):
+            return None
+        return ntfyserver.LOCAL_URL, ntfyserver.topic(stack), ntfyserver.box_token(stack)
+    return (s.get("ntfy_server") or "https://ntfy.sh", s["ntfy_topic"], s.get("ntfy_token", "")) if s.get("ntfy_topic") else None
+
+
 def channels_for(stack, s, priority, voice_on):
     """The channels this priority goes to, from the ones that are set up."""
     ready = []
     if s.get("ha_app") and chosen_phones(stack, s):
         ready.append("ha_app")
-    if s.get("ntfy") and s.get("ntfy_topic"):
+    if ntfy_target(stack, s):
         ready.append("ntfy")
     if priority == "critical":
         return ready + (["wall"] if s.get("wall") and voice_on else [])
@@ -299,10 +313,15 @@ def send(stack, s, a, channels):
                 names = {x["id"]: x["name"] for x in phones(stack)}
                 res[ch] = "sent to " + ", ".join(names.get(i, i) for i in p)
             elif ch == "ntfy":
-                body = {"topic": s["ntfy_topic"], "title": a["title"] or "Solar monitor", "message": a["message"],
+                target = ntfy_target(stack, s)
+                if not target:
+                    res[ch] = "failed: ntfy isn't set up (on this box it needs Remote access)"
+                    continue
+                server, topic, token = target
+                body = {"topic": topic, "title": a["title"] or "Solar monitor", "message": a["message"],
                         "priority": NTFY_PRIORITY[a["priority"]], "tags": [a["tag"]]}
-                hdr = {"Authorization": f"Bearer {s['ntfy_token']}"} if s.get("ntfy_token") else {}
-                _post(s["ntfy_server"].rstrip("/"), body, hdr)
+                hdr = {"Authorization": f"Bearer {token}"} if token else {}
+                _post(server.rstrip("/"), body, hdr)
                 res[ch] = "sent"
             elif ch == "wall":
                 from modules import voice

@@ -32,12 +32,9 @@ def migrate(stack, old, version):
     return old
 
 
-def _tunnel_on(stack):
-    try:
-        import tunnel
-        return bool(tunnel.public_url(stack))
-    except Exception:  # noqa: BLE001
-        return False
+def _ntfy_wanted(stack):
+    import ntfyserver
+    return ntfyserver.wanted(stack)
 
 
 # --------------------------------------------------------------------------
@@ -60,8 +57,25 @@ def form_section(stack):
                   "account and allow notifications; it shows up here.</small></p><input type='hidden' name='nt_all_phones' value='1'>")
     tok = (f"<small>Saved: <code>{e(s['ntfy_token'][:4])}…</code>. Leave empty to keep it; enter <code>-</code> to remove it.</small>"
            if s.get("ntfy_token") else "")
-    own = ("<b>Remote access is set up on this box, so a server of your own behind it is the private choice.</b> "
-           if _tunnel_on(stack) else "")
+    import ntfyserver
+    box_url = ntfyserver.public_url(stack)
+    def radio(v, on, label, disabled=False):
+        return (f"<label style='display:block'><input type='radio' name='nt_where' value='{v}' style='width:auto'"
+                f"{' checked' if on else ''}{' disabled' if disabled else ''}> {label}</label>")
+    if box_url:
+        mine = (f"<b>This box</b>, through its remote access at <code>{e(box_url)}</code>: private, only phones with the "
+                f"password can read it.")
+    else:
+        mine = "<b>This box</b> <small style='display:inline'>(set up Remote access below first: the phones reach it through it)</small>"
+    phone = ""
+    if s.get("ntfy") and s.get("ntfy_box") and box_url:
+        phone = f"""<div style="margin:6px 0 6px 24px;padding:8px;border:1px solid var(--line)"><b>On each phone</b>, in the ntfy app:
+<ol style="margin:4px 0"><li>Settings &rarr; Manage users &rarr; add user: server <code>{e(box_url)}</code>, username
+<code>{ntfyserver.PHONE_USER}</code>, password <code>{e(ntfyserver.phone_password(stack))}</code></li>
+<li>Subscribe to topic <code>{e(ntfyserver.topic(stack))}</code> on <i>Use another server</i>: <code>{e(box_url)}</code></li></ol>
+<small>On an iPhone, alerts arrive through ntfy.sh's push relay (Apple only lets ntfy.sh's app push); it only sees a code for
+the topic, the phone then fetches the message from this box. <button formaction='/notifications/ntfy-password' formmethod='post'
+formnovalidate>New phone password</button> (phones need the new one entered).</small></div>"""
     wall_note = "" if _voice_on(stack) else " <small style='display:inline'>(turn on Voice announcements for this)</small>"
     def test(ch, label):
         return f"<button formaction='/notifications/test' formmethod='post' formnovalidate name='channel' value='{ch}'>{label}</button> "
@@ -72,11 +86,14 @@ summary, service reminders) goes to one channel, also not during quiet hours. <a
 <label>{chk('nt_ha_app', s['ha_app'])} <b>Home Assistant app</b></label>
 <div style="margin-left:24px">{phones}</div>
 <label>{chk('nt_ntfy', s['ntfy'])} <b>ntfy</b> <small style='display:inline'>(the ntfy app, without Home Assistant)</small></label>
+<div style="margin-left:24px">
+{radio('box', s.get('ntfy_box'), mine, disabled=not box_url and not s.get('ntfy_box'))}{phone}
+{radio('server', not s.get('ntfy_box'), '<b>A server</b>: ntfy.sh, or one of your own')}
 <div style="margin-left:24px"><div class="row"><label>Server <input name="nt_server" value="{e(s['ntfy_server'])}" placeholder="https://ntfy.sh"></label>
 <label>Topic <input name="nt_topic" value="{e(s['ntfy_topic'])}" placeholder="made for you when left empty"></label></div>
 <label>Access token <input name="nt_token" type="password" autocomplete="off"></label>{tok}
-<small>{own}ntfy.sh is free and public: anyone who knows the topic can read it, so the topic is a long random name; add an access
-token if you have an ntfy account. Subscribe to the same server and topic in the ntfy app.</small></div>
+<small>ntfy.sh is free and public: anyone who knows the topic can read it, so the topic is a long random name; add an access
+token if you have an ntfy account. Subscribe to the same server and topic in the ntfy app.</small></div></div>
 <label>{chk('nt_wall', s['wall'])} <b>Wall display</b>: speak critical alerts{wall_note}</label>
 <div class="row"><label>Quiet hours from <input name="nt_quiet_from" type="time" value="{e(s['quiet_from'])}"></label>
 <label>to <input name="nt_quiet_to" type="time" value="{e(s['quiet_to'])}"></label></div>
@@ -90,7 +107,11 @@ def _url_ok(u):
 
 
 def form_check(stack, form):
-    if form.get("nt_ntfy") == "1":
+    if form.get("nt_ntfy") == "1" and form.get("nt_where") == "box":
+        import ntfyserver
+        if not ntfyserver.host(stack):
+            raise FieldError("nt_where", "ntfy on this box needs Remote access set up first: the phones reach it through it")
+    elif form.get("nt_ntfy") == "1":
         if not _url_ok(form.get("nt_server", "").strip()):
             raise FieldError("nt_server", "the ntfy server must be an address like https://ntfy.sh")
         t = form.get("nt_topic", "").strip()
@@ -111,6 +132,7 @@ def form_save(stack, form):
         "ha_app": form.get("nt_ha_app") == "1",
         "phones": "all" if every else [i for i in ids if form.get("nt_phone_" + i) == "1"],
         "ntfy": form.get("nt_ntfy") == "1",
+        "ntfy_box": form.get("nt_where") == "box",
         "ntfy_server": form.get("nt_server", "").strip() or "https://ntfy.sh",
         "ntfy_topic": form.get("nt_topic", "").strip() or cur.get("ntfy_topic", ""),
         "ntfy_token": cur.get("ntfy_token", ""),
@@ -123,13 +145,44 @@ def form_save(stack, form):
         new["ntfy_token"] = ""
     elif tok:
         new["ntfy_token"] = tok
-    if new["ntfy"] and not new["ntfy_topic"]:
+    if new["ntfy"] and not new["ntfy_box"] and not new["ntfy_topic"]:
         new["ntfy_topic"] = "solar-" + secrets.token_urlsafe(18).replace("_", "-")
     modules.save(stack, "notifications", new)
     msgs = []
+    was = bool(cur.get("ntfy") and cur.get("ntfy_box"))
+    if was != bool(new["ntfy"] and new["ntfy_box"]):
+        msgs += _ntfy_changed(stack)
     if new["ha_app"] and not every and not new["phones"] and ids:
         msgs.append("no phone is ticked: the Home Assistant app gets no alerts")
     return msgs
+
+
+def _ntfy_changed(stack, on=None):
+    """ntfy on this box turned on or off: start or stop it, and add or remove its route on the tunnel.
+    on: whether it should run (None: as the settings say; on_disable runs while the module is still on)."""
+    import ntfyserver
+    import tunnel
+    return ntfyserver.apply(stack, on) + tunnel.update_routes(stack, ntfy=on)
+
+
+def on_disable(stack):
+    s = settings(stack)
+    if s.get("ntfy") and s.get("ntfy_box"):
+        _ntfy_changed(stack, on=False)
+
+
+def on_enable(stack):
+    s = settings(stack)
+    if s.get("ntfy") and s.get("ntfy_box"):
+        _ntfy_changed(stack)
+
+
+def ntfy_password(stack, form):
+    """POST /notifications/ntfy-password: a new password for the phones on ntfy on this box."""
+    import ntfyserver
+    ntfyserver.reset_phone_password(stack)
+    msgs = ntfyserver.apply(stack)
+    return Response(setup_msg="New ntfy phone password: enter it on each phone. " + "; ".join(msgs) + ".")
 
 
 def test(stack, form):
@@ -139,8 +192,8 @@ def test(stack, form):
     s = settings(stack)
     if ch == "ha_app" and not notify.chosen_phones(stack, s):
         return Response(setup_msg="Not sent: no phone is chosen (or none is signed in to Home Assistant yet).")
-    if ch == "ntfy" and not s.get("ntfy_topic"):
-        return Response(setup_msg="Not sent: turn ntfy on and save first (that makes the topic).")
+    if ch == "ntfy" and not notify.ntfy_target(stack, s):
+        return Response(setup_msg="Not sent: turn ntfy on and save first (on this box it also needs Remote access).")
     if ch == "wall" and not _voice_on(stack):
         return Response(setup_msg="Not sent: turn on Voice announcements first.")
     a = {"tag": "test", "title": "Test from the solar monitor", "priority": "info",
@@ -203,6 +256,10 @@ MODULE = Module(
     form_check=form_check,
     form_save=form_save,
     nav=("/notifications", "Alerts", "Alerts sent"),
-    routes={("POST", "/notify/send"): receive, ("POST", "/notifications/test"): test, ("GET", "/notifications"): page},
+    routes={("POST", "/notify/send"): receive, ("POST", "/notifications/test"): test, ("GET", "/notifications"): page,
+            ("POST", "/notifications/ntfy-password"): ntfy_password},
+    on_enable=on_enable,
+    on_disable=on_disable,
+    compose_profiles=lambda stack: ["ntfy"] if _ntfy_wanted(stack) else [],
     every={60: due},
 )
