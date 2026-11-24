@@ -36,7 +36,8 @@ class Response:
     body: str = ""
     location: Optional[str] = None      # set: a 303 redirect there
     setup_msg: Optional[str] = None     # set: the setup page, with this message in the module's section
-    done: Optional[list] = None         # set: the setup page with these as "Saved: ..." (like the main Save)
+    done: Optional[list] = None         # set: the setup page with these as "Done: ..." (an action button's result)
+    fields: Optional[dict] = None       # with done/setup_msg, for the setup page's script: {data-set name: new text}
     ctype: Optional[str] = None         # set: body is sent as it is (JSON, text), with this Content-Type
 
 
@@ -269,7 +270,7 @@ def setup_sections(stack, msgs=None):
     for m in enabled(stack):
         if m.setup_section:
             try:
-                out.append(m.setup_section(stack, (msgs or {}).get(m.id, "")))
+                out.append(f"<section class='own'>{m.setup_section(stack, (msgs or {}).get(m.id, ''))}</section>")
             except Exception as e:  # noqa: BLE001
                 log(f"{m.id}: setup_section failed:", e)
                 out.append(f"<h2>{m.title}</h2><p class='err'>This section couldn't be shown ({type(e).__name__}: {e}).</p>")
@@ -385,7 +386,8 @@ def switches(stack):
             on = None
         desc = f" <small style='display:inline'>{html.escape(m.description)}</small>" if m.description else ""
         rows.append(f"<label><input type='checkbox' name='module_{m.id}' value='1' style='width:auto'"
-                    f"{' checked' if on else ''}{' disabled' if on is None else ''}> <b>{html.escape(m.title)}</b>{desc}</label>")
+                    f"{' checked' if on else ''}{' disabled' if on is None else ''}> <b>{html.escape(m.title)}</b>{desc}"
+                    f" <span class='pending'>{'press Save site settings to turn it off' if on else 'press Save site settings to turn it on; its settings appear then'}</span></label>")
     return ("<fieldset id='features'><legend>Optional features</legend><input type='hidden' name='modules_form' value='1'>"
             + "".join(rows) + "<small>Turning one off hides its settings and pages and stops what it runs; its settings "
             "are kept for when it's turned on again.</small></fieldset>")

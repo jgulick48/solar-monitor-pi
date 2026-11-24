@@ -77,7 +77,7 @@ cameras stay on the local network.</small></p>
 <p><small>Make one at Cloudflare &rarr; My Profile &rarr; API Tokens &rarr; Create Custom Token with the permissions
 <b>Account &middot; Cloudflare Tunnel &middot; Edit</b>, <b>Zone &middot; DNS &middot; Edit</b> and <b>Zone &middot; Zone &middot; Read</b>
 (limit it to that account and domain). This box keeps the token to update or remove the tunnel later.</small></p>
-<p><button>{'Save and update' if d['enabled'] else 'Turn remote access on'}</button></p></fieldset></form>{off}"""
+<p><button>{'Save remote access' if d['enabled'] else 'Turn remote access on'}</button></p></fieldset></form>{off}"""
 
 
 def apply_core_change(stack):

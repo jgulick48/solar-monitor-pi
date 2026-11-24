@@ -36,7 +36,7 @@ computer logging in; turning SSH access off removes them all.</small></p>
 <textarea name="ssh_keys" rows="3" style="{TEXTAREA}">{html.escape(d['keys'])}</textarea></label>
 <label><input type="checkbox" name="ssh_sudo" value="1" style="width:auto"{' checked' if d['sudo'] else ''}> Administrator rights
 (sudo without a password), needed to update or repair the box</label>
-<p><button>{'Save' if d['enabled'] else 'Turn SSH access on'}</button></p></fieldset></form>{off}"""
+<p><button>{'Save SSH access' if d['enabled'] else 'Turn SSH access on'}</button></p></fieldset></form>{off}"""
 
 
 def card(stack):

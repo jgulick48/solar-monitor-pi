@@ -168,7 +168,7 @@ front of the screen when it sees a person, vehicle, animal or package, or the do
 UniFi OS &rarr; Settings &rarr; Control Plane &rarr; Integrations &rarr; Create API Key.</small></p>
 <div class="row"><label>Console address {f"<input name='protect_host' value='{html.escape(d['host'])}' placeholder='192.168.1.1'>"}</label>
 <label>API key <input name="protect_key" type="password" autocomplete="off"></label></div>{saved}
-<p><button>Save and connect</button></p></fieldset></form>{cams_html}"""
+<p><button>Save console and connect</button></p></fieldset></form>{cams_html}"""
 
 
 def _protect(stack, action, f):

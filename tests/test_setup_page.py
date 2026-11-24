@@ -1,9 +1,17 @@
 """Tests for the setup page's messages: field errors, notices, scrolling to what happened.
 Run: python3 -m unittest discover -s tests -v"""
+import http.server
+import json
 import os
+import re
+import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.parse
+import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "setup"))
 import solar_web  # noqa: E402
@@ -120,3 +128,87 @@ class SetupPage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SavingIsClear(unittest.TestCase):
+    """What the main Save covers, what saves on its own, and buttons that act without throwing edits away."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        os.makedirs(os.path.join(self.tmp.name, "state"))
+        self.old, solar_web.STACK = solar_web.STACK, self.tmp.name
+        os.environ["SOLAR_COMPOSE"] = "true"            # modules that start a container: compose succeeds and does nothing
+        self.old_run, solar_web.run_quietly = solar_web.run_quietly, lambda *a, **k: subprocess.CompletedProcess(a, 0, "", "")
+
+    def tearDown(self):
+        solar_web.run_quietly = self.old_run
+        os.environ.pop("SOLAR_COMPOSE", None)
+        solar_web.STACK = self.old
+        solar_web.modules._ALL = None
+        self.tmp.cleanup()
+
+    def page(self):
+        return solar_web.setup_page(solar_web.load_site())
+
+    def test_one_save_bar_for_the_main_form(self):
+        page = self.page()
+        start, end = page.index("<form method=\"post\" action=\"/setup\" id=\"site-form\">"), page.index("</form>", page.index("id=\"savebar\""))
+        main = page[start:end]
+        self.assertIn("<div class=\"savebar\" id=\"savebar\"><button>Save site settings</button>", main)
+        self.assertEqual(page.count("Save site settings</button>"), 1)
+        self.assertNotIn("<button>Save</button>", page)                  # every save button says what it saves
+        self.assertIn("press Save site settings to turn it off", main)  # beside each module switch
+        # the sections with their own forms come after the main form, under their own heading, each in a box
+        own = page[end:]
+        self.assertIn("<h2>Saved separately</h2>", own)
+        for h2 in ('<h2 id="support">', '<h2 id="ssh">', '<h2 id="remote">'):
+            self.assertNotIn(h2, main)
+            self.assertIn("<section class='own'>" + h2, own)
+        self.assertIn("Save site settings</b> doesn't include them", own)
+
+    def test_action_buttons_answer_without_a_new_page(self):
+        solar_web.modules.set_enabled(self.tmp.name, "voice", True)
+        page = self.page()
+        main = page[page.index("id=\"site-form\""):page.index("id=\"savebar\"")]
+        buttons = []
+        for tag in re.findall(r"<button formaction=[^>]*>", main):
+            nv = re.search(r"name='(\w+)' value='(\w+)'", tag)
+            buttons.append((re.search(r"formaction=['\"]([^'\"]+)", tag).group(1), *(nv.groups() if nv else ("", ""))))
+        actions = {b[0] for b in buttons}
+        self.assertIn(("/notifications/test", "channel", "wall"), buttons)
+        for a in ("/display/test-sound", "/display/restart", "/display/test-power", "/voice/test", "/notifications/test"):
+            self.assertIn(a, actions)
+        self.assertIn("button[formaction]", page)                        # the page's script handles them
+        web = http.server.ThreadingHTTPServer(("127.0.0.1", 0), solar_web.Handler)
+        threading.Thread(target=web.serve_forever, daemon=True).start()
+        try:
+            for url, name, value in buttons:
+                data = urllib.parse.urlencode({"name": "Edited but not saved", **({name: value} if name else {})}).encode()
+                req = urllib.request.Request(f"http://127.0.0.1:{web.server_port}{url}", data=data, method="POST",
+                                             headers={"X-Solar-Action": "1"})
+                try:
+                    r = urllib.request.urlopen(req)
+                except urllib.error.HTTPError as e:
+                    r = e
+                body = r.read().decode()
+                self.assertEqual(r.headers["Content-Type"], "application/json", url)
+                d = json.loads(body)
+                self.assertTrue(d["msg"] and d["msg"][0].isupper(), (url, d))
+                self.assertIsInstance(d["ok"], bool)
+                r.close()
+            ok = json.loads(urllib.request.urlopen(urllib.request.Request(
+                f"http://127.0.0.1:{web.server_port}/voice/test", data=b"", method="POST", headers={"X-Solar-Action": "1"})).read())
+            self.assertEqual(ok, {"ok": True, "msg": "Test announcement sent to the screen.", "set": {}})
+            no = json.loads(urllib.request.urlopen(urllib.request.Request(
+                f"http://127.0.0.1:{web.server_port}/notifications/test", data=b"channel=ha_app", method="POST",
+                headers={"X-Solar-Action": "1"})).read())
+            self.assertFalse(no["ok"])                                    # "Not sent: no phone is chosen ..."
+            # nothing above saved the edited site name
+            self.assertNotEqual(solar_web.load_site()["name"], "Edited but not saved")
+            # without the script (no header) the old way still works, and says Done, not Saved
+            html_page = urllib.request.urlopen(urllib.request.Request(
+                f"http://127.0.0.1:{web.server_port}/display/test-sound", data=b"", method="POST")).read().decode()
+            self.assertIn("Done: test sound sent", html_page)
+            self.assertNotIn("Saved: test sound", html_page)
+        finally:
+            web.shutdown()
+            web.server_close()

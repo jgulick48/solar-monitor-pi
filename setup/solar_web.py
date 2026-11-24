@@ -438,7 +438,16 @@ padding:12px 44px 12px 16px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.
 .toast .x{position:absolute;right:8px;top:6px;background:none;border:0;color:#fff;font-size:22px;padding:2px 8px}
 .bad{border:2px solid #c33!important;box-shadow:0 0 0 3px color-mix(in srgb,#c33 25%,transparent)}
 .fielderr{display:block;color:#c33;font-weight:600;font-size:.9em;margin-top:4px}
-@media (max-width:600px){body{padding:12px} fieldset{padding:6px 12px 14px} .row label{flex-basis:100%}}"""
+/* setup page: the main form's save bar, action results, and the sections saved on their own */
+.savebar{position:sticky;bottom:0;z-index:10;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:16px -16px 0;padding:10px 16px;
+background:var(--bg);border-top:1px solid var(--line);box-shadow:0 -4px 12px rgba(0,0,0,.08)}
+.savebar .state{color:var(--muted)} .savebar.dirty{border-top:2px solid var(--warn)} .savebar.dirty .state{color:var(--warn);font-weight:600}
+.actmsg{display:inline-block;margin-left:8px;font-size:.9em;font-weight:600}.actmsg.ok{color:var(--accent)}.actmsg.err{color:#c33}
+.pending{display:none;color:var(--warn);font-weight:600;font-size:.9em}.pending.on{display:inline}
+.own-intro{margin:56px 0 0;padding-top:20px;border-top:2px solid var(--line)} .own-intro h2{margin:0;padding:0;border:0}
+section.own{border:1px solid var(--line);border-radius:10px;margin:16px 0;padding:4px 16px 12px;
+background:color-mix(in srgb,var(--fg) 3%,var(--bg))} section.own h2{margin:12px 0 4px;padding:0;border:0}
+@media (max-width:600px){body{padding:12px} fieldset{padding:6px 12px 14px} .row label{flex-basis:100%} .savebar{margin:16px -12px 0;padding:8px 12px}}"""
 
 
 NAV = [("/", "Home", "Solar monitor"), ("/setup", "Setup", "Site setup"),
@@ -582,7 +591,32 @@ def mark_field(body, name, error):
     return body[:m.start()] + bad + body[m.end():end] + f"<span class='fielderr'>{html.escape(error)}</span>" + body[end:]
 
 
-def setup_page(site, error="", done=None, error_field="", form=None, module_msgs=None):
+SETUP_JS = """<script>(()=>{
+const f=document.querySelector('#site-form'); if(!f) return;
+const bar=document.querySelector('#savebar'), st=bar.querySelector('.state'); let dirty=false, sending=false;
+const mark=()=>{dirty=true; bar.classList.add('dirty'); st.textContent='Unsaved changes: press Save site settings';};
+f.addEventListener('input',e=>{if(!e.target.closest('[data-nosave]')) mark();});
+f.addEventListener('change',e=>{if(!e.target.closest('[data-nosave]')) mark();
+  const c=e.target; if(c.matches('input[type=checkbox][name^=module_]')){const p=c.closest('label').querySelector('.pending');
+  if(p) p.classList.toggle('on', c.checked!==c.defaultChecked);}});
+f.addEventListener('submit',e=>{const b=e.submitter; if(b&&b.hasAttribute('formaction')) return; sending=true;});
+addEventListener('beforeunload',e=>{if(dirty&&!sending){e.preventDefault(); e.returnValue='';}});
+// Test, restart and similar buttons inside the form: run them without leaving the page, so edits stay
+f.querySelectorAll('button[formaction]').forEach(b=>b.addEventListener('click',async e=>{
+  e.preventDefault(); let m=b.nextElementSibling;
+  if(!m||!m.classList.contains('actmsg')){m=document.createElement('span'); m.setAttribute('aria-live','polite'); b.after(m);}
+  m.className='actmsg'; m.textContent='Working...'; b.disabled=true;
+  const body=new URLSearchParams(new FormData(f)); if(b.name) body.set(b.name,b.value);
+  try{const r=await fetch(b.formAction,{method:'POST',body,headers:{'X-Solar-Action':'1'}}); const j=await r.json();
+    m.className='actmsg '+(j.ok?'ok':'err'); m.textContent=j.msg+(dirty&&j.ok?' (with the saved settings: your changes here are not saved yet)':'');
+    for(const [k,v] of Object.entries(j.set||{})) document.querySelectorAll('[data-set="'+k+'"]').forEach(x=>x.textContent=v);
+  }catch(err){m.className='actmsg err'; m.textContent='No answer from the box: '+err;}
+  b.disabled=false;}));
+})();</script>"""
+
+
+def setup_page(site, error="", done=None, error_field="", form=None, module_msgs=None, done_prefix="Saved"):
+    """done: what a save (or, with done_prefix="Done", an action button) did; shown in the banner."""
     upd = update_settings()
     def inp(name, value, typ="text", extra=""):
         return f"<input name='{name}' type='{typ}' value='{html.escape(str(value))}' {extra}>"
@@ -635,15 +669,25 @@ def setup_page(site, error="", done=None, error_field="", form=None, module_msgs
         if not error_field:
             msg = notice("err", "Not saved: " + error)
     elif done:
-        text = "Saved: " + "; ".join(done) + "."
+        text = f"{done_prefix}: " + "; ".join(done) + "."
         toast, msg = notice("ok", text, toast=True), notice("ok", text, link=("/", "Back to the start page"))
     sections = [(msg, modules.get(mid).title) for mid, msg in (module_msgs or {}).items()]
     for sec_msg, title in sections:
         if sec_msg:
             kind = "err" if is_error(sec_msg) else "ok"
             toast, target = notice(kind, f"{title}: {sec_msg}", toast=True), "notice"
+    own = modules.setup_sections(STACK, module_msgs)
+    own_note = ("The sections under <a href='#own'>Saved separately</a> have their own buttons and aren't part of it."
+                if own else "")
+    if own:
+        own = ("<div class='own-intro' id='own'><h2>Saved separately</h2><p><small>Each of these has its own button, which saves "
+               "only that section, straight away. <b>Save site settings</b> doesn't include them, and they don't save "
+               "changes made above.</small></p></div>" + own)
     body = f"""<h1>Site setup</h1>{toast}{msg}
-<form method="post" action="/setup">
+<p><small>Everything from <i>Optional features</i> to <i>Updates</i> is saved together with the <b>Save site settings</b>
+button at the bottom of the window. The test and restart buttons among them act straight away, with the saved settings.
+{own_note}</small></p>
+<form method="post" action="/setup" id="site-form">
 {modules.switches(STACK)}
 <fieldset><legend>Location</legend>
 <label>Site name {inp('name', site['name'])}</label>
@@ -686,9 +730,10 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
 <label><input type="checkbox" name="auto_update" value="1" style="width:auto"{' checked' if upd['enabled'] else ''}> Install new versions automatically (checked daily, early morning)</label>
 <label>Follow <select name="update_channel"><option value="release"{' selected' if upd['channel'] == 'release' else ''}>Releases (recommended)</option>
 <option value="main"{' selected' if upd['channel'] == 'main' else ''}>Every change on main (test boxes)</option></select></label></fieldset>
-<p><button>Save</button> &nbsp;<a href="/">Cancel</a></p></form>
+<div class="savebar" id="savebar"><button>Save site settings</button><span class="state" aria-live="polite">No unsaved changes</span>
+<a href="/setup">Undo changes</a></div></form>
 <p><small>Saving restarts Home Assistant (about a minute) when the location, time zone or sizes changed.</small></p>
-{modules.setup_sections(STACK, module_msgs)}{scroll_to(target)}"""
+{own}{SETUP_JS}{scroll_to(target)}"""
     if error_field:
         body = mark_field(body, error_field, error)
     return page("Site setup", body)
@@ -902,6 +947,14 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(min(n, 65536)).decode()
         return {k: v[0] for k, v in urllib.parse.parse_qs(raw, keep_blank_values=True).items()}
 
+    def action(self):
+        """A button inside the setup form, sent by the page's script: answer with JSON instead of a new page."""
+        return self.headers.get("X-Solar-Action") == "1"
+
+    def action_reply(self, msg, ok=None, code=200, fields=None):
+        ok = (not is_error(msg)) and code < 400 if ok is None else ok
+        self.send(code if code >= 400 else 200, json.dumps({"ok": ok, "msg": msg, "set": fields or {}}), "application/json")
+
     def module_route(self, method, url_path):
         """An enabled module's page (modules/): True if one answered."""
         mod, fn = modules.route(STACK, method, url_path)
@@ -913,12 +966,15 @@ class Handler(BaseHTTPRequestHandler):
         if auth.startswith("Bearer "):
             form["_bearer"] = auth[7:].strip()    # a token from Home Assistant's rest_command (not in the logged payload)
         r = fn(STACK, form)
-        if r.location:
+        if self.action() and (r.done is not None or r.setup_msg is not None):
+            text = ("; ".join(r.done) + ".") if r.done is not None else r.setup_msg
+            self.action_reply(text[:1].upper() + text[1:], code=r.code, fields=r.fields)
+        elif r.location:
             self.send(303, "", extra={"Location": r.location})
         elif r.ctype:
             self.send(r.code, r.body, r.ctype)
         elif r.done is not None:
-            self.send(r.code, setup_page(load_site(), done=r.done))
+            self.send(r.code, setup_page(load_site(), done=r.done, done_prefix="Done"))
         elif r.setup_msg is not None:
             self.send(r.code, setup_page(load_site(), module_msgs={mod.id: r.setup_msg}))
         else:
@@ -1015,7 +1071,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, "{}", "application/json")
         elif self.path == "/display/test-power":
             sp.TEST["until"] = time.time() + 15
-            self.send(200, setup_page(load_site(), done=["the screen turns off for 15 seconds, then back on"]))
+            done = "the screen turns off for 15 seconds, then back on"
+            if self.action():
+                return self.action_reply(done[:1].upper() + done[1:] + ".")
+            self.send(200, setup_page(load_site(), done=[done], done_prefix="Done"))
         elif self.path == "/inverter/forget":
             try:
                 msgs = ss.forget_dongle(STACK, self.form().get("datalog", ""))
@@ -1025,11 +1084,15 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/display/test-sound":
             display.TEST_SOUND["at"] = time.time()
             ok = display.screen_connected() and run_quietly(["systemctl", "is-active", "--quiet", "solar-display.service"]).returncode == 0
-            self.send(200, setup_page(load_site(), done=["test sound sent to the screen" if ok else
-                                                         "test sound sent, but the screen's dashboard isn't running"]))
+            done = "test sound sent to the screen" if ok else "test sound sent, but the screen's dashboard isn't running"
+            if self.action():
+                return self.action_reply(done[:1].upper() + done[1:] + ".")
+            self.send(200, setup_page(load_site(), done=[done], done_prefix="Done"))
         elif self.path == "/display/restart":
             run_quietly(["systemctl", "reset-failed", "solar-display.service"])
             run_quietly(["systemctl", "restart", "--no-block", "solar-display.service"])
+            if self.action():
+                return self.action_reply("The dashboard on the screen is restarting.")
             self.send(303, "", extra={"Location": "/"})
         elif self.path == "/notify/test":
             msg = send_test_notification()

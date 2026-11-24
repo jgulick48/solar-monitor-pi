@@ -48,7 +48,7 @@ Nothing is opened on your router. It switches itself off when the time you choos
 <label>Their SSH public key(s), one per line <small>(not needed with a support code)</small>
 <textarea name="support_keys" rows="3" style="width:100%;font:inherit;box-sizing:border-box;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px">{html.escape(st['keys'])}</textarea></label>
 <label>Switch off <select name="support_days">{days}</select></label>
-<p><button>{'Save and keep on' if st['enabled'] else 'Turn remote support on'}</button></p></fieldset></form>{off}"""
+<p><button>{'Save remote support' if st['enabled'] else 'Turn remote support on'}</button></p></fieldset></form>{off}"""
 
 
 def banner(stack):
