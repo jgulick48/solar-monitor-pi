@@ -6,12 +6,14 @@ the address (solar -> solar.example.com) and an API token. With those this box:
 
   1. finds the domain's zone,
   2. creates a remotely managed tunnel (or reuses the one it made before),
-  3. points the tunnel at Home Assistant only (http://localhost:8123; everything else 404),
+  3. points the tunnel at Home Assistant (http://localhost:8123; everything else 404) and, when the notifications
+     module's ntfy is set to this box, at ntfy too (<name>-ntfy.<domain> -> http://localhost:2586),
   4. adds a proxied CNAME <name>.<domain> -> <tunnel id>.cfargotunnel.com,
   5. fetches the tunnel's run token and starts the `cloudflared` compose service
      (profile "tunnel", turned on through COMPOSE_PROFILES in .env).
 
-The setup page, Grafana and the cameras are never published. The API token needs:
+The setup page, Grafana and the cameras are never published. update_routes() redoes steps 3-4 when the ntfy
+route is added or removed. The API token needs:
 Account > Cloudflare Tunnel > Edit, Zone > DNS > Edit and Zone > Zone > Read.
 
 Home Assistant is told to trust X-Forwarded-For from localhost (its .storage/http; YAML `http:` is
@@ -184,9 +186,16 @@ def ensure_tunnel(token, acct, tunnel_name, tunnel_id=""):
     return api(token, "POST", f"/accounts/{acct}/cfd_tunnel", {"name": tunnel_name, "config_src": "cloudflare"})["id"]
 
 
-def ingress(host):
-    return {"config": {"ingress": [{"hostname": host, "service": SERVICE, "originRequest": {}},
-                                   {"service": "http_status:404"}]}}
+def ingress(host, extra=()):
+    """The tunnel's routes: Home Assistant, any extra (hostname, service), and 404 for everything else."""
+    rules = [{"hostname": host, "service": SERVICE, "originRequest": {}}]
+    rules += [{"hostname": h, "service": svc, "originRequest": {}} for h, svc in extra]
+    return {"config": {"ingress": rules + [{"service": "http_status:404"}]}}
+
+
+def ntfy_host(d):
+    """The ntfy hostname for these settings (whether or not it is in use)."""
+    return f"{d['name']}-ntfy.{d['domain']}" if d.get("name") else f"ntfy.{d['domain']}"
 
 
 def target(tunnel_id):
@@ -211,12 +220,13 @@ def ensure_dns(token, zone_id, host, tunnel_id, ours=()):
     return api(token, "POST", f"/zones/{zone_id}/dns_records", want)["id"]
 
 
-def _delete_dns(d, tunnel_id):
-    """Delete d's CNAME if (and only if) it points at this tunnel. True when one was deleted."""
+def _delete_dns(d, tunnel_id, host=None):
+    """Delete the CNAME for host (default: d's Home Assistant name) if (and only if) it points at this tunnel.
+    True when one was deleted."""
     if not d.get("zone_id"):
         return False
     gone = False
-    for r in api(d["api_token"], "GET", f"/zones/{d['zone_id']}/dns_records", query={"name": hostname(d)}) or []:
+    for r in api(d["api_token"], "GET", f"/zones/{d['zone_id']}/dns_records", query={"name": host or hostname(d)}) or []:
         if r["type"] == "CNAME" and r["content"] == target(tunnel_id):
             api(d["api_token"], "DELETE", f"/zones/{d['zone_id']}/dns_records/{r['id']}")
             gone = True
@@ -254,10 +264,15 @@ def enable(stack, d, prev=None):
     zone = find_zone(token, acct, d["domain"])
     old = d.get("tunnel_id", "")
     tid = ensure_tunnel(token, acct, f"solar-monitor {host}", old)
-    api(token, "PUT", f"/accounts/{acct}/cfd_tunnel/{tid}/configurations", ingress(host))
+    import ntfyserver
+    extra = [(ntfy_host(d), ntfyserver.SERVICE)] if ntfyserver.chosen(stack) else []
+    api(token, "PUT", f"/accounts/{acct}/cfd_tunnel/{tid}/configurations", ingress(host, extra))
     ensure_dns(token, zone, host, tid, ours=(old,))
+    for h, _ in extra:
+        ensure_dns(token, zone, h, tid, ours=(old,))
     if prev and prev.get("enabled") and prev.get("zone_id") and hostname(prev) != host:
         _delete_dns(prev, tid)
+        _delete_dns(prev, tid, ntfy_host(prev))
     run_token = api(token, "GET", f"/accounts/{acct}/cfd_tunnel/{tid}/token")
     ss.write_if_changed(env_path(stack), f"TUNNEL_TOKEN={run_token}\n", 0o600)
     d = {**d, "enabled": True, "zone_id": zone, "tunnel_id": tid, "message": ""}
@@ -289,6 +304,8 @@ def disable(stack, remove=True):
         try:
             if _delete_dns(d, tid):
                 msgs.append(f"DNS record {hostname(d)} deleted")
+            if _delete_dns(d, tid, ntfy_host(d)):
+                msgs.append(f"DNS record {ntfy_host(d)} deleted")
             api(token, "DELETE", f"/accounts/{acct}/cfd_tunnel/{tid}/connections")
             api(token, "DELETE", f"/accounts/{acct}/cfd_tunnel/{tid}")
             msgs.append("tunnel deleted at Cloudflare")
@@ -297,3 +314,26 @@ def disable(stack, remove=True):
             msgs.append(f"couldn't clean up at Cloudflare ({e}); delete the tunnel there by hand")
         save(stack, d)
     return msgs
+
+
+def update_routes(stack, ntfy=None):
+    """Re-send the tunnel's routes and add or remove the ntfy hostname's DNS record, after the notifications module
+    turned ntfy on this box on or off (ntfy: whether it should be routed; None: as the settings say).
+    Returns messages; Cloudflare errors are reported, not raised."""
+    import ntfyserver
+    d = settings(stack)
+    if not (d["enabled"] and d["tunnel_id"] and d["api_token"]):
+        return []
+    token, acct, tid = d["api_token"], d["account_id"], d["tunnel_id"]
+    on = ntfyserver.chosen(stack) if ntfy is None else ntfy
+    extra = [(ntfy_host(d), ntfyserver.SERVICE)] if on else []
+    try:
+        api(token, "PUT", f"/accounts/{acct}/cfd_tunnel/{tid}/configurations", ingress(hostname(d), extra))
+        if extra:
+            ensure_dns(token, d["zone_id"], ntfy_host(d), tid)
+            return [f"{ntfy_host(d)} added to the tunnel"]
+        if _delete_dns(d, tid, ntfy_host(d)):
+            return [f"{ntfy_host(d)} removed from the tunnel"]
+        return []
+    except CFError as e:
+        return [f"couldn't update the tunnel at Cloudflare: {e}"]

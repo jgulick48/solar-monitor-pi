@@ -95,6 +95,20 @@ services:
         required: false
     depends_on: [homeassistant]
 
+  # ntfy on this box (setup page -> Notifications -> ntfy, "this box"; setup/ntfyserver.py): a private ntfy
+  # server for the alerts, published through the Remote access tunnel at <name>-ntfy.<domain>. Off unless
+  # COMPOSE_PROFILES has "ntfy". Accounts only (deny-all, no sign-up, no web app); config written by the box.
+  ntfy:
+    image: binwiederhier/ntfy:v2.37.2
+    profiles: [ntfy]
+    restart: unless-stopped
+    command: ["serve"]
+    volumes:
+      - ./ntfy/server.yml:/etc/ntfy/server.yml:ro
+      - ntfy-data:/var/cache/ntfy
+    ports:
+      - "127.0.0.1:2586:80"
+
   # Remote support (setup page -> Remote support; setup/support.py): a second cloudflared with a
   # tunnel token from the helper's own Cloudflare account. Off unless COMPOSE_PROFILES has "support";
   # what it publishes (SSH, setup page, Grafana...) is set in that account, behind Cloudflare Access.
@@ -194,6 +208,7 @@ services:
       - restic-cache:/cache
 
 volumes:
+  ntfy-data:
   mosquitto-data:
   vm-data:
   grafana-data:
