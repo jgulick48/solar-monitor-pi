@@ -2,9 +2,10 @@
 // Print in PETG: box open side up, lid outside face down; 0.2 mm layers, 3 walls, no supports needed.
 // Render one part at a time: set PART below, F6, then File > Export > STL.
 //
-// Board outline, RJ45 and USB-C positions come from Waveshare's dimension drawing (ESP32-P4-ETH-details-size.jpg,
-// 78.00 x 21.0 mm). Heights and the PoE module's size are NOT published: the values marked MEASURE are placeholders to
-// be replaced with measurements of the real board before printing. The layout follows the photo in images/poe_board.png:
+// The board's sizes come from Waveshare's outline drawing (ESP32-P4-ETH.zip, outline PDF of 2025-12-19): 78 x 21 mm,
+// 1.6 mm PCB, RJ45 16 wide x 13.3 high and 0.8 past the edge, USB-C 9 x 3.2, header pins 8.3 below the PCB, mounting
+// holes at 22.3 and 76.5 from the RJ45 end and 18.2 apart across, BOOT and RESET 18 from the RJ45 end. The PoE
+// module's size is NOT published: the values marked MEASURE are placeholders until it is measured. The layout follows the photo in images/poe_board.png:
 // the PoE module (B) stacks on top, components down, on the 6-pin header behind the RJ45; header pins point down; the
 // RESET button sits under the board's front long edge just behind the RJ45 (BOOT on the other edge).
 
@@ -13,21 +14,21 @@ PART = "box";              // "box", "lid", or "both" (preview only)
 /* [Board, from Waveshare's drawing] */
 board_l = 78.0;            // along the board, RJ45 end to USB-C end
 board_w = 21.0;
-pcb_t = 1.6;               // MEASURE (usual 1.6)
+pcb_t = 1.6;
 rj45_w = 16.0;             // jack width across the board
-rj45_y = 2.45;             // jack's near edge from the board's bottom long edge
-rj45_h = 13.5;             // MEASURE: jack height above the PCB top
-rj45_overhang = 1.0;       // MEASURE: how far the jack sticks out past the board edge
+rj45_y = 2.5;              // jack's near edge from the board's front (RESET) long edge: (21 - 16) / 2
+rj45_h = 13.3;             // jack height above the PCB top
+rj45_overhang = 0.8;       // how far the jack sticks out past the board edge
 notch_below = 0.5;         // the RJ45-end notch goes this far below the PCB (MEASURE: more if anything underneath reaches that edge)
 usbc_w = 9.0;              // USB-C receptacle width (centred on the board's short edge)
-usbc_h = 3.3;              // receptacle height above the PCB top
-// Mounting holes, from the RJ45 end and the bottom long edge (drawing: 22.26 and 78 - 4.67 = 73.33 along).
-hole_x = [22.26, 73.33];
-hole_y_inset = 1.2;        // MEASURE: hole centre from the long edge
+usbc_h = 3.2;              // receptacle height above the PCB top
+// Mounting holes, from the RJ45 end (22.3, then 54.2 further) and 18.2 apart across the board.
+hole_x = [22.3, 76.5];
+hole_y_inset = 1.4;        // (21 - 18.2) / 2
 hole_d = 2.6;              // MEASURE: hole diameter (the kit's standoffs are M2.5)
 
 /* [Underneath: header pins] */
-under_h = 9.0;             // MEASURE: from the PCB bottom to the header pins' tips; the standoffs are this tall
+under_h = 9.0;             // the header pins reach 8.3 below the PCB; the standoffs are this tall
 
 /* [PoE module (B), stacked on top] */
 poe_x = 19.0;              // MEASURE: its RJ45-end edge, from the board's RJ45 edge
@@ -37,8 +38,8 @@ poe_y = 0.0;               // MEASURE: its front edge, from the board's front lo
 poe_top = 14.0;            // MEASURE: from the main PCB's top to the PoE module's top
 top_h = max(rj45_h, poe_top);   // tallest part above the PCB
 
-/* [RESET button] */
-reset_x = 18.0;            // MEASURE: button centre from the board's RJ45 edge (just behind the jack, under "RESET")
+/* [RESET and BOOT buttons: side-press, under the board's two long edges] */
+reset_x = 18.0;            // button centre from the board's RJ45 edge (both buttons)
 reset_z = -1.5;            // MEASURE: button centre height from the PCB bottom (negative: below the board)
 reset_hole_d = 3.5;        // for a paperclip or a pen tip
 
@@ -144,6 +145,13 @@ module box() {
         }
         translate([board_x0 + reset_x + reset_hole_d / 2 + 2.5, 0.6, pcb_z + reset_z]) rotate([90, 0, 0])
             linear_extrude(1) text("RESET", size = 3, halign = "left", valign = "center");
+        // BOOT, the same through the back wall (hold it while pressing RESET or plugging in, to flash over USB)
+        translate([board_x0 + reset_x, out_w + 1, pcb_z + reset_z]) rotate([90, 0, 0]) {
+            cylinder(d = reset_hole_d, h = wall + 2);
+            cylinder(d1 = reset_hole_d + 3, d2 = reset_hole_d, h = 2.2);
+        }
+        translate([board_x0 + reset_x - reset_hole_d / 2 - 2.5, out_w - 0.6, pcb_z + reset_z]) rotate([90, 0, 180])
+            linear_extrude(1) text("BOOT", size = 3, halign = "left", valign = "center");
         // label engraved 0.6 mm into the front face
         translate([out_l / 2, 0.6, out_h - 6]) rotate([90, 0, 0])
             linear_extrude(1) text("BOILER PROBES", size = 4, halign = "center", valign = "center");
@@ -187,6 +195,7 @@ module board_ghost() {
         translate([0, 0, floor_t]) cube([board_l, board_w, under_h]);                              // header pins
         translate([poe_x, poe_y, pcb_z + pcb_t]) cube([poe_l, poe_w, poe_top]);                    // PoE module on top
         translate([reset_x - 2, -1, pcb_z + reset_z - 1.5]) cube([4, 1.5, 3]);                    // RESET button
+        translate([reset_x - 2, board_w - 0.5, pcb_z + reset_z - 1.5]) cube([4, 1.5, 3]);         // BOOT button
         translate([0, 0, pcb_z]) cube([board_l, board_w, pcb_t]);                                  // PCB
         translate([-rj45_overhang, rj45_y, pcb_z + pcb_t]) cube([22.26 - 2, rj45_w, rj45_h]);     // RJ45 jack
         translate([board_l - 7.5, (board_w - usbc_w) / 2, pcb_z + pcb_t]) cube([7.5 + 0.5, usbc_w, usbc_h]);  // USB-C
