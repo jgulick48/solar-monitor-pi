@@ -2,7 +2,7 @@
 import html
 import re
 
-ERROR_WORDS = re.compile(r"^(not saved|not turned on)|failed|couldn't|can't|didn't|isn't running|wasn't", re.I)
+ERROR_WORDS = re.compile(r"^(not saved|not sent|not turned on)|failed|couldn't|can't|didn't|isn't running|wasn't", re.I)
 
 
 def is_error(text):

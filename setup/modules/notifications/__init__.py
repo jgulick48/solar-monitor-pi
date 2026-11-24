@@ -71,7 +71,7 @@ def form_section(stack):
     if s.get("ntfy") and s.get("ntfy_box") and box_url:
         phone = f"""<div style="margin:6px 0 6px 24px;padding:8px;border:1px solid var(--line)"><b>On each phone</b>, in the ntfy app:
 <ol style="margin:4px 0"><li>Settings &rarr; Manage users &rarr; add user: server <code>{e(box_url)}</code>, username
-<code>{ntfyserver.PHONE_USER}</code>, password <code>{e(ntfyserver.phone_password(stack))}</code></li>
+<code>{ntfyserver.PHONE_USER}</code>, password <code data-set='ntfy-password'>{e(ntfyserver.phone_password(stack))}</code></li>
 <li>Subscribe to topic <code>{e(ntfyserver.topic(stack))}</code> on <i>Use another server</i>: <code>{e(box_url)}</code></li></ol>
 <small>On an iPhone, alerts arrive through ntfy.sh's push relay (Apple only lets ntfy.sh's app push); it only sees a code for
 the topic, the phone then fetches the message from this box. <button formaction='/notifications/ntfy-password' formmethod='post'
@@ -99,7 +99,7 @@ token if you have an ntfy account. Subscribe to the same server and topic in the
 <label>to <input name="nt_quiet_to" type="time" value="{e(s['quiet_to'])}"></label></div>
 <small>Empty: no quiet hours. Box time.</small>
 <p>{test('ha_app', 'Test the app')}{test('ntfy', 'Test ntfy')}{test('wall', 'Test the wall display')}
-<small style="display:inline">save first if you changed something.</small></p></fieldset>"""
+<small style="display:inline">these use the saved settings: save first if you changed something.</small></p></fieldset>"""
 
 
 def _url_ok(u):
@@ -180,9 +180,10 @@ def on_enable(stack):
 def ntfy_password(stack, form):
     """POST /notifications/ntfy-password: a new password for the phones on ntfy on this box."""
     import ntfyserver
-    ntfyserver.reset_phone_password(stack)
+    pw = ntfyserver.reset_phone_password(stack)
     msgs = ntfyserver.apply(stack)
-    return Response(setup_msg="New ntfy phone password: enter it on each phone. " + "; ".join(msgs) + ".")
+    return Response(setup_msg="New ntfy phone password: enter it on each phone. " + "; ".join(msgs) + ".",
+                    fields={"ntfy-password": pw})
 
 
 def test(stack, form):
