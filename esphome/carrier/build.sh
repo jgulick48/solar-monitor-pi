@@ -1,14 +1,14 @@
 #!/bin/sh
 # Builds both carrier boards (THT and SMD) in Docker: placement, Freerouting, ground pours, DRC, fabrication files.
 # Needs Docker and freerouting.jar (https://github.com/freerouting/freerouting/releases, v2.1.0) in this folder.
-# Output: out/<variant>/ with the KiCad board, Gerbers + drill (zipped for the PCB maker), DRC report, renders,
+# Output: fab/<variant>/ with the KiCad board, Gerbers + drill (zipped for the PCB maker), DRC report, renders,
 # and for SMD the JLCPCB BOM and placement files.
 set -eu
 cd "$(dirname "$0")"
 KICAD="docker run --rm -u $(id -u):$(id -g) -e HOME=/w -v $PWD:/w -w /w kicad/kicad:9.0"
 JAVA="docker run --rm -u $(id -u):$(id -g) -e HOME=/w -v $PWD:/w -w /w eclipse-temurin:21-jre"
 for v in ${*:-tht smd}; do
-  o=out/$v; rm -rf "$o"; mkdir -p "$o"
+  o=fab/$v; rm -rf "$o"; mkdir -p "$o"
   $KICAD python3 build_board.py place "$v" "$o/carrier-$v-placed.kicad_pcb"
   $JAVA java -jar freerouting.jar -de "$o/carrier-$v-placed.dsn" -do "$o/carrier-$v.ses" -mp 40 --gui.enabled=false \
     > "$o/freerouting.log" 2>&1 || { tail -20 "$o/freerouting.log"; exit 1; }

@@ -5,7 +5,7 @@ eight probe ports and the boiler module's other inputs, and fits the enclosure i
 
 | THT (hand-soldered) | SMD (factory-assembled resistors and capacitors) |
 | --- | --- |
-| ![](out/tht/render-top.png) | ![](out/smd/render-top.png) |
+| ![](fab/tht/render-top.png) | ![](fab/smd/render-top.png) |
 
 ## What's on it
 
@@ -35,10 +35,10 @@ fit its 1.4 mm holes before ordering.
 | `build_board.py` | Builds the board in KiCad 9's Python: parts, placement, nets, labels; then imports the routes and adds the ground pours |
 | `build.sh` | The whole build in Docker: place, route with [Freerouting](https://github.com/freerouting/freerouting) 2.1.0, ground pours, DRC, Gerbers, drill files, renders, and for SMD the JLCPCB files |
 | `jlc_files.py` | JLCPCB's BOM and placement (CPL) files for the SMD version |
-| `out/<tht or smd>/carrier-*.kicad_pcb` | The routed board, to open in KiCad |
-| `out/<tht or smd>/carrier-*-gerbers.zip` | **Upload this to the PCB maker**: Gerbers and drill files |
-| `out/smd/carrier-smd-jlc-bom.csv`, `-cpl.csv` | For JLCPCB's assembly service (top side) |
-| `out/<tht or smd>/drc.rpt` | KiCad's design rule check |
+| `fab/<tht or smd>/carrier-*.kicad_pcb` | The routed board, to open in KiCad |
+| `fab/<tht or smd>/carrier-*-gerbers.zip` | **Upload this to the PCB maker**: Gerbers and drill files |
+| `fab/smd/carrier-smd-jlc-bom.csv`, `-cpl.csv` | For JLCPCB's assembly service (top side) |
+| `fab/<tht or smd>/drc.rpt` | KiCad's design rule check |
 
 ## Status
 
