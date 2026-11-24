@@ -3,11 +3,19 @@
 A 3D-printed box for the **Waveshare ESP32-P4-ETH with its PoE module** (the board in `../boiler-probes.yaml`):
 the board on four standoffs with the RJ45 jack's front flush with the outside of its end wall (so the latch can be
 pressed to unplug it), USB-C (for flashing) through the other end wall, a bay beside the board
-for the probe buses' screw terminal block and the 4.7 kΩ pull-ups, two grommet holes for the probe cables, screw
-tabs for the wall, and a screwed lid with vents over the PoE end.
+for the probe buses' screw terminal block and the 4.7 kΩ pull-ups, two grommet holes for the probe cables, a
+labelled hole in the front wall for pressing RESET with a paperclip, screw tabs for the wall, and a screwed lid with
+vents over the PoE module.
+
+The layout follows the photo of the board, `images/poe_board.png`. The PoE module (B) stacks **on top**,
+components down, plugged into the 6-pin header just behind the RJ45, and overhangs the board's back edge. The header
+pins point down. RESET is a side-press button under the board's front long edge just behind the RJ45, and BOOT is
+on the other edge.
+
+![The board with the PoE module fitted, and the two apart](images/poe_board.png)
 
 > **Not ready to print yet.** Waveshare's drawing gives the board's outline (78.0 × 21.0 mm), the RJ45 and USB-C
-> positions and the mounting holes along the board, but not the heights or the PoE module. The sizes marked
+> positions and the mounting holes along the board, but not the heights, the PoE module's size or the RESET button's position. The sizes marked
 > `MEASURE` in `boiler-probes-box.scad` are placeholders until the real board is measured. The STLs here are
 > rendered from those placeholders.
 
@@ -17,14 +25,14 @@ tabs for the wall, and a screwed lid with vents over the PoE end.
 | `box.stl`, `lid.stl` | The two parts, rendered from the `.scad` with the current parameters |
 | `images/` | Previews of the same render |
 
-Outside: 82.4 × 56.3 × 31.1 mm, plus a 14 mm screw tab on each end. In the box previews the board, its jacks and the
+Outside: 82.4 × 56.3 × 28.6 mm, plus a 14 mm screw tab on each end. In the box previews the board, its jacks and the
 space under it show see-through (OpenSCAD's preview only; they're never in the STL), to check that nothing is in the way.
 
 ![Box and lid](images/both-iso.png)
 
-| Box: RJ45 end, flush | Box: inside and grommets | Box: USB-C end and label | Lid: lip side and tongue | Lid: outside |
-| --- | --- | --- | --- | --- |
-| ![](images/box-rj45-face.png) | ![](images/box-rj45.png) | ![](images/box-usb.png) | ![](images/lid-lip.png) | ![](images/lid-under.png) |
+| Box: RJ45 end, flush | Box: front, RESET | Box: inside and grommets | Box: USB-C end | Lid: lip side and tongue | Lid: outside |
+| --- | --- | --- | --- | --- | --- |
+| ![](images/box-rj45-face.png) | ![](images/box-front.png) | ![](images/box-rj45.png) | ![](images/box-usb.png) | ![](images/lid-lip.png) | ![](images/lid-under.png) |
 
 **RJ45 end.** The board's end sits in a notch in the end wall, open to the top and as wide as the board, from just
 below the PCB: the board drops in from above and the jack's front ends flush with the outside. The lid has a tongue
@@ -35,13 +43,15 @@ away over the jack. The lid-screw posts fill the inside corners and the board ru
 
 | Parameter | Now | What to measure |
 | --- | --- | --- |
-| `under_h` | 12 mm | PCB bottom to the lowest point underneath (the PoE module, or header pins); the standoffs are this tall |
+| `under_h` | 9 mm | PCB bottom to the header pins' tips; the standoffs are this tall |
 | `rj45_h` | 13.5 mm | RJ45 jack height above the PCB top |
 | `rj45_overhang` | 1.0 mm | How far the jack sticks out past the board's edge (sets where the board sits, so the jack ends flush) |
 | `notch_below` | 0.5 mm | How far below the PCB the RJ45-end notch goes: more if the PoE module or anything underneath reaches that edge |
 | `hole_d`, `hole_y_inset` | 2.6 mm, 1.2 mm | Mounting hole diameter, and its centre's distance from the long edge |
 | `pcb_t` | 1.6 mm | Board thickness |
-| PoE module | not modelled | Above or below the board, its footprint and height |
+| `poe_x`, `poe_l`, `poe_w`, `poe_y` | 19, 52, 27, 0 mm | The PoE module's footprint: where it starts from the RJ45 end, its length, its width, and its front edge from the board's front edge |
+| `poe_top` | 14 mm | Main PCB top to the PoE module's top |
+| `reset_x`, `reset_z` | 18 mm, −1.5 mm | The RESET button's centre: from the board's RJ45 end, and its height from the PCB bottom (negative is below) |
 
 ## Printing
 
