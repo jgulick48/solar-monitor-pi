@@ -713,14 +713,36 @@ def vm_lines(stack, now=None):
         lines.append(f'boiler_probe_offset_c{{pair="{pair}"}} {o.get("c", 0):g}')
     for name, kind, _, _ in RULES:
         lines.append(f'boiler_rule_active{{rule="{name}",kind="{kind}"}} {1 if name in st["active"] else 0}')
+    if last.get("outdoor") is not None:
+        lines.append(f"boiler_outdoor_c {float(last['outdoor']):g}")
+    today = st["days"].get(time.strftime("%Y-%m-%d", time.localtime(now or time.time())))
+    if today:
+        for kind, key in (("all", "burner_min"), ("heating", "heat_min"), ("hot_water", "dhw_min")):
+            lines.append(f'boiler_burner_minutes_today{{kind="{kind}"}} {float(today.get(key, 0)):g}')
+        lines.append(f"boiler_heat_today_kbtu {float(today.get('heat_kbtu', 0)):g}")
+    return lines
+
+
+def day_lines(date, d):
+    """One finished day for VictoriaMetrics (vmdays): burner minutes by kind, runs, faults, heat, outdoor."""
+    f = day_figures(date, d)
+    lines = [f'boiler_day_burner_minutes{{kind="all"}} {float(f["burner_min"]):g}',
+             f'boiler_day_burner_minutes{{kind="heating"}} {float(f["heat_min"]):g}',
+             f'boiler_day_burner_minutes{{kind="hot_water"}} {float(f["dhw_min"]):g}',
+             f"boiler_day_runs {int(f['runs'])}", f"boiler_day_faults {int(d.get('faults', 0))}",
+             f"boiler_day_heat_kbtu {float(f['heat_kbtu']):g}"]
+    if f["outdoor_c"] is not None:
+        lines += [f"boiler_day_outdoor_c {f['outdoor_c']:g}", f"boiler_day_hdd {f['hdd']:g}"]
     return lines
 
 
 def vm_push(stack):
+    import vmdays
     lines = vm_lines(stack)
     if lines:
         req = urllib.request.Request(f"{VM}/api/v1/import/prometheus", data=("\n".join(lines) + "\n").encode(), method="POST")
         urllib.request.urlopen(req, timeout=10).read()
+    vmdays.push(stack, "boiler", load(stack)["days"], day_lines)
 
 
 def summary(stack, s, now=None):

@@ -464,11 +464,36 @@ def vm_lines(stack, s, now=None):
         lines.append(f"water_days_left {v['days_left']:g}")
     for name, *_ in RULES:
         lines.append(f'water_rule_active{{rule="{name}"}} {1 if name in v["active"] else 0}')
+    # which Home Assistant entity fills each role, so Grafana can show its raw readings (ha_state ... and on(entity_id))
+    for role, eid in sorted((s.get("roles") or {}).items()):
+        if eid:
+            lines.append(f'water_role_info{{role="{role}",entity_id="{eid}"}} 1')
     return lines
 
 
+def day_lines_for(s):
+    """lines_for(date, day) for vmdays: one finished day's use, pump runs and fills."""
+    roles = s.get("roles") or {}
+    def lines_for(date, d):
+        out = []
+        use, source = use_of(d, s, roles)
+        if use is not None:
+            out.append(f'water_day_used_gal{{source="{source}"}} {use:g}')
+        if roles.get("pump_power"):
+            out += [f"water_day_pump_run_minutes {d.get('run_s', 0) / 60:.1f}", f"water_day_pump_runs {int(d.get('runs', 0))}",
+                    f"water_day_longest_run_seconds {float(d.get('max_run_s', 0)):g}"]
+        if roles.get("tank_level"):
+            out.append(f"water_day_tank_filled_gal {float(d.get('tank_filled_gal', 0)):g}")
+        night = d.get("night_meter" if roles.get("water_meter") else "night_starts") or []
+        out.append(f"water_day_night_hours {len(night)}")
+        return out
+    return lines_for
+
+
 def vm_push(stack, s):
+    import vmdays
     lines = vm_lines(stack, s)
     if lines:
         req = urllib.request.Request(f"{VM}/api/v1/import/prometheus", data=("\n".join(lines) + "\n").encode(), method="POST")
         urllib.request.urlopen(req, timeout=10).read()
+    vmdays.push(stack, "water", load(stack)["days"], day_lines_for(s))
