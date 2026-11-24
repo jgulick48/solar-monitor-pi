@@ -16,6 +16,7 @@ rj45_w = 16.0;             // jack width across the board
 rj45_y = 2.45;             // jack's near edge from the board's bottom long edge
 rj45_h = 13.5;             // MEASURE: jack height above the PCB top
 rj45_overhang = 1.0;       // MEASURE: how far the jack sticks out past the board edge
+notch_below = 0.5;         // the RJ45-end notch goes this far below the PCB (MEASURE: more if the PoE module reaches the edge)
 usbc_w = 9.0;              // USB-C receptacle width (centred on the board's short edge)
 usbc_h = 3.3;              // receptacle height above the PCB top
 // Mounting holes, from the RJ45 end and the bottom long edge (drawing: 22.26 and 78 - 4.67 = 73.33 along).
@@ -58,18 +59,20 @@ tab_slot_l = 8.0;
 $fn = 48;
 
 // ----------------------------------------------------------------- derived sizes
-in_l = board_l + 2 * clear + rj45_overhang + 2 * boss_d;    // bosses sit in the corners, clear of the board
-// The lid-screw bosses fill the inside corners. The board sits far enough from the front wall that the RJ45
-// opening starts past the front boss (0.5 mm spare), so a plug goes straight in.
-front_gap = max(clear, boss_d + 0.5 + 0.6 - rj45_y);
+// The RJ45 jack's front is flush with the outside of its end wall, so its latch can be pressed: the board's end
+// sits in a notch in that wall. The lid-screw bosses fill the inside corners; the board runs beside the two front
+// ones (0.5 mm spare) so it can reach the end wall.
+board_x0 = rj45_overhang;                   // board's RJ45 edge, from the box's outer RJ45-end face
+front_gap = boss_d + 0.5;
+out_l = board_x0 + board_l + clear + wall;
+in_l = out_l - 2 * wall;
 in_w = front_gap + board_w + clear + tb_bay_w;
 in_h = under_h + pcb_t + top_h + 2;                          // 2 mm above the jack
-out_l = in_l + 2 * wall;
 out_w = in_w + 2 * wall;
 out_h = in_h + floor_t;
 
-board_x0 = wall + boss_d + rj45_overhang;   // board's RJ45 edge, from the box's outer RJ45-end face
 board_y0 = wall + front_gap;                // board's bottom long edge
+notch = [board_y0 - 0.5, board_y0 + board_w + 0.5];          // the notch's span across the end wall
 pcb_z = floor_t + under_h;                  // PCB bottom
 
 module rbox(l, w, h, r) {
@@ -110,9 +113,9 @@ module box() {
                     hull() for (dy = [-tab_slot_l / 2, tab_slot_l / 2]) translate([0, dy, 0]) cylinder(d = tab_slot_w, h = tab_t + 2);
             }
         }
-        // RJ45 opening in the end wall, 0.6 mm clearance all round
-        translate([-1, board_y0 + rj45_y - 0.6, pcb_z + pcb_t - 0.6])
-            cube([wall + 2, rj45_w + 1.2, rj45_h + 1.2]);
+        // RJ45 end: a notch open to the top, as wide as the board, from just below the PCB; the board drops in
+        // with the jack's front flush with the outside. The lid's tongue closes it above the PCB.
+        translate([-1, notch[0], pcb_z - notch_below]) cube([wall + 2, notch[1] - notch[0], out_h]);
         // USB-C opening (for flashing), with room for the plug's overmould
         translate([out_l - wall - 1, board_y0 + board_w / 2 - (usbc_w + 3) / 2, pcb_z + pcb_t - 1.5])
             cube([wall + 2, usbc_w + 3, usbc_h + 3]);
@@ -136,6 +139,14 @@ module lid() {
                 translate([1.6, 1.6, -1]) rbox(in_l - 2 * fit - 3.2, in_w - 2 * fit - 3.2, lip_h + 2, 0.5);
                 for (x = [boss_d / 2 - fit, in_l - fit - boss_d / 2], y = [boss_d / 2 - fit, in_w - fit - boss_d / 2])
                     translate([x, y, -1]) cylinder(d = boss_d + 1, h = lip_h + 2);     // clear of the bosses
+                translate([-1, notch[0] - wall - fit - 1, -1]) cube([3.2, notch[1] - notch[0] + 2, lip_h + 2]);  // over the jack
+            }
+            // tongue that closes the RJ45-end notch above the PCB, around the jack (lid coordinates: z up from
+            // its outside face; fitted, a height z here is at out_h + lid_t - z in the box)
+            jack_top = pcb_z + pcb_t + rj45_h + 0.4;
+            difference() {
+                translate([0, notch[0] + fit, lid_t - 0.01]) cube([wall, notch[1] - notch[0] - 2 * fit, out_h - (pcb_z + pcb_t + 0.3) + 0.01]);
+                translate([-1, board_y0 + rj45_y - 0.4, out_h + lid_t - jack_top]) cube([wall + 2, rj45_w + 0.8, out_h]);
             }
         }
         for (x = [wall + boss_d / 2, out_l - wall - boss_d / 2], y = [wall + boss_d / 2, out_w - wall - boss_d / 2])

@@ -1,7 +1,8 @@
 # Enclosure for the boiler probe board
 
 A 3D-printed box for the **Waveshare ESP32-P4-ETH with its PoE module** (the board in `../boiler-probes.yaml`):
-the board on four standoffs, the RJ45 jack and USB-C (for flashing) through the end walls, a bay beside the board
+the board on four standoffs with the RJ45 jack's front flush with the outside of its end wall (so the latch can be
+pressed to unplug it), USB-C (for flashing) through the other end wall, a bay beside the board
 for the probe buses' screw terminal block and the 4.7 kΩ pull-ups, two grommet holes for the probe cables, screw
 tabs for the wall, and a screwed lid with vents over the PoE end.
 
@@ -16,14 +17,19 @@ tabs for the wall, and a screwed lid with vents over the PoE end.
 | `box.stl`, `lid.stl` | The two parts, rendered from the `.scad` with the current parameters |
 | `images/` | Previews of the same render |
 
-Outside: 99.8 × 54.5 × 31.1 mm, plus a 14 mm screw tab on each end. In the box previews the board, its jacks and the
+Outside: 82.4 × 56.3 × 31.1 mm, plus a 14 mm screw tab on each end. In the box previews the board, its jacks and the
 space under it show see-through (OpenSCAD's preview only; they're never in the STL), to check that nothing is in the way.
 
 ![Box and lid](images/both-iso.png)
 
-| Box: RJ45 end and grommets | Box: USB-C end and label | Lid: lip side | Lid: outside |
-| --- | --- | --- | --- |
-| ![](images/box-rj45.png) | ![](images/box-usb.png) | ![](images/lid-lip.png) | ![](images/lid-under.png) |
+| Box: RJ45 end, flush | Box: inside and grommets | Box: USB-C end and label | Lid: lip side and tongue | Lid: outside |
+| --- | --- | --- | --- | --- |
+| ![](images/box-rj45-face.png) | ![](images/box-rj45.png) | ![](images/box-usb.png) | ![](images/lid-lip.png) | ![](images/lid-under.png) |
+
+**RJ45 end.** The board's end sits in a notch in the end wall, open to the top and as wide as the board, from just
+below the PCB: the board drops in from above and the jack's front ends flush with the outside. The lid has a tongue
+that closes the notch above the PCB around the jack (two fingers beside it and a bar over it), and its lip is cut
+away over the jack. The lid-screw posts fill the inside corners and the board runs beside the two front ones.
 
 ## Still to measure
 
@@ -31,7 +37,8 @@ space under it show see-through (OpenSCAD's preview only; they're never in the S
 | --- | --- | --- |
 | `under_h` | 12 mm | PCB bottom to the lowest point underneath (the PoE module, or header pins); the standoffs are this tall |
 | `rj45_h` | 13.5 mm | RJ45 jack height above the PCB top |
-| `rj45_overhang` | 1.0 mm | How far the jack sticks out past the board's edge |
+| `rj45_overhang` | 1.0 mm | How far the jack sticks out past the board's edge (sets where the board sits, so the jack ends flush) |
+| `notch_below` | 0.5 mm | How far below the PCB the RJ45-end notch goes: more if the PoE module or anything underneath reaches that edge |
 | `hole_d`, `hole_y_inset` | 2.6 mm, 1.2 mm | Mounting hole diameter, and its centre's distance from the long edge |
 | `pcb_t` | 1.6 mm | Board thickness |
 | PoE module | not modelled | Above or below the board, its footprint and height |
