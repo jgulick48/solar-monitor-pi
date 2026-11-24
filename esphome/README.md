@@ -13,8 +13,8 @@ The wiki's *Boiler, propane and notifications* page has the design.
 | PoE switch port or injector | 802.3af |
 | 3 to 7 × DS18B20 waterproof probes | Stainless sleeve with **silicone** cable (rated to about 125 °C); 6 mm sleeves fit most wells |
 | 1 or 2 × 4.7 kΩ resistors | One 1-Wire pull-up per bus in use (about 2.2 kΩ for a bus over about 30 m in total) |
-| Cat5/Cat6 cable, screw terminal block | For the probe bus |
-| Enclosure (3D printed) | `enclosure/`: box and lid for the board, terminal block and probe cables (sizes still to be measured) |
+| Carrier board | `carrier/`: 8 pluggable probe ports with their pull-ups, the heat-call and clamp inputs, OLED header; Gerbers for a through-hole and an SMD version |
+| Enclosure (3D printed) | `enclosure/`: box and lid for the carrier and the board, with the ports in its walls and an OLED window (some sizes still to be measured) |
 | Thermal paste, pipe clamps, pipe insulation | For the pipe-mounted probes |
 | Optional: isolated 24 VAC input module (optocoupler) | Wired call for heat from the Taco SR501 |
 | Optional: 2 × SCT-013 current clamps (1 V output), 2 × 10 kΩ, 10 µF | Boiler and floor pump current |
