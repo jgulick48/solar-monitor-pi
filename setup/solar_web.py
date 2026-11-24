@@ -594,7 +594,7 @@ def mark_field(body, name, error):
 SETUP_JS = """<script>(()=>{
 const f=document.querySelector('#site-form'); if(!f) return;
 const bar=document.querySelector('#savebar'), st=bar.querySelector('.state'); let dirty=false, sending=false;
-const mark=()=>{dirty=true; bar.classList.add('dirty'); st.textContent='Unsaved changes: press Save site settings';};
+const mark=()=>{dirty=true; bar.classList.add('dirty'); st.textContent='Unsaved changes';};
 f.addEventListener('input',e=>{if(!e.target.closest('[data-nosave]')) mark();});
 f.addEventListener('change',e=>{if(!e.target.closest('[data-nosave]')) mark();
   const c=e.target; if(c.matches('input[type=checkbox][name^=module_]')){const p=c.closest('label').querySelector('.pending');
