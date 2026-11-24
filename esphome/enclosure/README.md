@@ -5,7 +5,7 @@ the board on four standoffs with the RJ45 jack's front flush with the outside of
 pressed to unplug it), USB-C (for flashing) through the other end wall, a bay beside the board
 for the probe buses' screw terminal block and the 4.7 kΩ pull-ups, two grommet holes for the probe cables, a
 labelled holes for pressing RESET (front wall) and BOOT (back wall) with a paperclip, screw tabs for the wall, and a screwed lid with
-vents over the PoE module.
+vents over the PoE module and a window for a 0.96" SSD1306 OLED that shows the readings.
 
 The layout follows the photo of the board, `images/poe_board.png`. The PoE module (B) stacks **on top**,
 components down, plugged into the 6-pin header just behind the RJ45, and overhangs the board's back edge. The header
@@ -27,7 +27,7 @@ on the other edge.
 | `box.stl`, `lid.stl` | The two parts, rendered from the `.scad` with the current parameters |
 | `images/` | Previews of the same render |
 
-Outside: 82.2 × 56.3 × 28.6 mm, plus a 14 mm screw tab on each end. In the box previews the board, its jacks and the
+Outside: 82.2 × 56.3 × 34.6 mm, plus a 14 mm screw tab on each end. In the box previews the board, its jacks and the
 space under it show see-through (OpenSCAD's preview only; they're never in the STL), to check that nothing is in the way.
 
 ![Box and lid](images/both-iso.png)
@@ -49,13 +49,22 @@ away over the jack. The lid-screw posts fill the inside corners and the board ru
 | `poe_top` | 14 mm | Main PCB top to the PoE module's top |
 | `reset_z` | −1.5 mm | The RESET and BOOT buttons' centre height from the PCB bottom (negative is below) |
 | `hole_d` | 2.6 mm | Mounting hole diameter |
+| `oled_pcb`, `oled_holes` | 27.3 × 27.8, 23.3 × 23.8 mm | The OLED module's board and its M2 hole spacing (these modules vary) |
+| `oled_view_dy`, `oled_glass_h` | −1.5, 1.8 mm | The display's offset from the module's centre (away from the pins), and its glass height above the module board |
+| `oled_depth` | 6 mm | From the glass front to the back of the module and its wires; the box is this much taller for it |
+
+**OLED.** The lid has a window, chamfered on the outside, and four posts underneath that the module screws to
+with M2 self-tapping screws, its glass just behind the window and its pins toward the back. It sits toward the
+USB-C end, and the vents stop short of it. It's wired to the carrier board's OLED header (`../carrier/`); with
+the board alone, use the header pins 3V3, GND, GPIO7 (SDA) and GPIO8 (SCL). Set `oled = false` to leave it out
+(the box is then 6 mm lower).
 
 ## Printing
 
 - **PETG** (it sits in a warm boiler room; PLA softens at about 55 °C). For PLA, set `fit = 0.15`.
 - 0.2 mm layers, 3 perimeters, 20% infill, no supports.
 - Box: open side up. Lid: outside face down (the lip up).
-- Hardware: 4 × M2.5 self-tapping screws for the board, 4 × M3 × 8 countersunk self-tapping screws for the lid,
+- Hardware: 4 × M2 × 4 self-tapping screws for the OLED, 4 × M2.5 self-tapping screws for the board, 4 × M3 × 8 countersunk self-tapping screws for the lid,
   2 × M3 for the terminal block (or glue it and set `tb_screws = false`), 2 × 9 mm grommets (or PG7 cable glands
   with `grommet_d = 12.5`), and 2 × 4 mm screws through the tabs.
 - A cheap fit check first: print only the RJ45 end (cut the STL in the slicer about 10 mm from that end).

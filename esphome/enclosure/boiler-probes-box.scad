@@ -52,6 +52,16 @@ tb_bay_w = 22.0;           // space beside the board for the block, the 4.7 k re
 grommet_d = 9.0;           // probe cables enter here (a 9 mm rubber grommet, or a PG7 gland with 12.5)
 grommets = 2;              // one per bus
 
+/* [OLED in the lid: SSD1306 0.96" I2C module, screen facing out through a window] */
+oled = true;
+oled_pcb = [27.3, 27.8];   // MEASURE: module board, across (x) and along the pins' direction (y)
+oled_holes = [23.3, 23.8]; // MEASURE: mounting hole spacing (M2), centred on the board
+oled_view = [23.0, 12.5];  // the window: the 21.7 x 10.9 mm active area plus a margin
+oled_view_dy = -1.5;       // MEASURE: window centre from the board centre, away from the pin edge (+y = pin edge)
+oled_glass_h = 1.8;        // MEASURE: from the module board's face to the glass front; the posts are this tall
+oled_depth = 6.0;          // MEASURE: from the glass front to the back of the module and its wires
+oled_pos = [0, 0];         // centre of the module board, from the lid's centre (0, 0 = middle, see below)
+
 /* [Box] */
 wall = 2.4;                // 3 perimeters at 0.4 mm nozzle x 2
 floor_t = 2.0;
@@ -82,7 +92,7 @@ front_gap = boss_d + 0.5;
 out_l = board_x0 + board_l + clear + wall;
 in_l = out_l - 2 * wall;
 in_w = front_gap + board_w + clear + tb_bay_w;
-in_h = under_h + pcb_t + top_h + 2;                          // 2 mm above the jack
+in_h = under_h + pcb_t + top_h + 2 + (oled ? oled_depth : 0); // 2 mm above the jack, plus the OLED hanging from the lid
 out_w = in_w + 2 * wall;
 out_h = in_h + floor_t;
 
@@ -158,6 +168,9 @@ module box() {
     }
 }
 
+// The OLED's centre on the lid: over the board toward the USB-C end, with its pin edge toward the back (+y).
+oled_c = [out_l - wall - 4 - oled_pcb[0] / 2 + oled_pos[0], out_w / 2 + oled_pos[1]];
+
 module lid() {
     difference() {
         union() {
@@ -183,10 +196,28 @@ module lid() {
                 cylinder(d = 3.4, h = lid_t + lip_h + 2);
                 cylinder(d1 = lid_screw_head_d, d2 = 3.4, h = 1.6);    // countersink on the outside face
             }
-        if (vent)                                               // over the PoE module, which makes the most heat
-            for (i = [0 : floor((poe_l - 8) / 4)]) translate([board_x0 + poe_x + 4 + i * 4, board_y0 + poe_y + 3, -1])
-                cube([2, poe_w - 6, lid_t + 2]);
+        if (vent)                                               // over the PoE module, which makes the most heat,
+            for (i = [0 : floor((poe_l - 8) / 4)])               // and clear of the OLED
+                let (x = board_x0 + poe_x + 4 + i * 4)
+                if (!oled || x + 2 < oled_c[0] - oled_pcb[0] / 2 - 2 || x > oled_c[0] + oled_pcb[0] / 2 + 2)
+                    translate([x, board_y0 + poe_y + 3, -1]) cube([2, poe_w - 6, lid_t + 2]);
+        if (oled) {                                             // the window, chamfered 45 degrees on the outside
+            c = [oled_c[0], oled_c[1] + oled_view_dy];
+            translate([c[0] - oled_view[0] / 2, c[1] - oled_view[1] / 2, -1]) cube([oled_view[0], oled_view[1], lid_t + 2]);
+            hull() {
+                translate([c[0] - oled_view[0] / 2, c[1] - oled_view[1] / 2, lid_t / 2]) cube([oled_view[0], oled_view[1], 0.01]);
+                translate([c[0] - oled_view[0] / 2 - lid_t / 2 - 0.5, c[1] - oled_view[1] / 2 - lid_t / 2 - 0.5, -0.01])
+                    cube([oled_view[0] + lid_t + 1, oled_view[1] + lid_t + 1, 0.01]);
+            }
+        }
     }
+    // OLED posts: the module's glass rests just behind the window, its board on these with M2 self-tapping screws
+    if (oled)
+        for (dx = [-oled_holes[0] / 2, oled_holes[0] / 2], dy = [-oled_holes[1] / 2, oled_holes[1] / 2])
+            translate([oled_c[0] + dx, oled_c[1] + dy, lid_t - 0.01]) difference() {
+                cylinder(d = 4.2, h = oled_glass_h + 0.01);
+                cylinder(d = 1.7, h = oled_glass_h + 1);
+            }
 }
 
 // The board, its jacks and the space under it, see-through in the preview (F5) only: never part of an STL.
