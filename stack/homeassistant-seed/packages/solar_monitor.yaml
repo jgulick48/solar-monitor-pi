@@ -64,6 +64,41 @@ rest:
         value_template: "{{ value_json.propane_used_yesterday }}"
         unit_of_measurement: gal
         icon: mdi:gas-cylinder
+      # Water module (monitoring only; the pump plug, tank and meter are Home Assistant's own entities)
+      - name: Site water pump run today
+        unique_id: site_water_pump_run_today_min
+        availability: "{{ value_json.water_pump_run_today_min is defined and value_json.water_pump_run_today_min is not none }}"
+        value_template: "{{ value_json.water_pump_run_today_min }}"
+        unit_of_measurement: min
+        icon: mdi:water-pump
+      - name: Site water pump starts today
+        unique_id: site_water_pump_starts_today
+        availability: "{{ value_json.water_pump_starts_today is defined and value_json.water_pump_starts_today is not none }}"
+        value_template: "{{ value_json.water_pump_starts_today }}"
+        icon: mdi:water-pump
+      - name: Site water used today
+        unique_id: site_water_used_today
+        availability: "{{ value_json.water_used_today is defined and value_json.water_used_today is not none }}"
+        value_template: "{{ value_json.water_used_today }}"
+        unit_of_measurement: gal
+        icon: mdi:water
+      - name: Site water days left
+        unique_id: site_water_days_left
+        availability: "{{ value_json.water_days_left is defined and value_json.water_days_left is not none }}"
+        value_template: "{{ value_json.water_days_left }}"
+        unit_of_measurement: d
+        icon: mdi:water
+      - name: Site water tank level
+        unique_id: site_water_tank_percent
+        availability: "{{ value_json.water_tank_percent is defined and value_json.water_tank_percent is not none }}"
+        value_template: "{{ value_json.water_tank_percent }}"
+        unit_of_measurement: "%"
+        icon: mdi:water-percent
+      - name: Site water alert
+        unique_id: site_water_alert
+        availability: "{{ value_json.water_alert is defined and value_json.water_alert is not none }}"
+        value_template: "{{ value_json.water_alert }}"
+        icon: mdi:water-alert
       # Boiler module (monitoring only; the probes, plugs and thermostat are Home Assistant's own entities)
       - name: Site boiler state
         unique_id: site_boiler_state
@@ -313,6 +348,12 @@ rest:
         availability: "{{ value_json.boiler_reset_allowed is defined }}"
         value_template: "{{ value_json.boiler_reset_allowed }}"
         icon: mdi:restart-alert
+      # the water module: the pump running now
+      - name: Site water pump running
+        unique_id: site_water_pump_running
+        availability: "{{ value_json.water_pump_running is defined and value_json.water_pump_running is not none }}"
+        value_template: "{{ value_json.water_pump_running }}"
+        device_class: running
       - name: Site data stale
         unique_id: site_data_stale
         value_template: "{{ value_json.data_stale }}"
