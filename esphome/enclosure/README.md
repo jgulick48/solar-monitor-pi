@@ -16,7 +16,8 @@ tabs for the wall, and a screwed lid with vents over the PoE end.
 | `box.stl`, `lid.stl` | The two parts, rendered from the `.scad` with the current parameters |
 | `images/` | Previews of the same render |
 
-Outside: 99.8 × 49.8 × 31.1 mm, plus a 14 mm screw tab on each end.
+Outside: 99.8 × 54.5 × 31.1 mm, plus a 14 mm screw tab on each end. In the box previews the board, its jacks and the
+space under it show see-through (OpenSCAD's preview only; they're never in the STL), to check that nothing is in the way.
 
 ![Box and lid](images/both-iso.png)
 

@@ -59,14 +59,17 @@ $fn = 48;
 
 // ----------------------------------------------------------------- derived sizes
 in_l = board_l + 2 * clear + rj45_overhang + 2 * boss_d;    // bosses sit in the corners, clear of the board
-in_w = board_w + 2 * clear + tb_bay_w;
+// The lid-screw bosses fill the inside corners. The board sits far enough from the front wall that the RJ45
+// opening starts past the front boss (0.5 mm spare), so a plug goes straight in.
+front_gap = max(clear, boss_d + 0.5 + 0.6 - rj45_y);
+in_w = front_gap + board_w + clear + tb_bay_w;
 in_h = under_h + pcb_t + top_h + 2;                          // 2 mm above the jack
 out_l = in_l + 2 * wall;
 out_w = in_w + 2 * wall;
 out_h = in_h + floor_t;
 
 board_x0 = wall + boss_d + rj45_overhang;   // board's RJ45 edge, from the box's outer RJ45-end face
-board_y0 = wall + clear;                    // board's bottom long edge
+board_y0 = wall + front_gap;                // board's bottom long edge
 pcb_z = floor_t + under_h;                  // PCB bottom
 
 module rbox(l, w, h, r) {
@@ -145,8 +148,18 @@ module lid() {
     }
 }
 
-if (PART == "box") box();
+// The board, its jacks and the space under it, see-through in the preview (F5) only: never part of an STL.
+module board_ghost() {
+    %translate([board_x0, board_y0, 0]) {
+        translate([0, 0, floor_t]) cube([board_l, board_w, under_h]);                              // PoE module, pins
+        translate([0, 0, pcb_z]) cube([board_l, board_w, pcb_t]);                                  // PCB
+        translate([-rj45_overhang, rj45_y, pcb_z + pcb_t]) cube([22.26 - 2, rj45_w, rj45_h]);     // RJ45 jack
+        translate([board_l - 7.5, (board_w - usbc_w) / 2, pcb_z + pcb_t]) cube([7.5 + 0.5, usbc_w, usbc_h]);  // USB-C
+    }
+}
+
+if (PART == "box") { box(); board_ghost(); }
 else if (PART == "lid") lid();
-else { box(); translate([0, 0, out_h + 20]) mirror([0, 0, 1]) translate([0, 0, -lid_t]) lid(); }
+else { box(); board_ghost(); translate([0, 0, out_h + 20]) mirror([0, 0, 1]) translate([0, 0, -lid_t]) lid(); }
 
 echo(str("outside: ", out_l, " x ", out_w, " x ", out_h, " mm (plus ", tab_l, " mm tabs each end); inside height ", in_h));
