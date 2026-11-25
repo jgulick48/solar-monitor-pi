@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import solar_setup as ss  # noqa: E402
 import modules  # noqa: E402
 import hastates  # noqa: E402
+import history  # noqa: E402
 import loadprofile  # noqa: E402
 import weather  # noqa: E402
 import wx  # noqa: E402
@@ -162,6 +163,7 @@ def main():
     marker = os.path.join(args.stack, "state", "openmeteo-backfilled")
     last_om = 0.0
     last_profile, profile_use = 0.0, None
+    last_history = time.time() - 3300               # first a few minutes after starting, then hourly
     hooks = {}
     seen = {}
     site_changed(args.stack, seen)
@@ -197,6 +199,13 @@ def main():
                     log(f"expected use: {doc['use']} ({doc['why']})")
             except Exception as e:  # noqa: BLE001 - keep collecting
                 log("expected-use profile failed:", e)
+        if time.time() - last_history >= 3600:      # finished days as their own samples, for the History page
+            last_history = time.time()
+            try:
+                for line in history.collect(args.stack):
+                    log(line)
+            except Exception as e:  # noqa: BLE001 - keep collecting
+                log("history: storing days failed:", e)
         modules.run_due(args.stack, hooks)          # the enabled modules' own schedules (remote support, weather, cameras, generator log)
         if args.once:
             return

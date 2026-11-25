@@ -24,7 +24,7 @@ for _p in glob.glob(os.path.join(ROOT, "setup", "**", "*.py"), recursive=True):
     with open(_p) as _f:
         SOURCE += _f.read() + "\n"
 FUNCS = {"avg_over_time", "last_over_time", "max_over_time", "min_over_time", "sum_over_time", "increase", "rate", "sum",
-         "avg", "max", "min", "on", "and", "by", "label_values", "clamp_min", "deriv", "delta", "count"}
+         "avg", "max", "min", "on", "and", "by", "label_values", "clamp_min", "deriv", "delta", "count", "offset", "d"}
 
 
 def load(path):
@@ -56,21 +56,23 @@ class Dashboards(unittest.TestCase):
     def test_metrics_exist(self):
         """Every metric a module dashboard queries is written by the box (a renamed metric breaks a panel silently)."""
         for path in BOARDS:
-            if os.path.basename(path) not in ("boiler.json", "water.json"):
+            if os.path.basename(path) not in ("boiler.json", "water.json", "history.json"):
                 continue
             for title, e in exprs(load(path)):
                 names = {m for m in re.findall(r"\b([a-z][a-z0-9_]*)\b(?=\s*(?:\{|\[|$|\)|\s|\*|/|and))", re.sub(r'"[^"]*"', "", e))}
                 for m in names - FUNCS - {"tu", "entity_id", "role", "kind", "source", "rule", "pair"}:
-                    if m.startswith(("boiler_", "water_", "ha_")):
+                    if m.startswith(("boiler_", "water_", "ha_", "site_day_", "propane_day_")):
                         self.assertTrue(m in SOURCE, f"{os.path.basename(path)} / {title}: {m} is not written anywhere")
 
     def test_day_bars_use_day_samples(self):
         """Per-day bars read the noon-stamped day samples, one per day-wide window."""
         for path in BOARDS:
             for title, e in exprs(load(path)):
-                if "_day_" in e:
+                if "_day_" in e and "sum_over_time(" in e:
+                    self.assertRegex(e, r"\[\d+d[\] ]", title)        # a total over whole days: one sample per day in any of them
+                elif "_day_" in e:
                     self.assertIn("last_over_time(", e, title)
-                    self.assertIn("[1d]", e, title)
+                    self.assertIn("[1d", e, title)
 
 
 class Days(unittest.TestCase):

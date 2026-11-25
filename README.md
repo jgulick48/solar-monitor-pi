@@ -204,6 +204,20 @@ forecast, the box itself (temperature, power, disk, services) and the clock. Ena
 notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras and freeze
 protection. Open it after first setup, and whenever something seems off.
 
+## History: this year against last
+
+`http://solar-monitor.local/history` (*History* in the header) shows each of the last 12 months against the same
+month a year earlier, with the change in percent: solar, use, generator hours, and propane and water while those
+modules are on. The month under way is compared with the same days last year, not the whole month. Only days with
+data are counted, and a month that misses days says how many it has. Until the box has a year of data the earlier
+column is empty.
+
+The figures come from per-day totals the collector stores once each day is over (`site_day_solar_kwh`,
+`site_day_used_kwh`, `site_day_generator_hours`, `site_day_generator_kwh`, `site_day_low_soc`,
+`propane_day_used_gal`), with days cut at the site's midnight. On its first runs it goes back to the oldest inverter
+data the box has, 90 days an hour. Grafana has the dashboard *History: this year against last*: 30-day totals and
+daily bars against the same days a year earlier. The data is kept for 5 years.
+
 ## Settings file (export and import)
 
 *Setup* &rarr; *Settings file* (`/config`) downloads this box's settings as one JSON file and imports such a file from
