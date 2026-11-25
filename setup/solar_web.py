@@ -714,7 +714,10 @@ Sundays also the week and the advisor's latest finding. Sent before 06:00 it cov
 {arrays}
 <fieldset><legend>Inverters</legend><label>Model <select name="inverter_model">{inv_opts}</select></label>
 <small>{n_inv} inverter dongle(s) found on the network. Used by the advisor for output, solar input and charging limits.</small></fieldset>
-<fieldset><legend>Sunlight data (for the advisor)</legend>
+<fieldset><legend>Weather data</legend>
+<small>With a weather station, its readings are what the box uses now: the screen's temperature, wind, rain and the
+like, and the sunlight for the advisor. Forecasts always come from Open-Meteo (a station only measures the present):
+the screen's forecast and the solar forecast, which also sends the site location.</small>
 <label><input type="radio" name="weather_source" value="openmeteo" style="width:auto"{' checked' if wth['source'] == 'openmeteo' else ''}>
  Open-Meteo (free online weather service; sends the site location)</label>
 <label><input type="radio" name="weather_source" value="station" style="width:auto"{' checked' if wth['source'] == 'station' else ''}>

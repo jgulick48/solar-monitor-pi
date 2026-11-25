@@ -142,7 +142,9 @@ def median(v):
 
 
 def build_steps(S, site):
-    """Per 15 minutes: t, pv_kw, load_kw, soc, gen_kw (inverter + external), raw potential (k=1, kW) or None."""
+    """Per 15 minutes: t, pv_kw, load_kw, soc, gen_kw (inverter + external), raw potential (k=1, kW) or None, from the
+    station's sunlight when it has enough, else Open-Meteo's; and raw_om, the same from Open-Meteo's alone (for the
+    solar forecast's calibration, which scales Open-Meteo's forecast)."""
     lat, lon = float(site["latitude"]), float(site["longitude"])
     arrays = site["arrays"]
     kwp = [int(a["panels"]) * int(a["panel_watts"]) / 1000 for a in arrays]
@@ -153,25 +155,28 @@ def build_steps(S, site):
         if t not in S["soc"] or t not in S["load"]:
             continue
         temp = S["temp"].get(t, 15.0)
-        raw = None
-        if use_station and t in S["ghi"]:
-            p = [poa(S["ghi"][t], t - STEP / 2, lat, lon, int(a["tilt"]), int(a["azimuth"])) for a in arrays]
-            raw = sum(k * x / 1000 * (1 + GAMMA * (temp + x / 800 * 20 - 25)) for k, x in zip(kwp, p))
-        elif gti:
+        raw = raw_om = None
+        if gti:
             hour_end = (t + 3599) // 3600 * 3600  # Open-Meteo value at hour end = mean of that hour
             vals = [gti.get(str(i), {}).get(hour_end) for i in range(1, len(arrays) + 1)]
             if all(v is not None for v in vals):
-                raw = sum(k * x / 1000 * (1 + GAMMA * (temp + x / 800 * 20 - 25)) for k, x in zip(kwp, vals))
+                raw_om = sum(k * x / 1000 * (1 + GAMMA * (temp + x / 800 * 20 - 25)) for k, x in zip(kwp, vals))
+        if use_station and t in S["ghi"]:
+            p = [poa(S["ghi"][t], t - STEP / 2, lat, lon, int(a["tilt"]), int(a["azimuth"])) for a in arrays]
+            raw = sum(k * x / 1000 * (1 + GAMMA * (temp + x / 800 * 20 - 25)) for k, x in zip(kwp, p))
+        elif raw_om is not None:
+            raw = raw_om
         inv_net = S["chg"].get(t, 0) - S["dis"].get(t, 0)
         ext = max(S["bms_w"].get(t, inv_net) - inv_net, 0) if t in S["bms_w"] else 0.0
         steps.append({"t": t, "pv": S["pv"][t] / 1000, "load": S["load"][t] / 1000, "soc": S["soc"][t],
-                      "gen": max(S["gen"].get(t, 0), 0) / 1000 + (ext / 1000 if ext > 500 else 0), "raw": raw})
+                      "gen": max(S["gen"].get(t, 0), 0) / 1000 + (ext / 1000 if ext > 500 else 0), "raw": raw,
+                      "raw_om": raw_om})
     return steps, ("weather station" if use_station else "Open-Meteo" if gti else "none")
 
 
-def calibrate(steps, total_kwp):
-    """k = actual / raw potential, median over daylight samples with the batteries not full."""
-    r = [s["pv"] / s["raw"] for s in steps if s["raw"] and s["soc"] < 95 and s["raw"] > 0.15 * total_kwp and s["pv"] > 0.05 * total_kwp]
+def calibrate(steps, total_kwp, key="raw"):
+    """k = actual / raw potential (steps' `key`), median over daylight samples with the batteries not full."""
+    r = [s["pv"] / s[key] for s in steps if s.get(key) and s["soc"] < 95 and s[key] > 0.15 * total_kwp and s["pv"] > 0.05 * total_kwp]
     return (median(r), len(r)) if len(r) >= 40 else (None, len(r))
 
 
@@ -274,6 +279,9 @@ def analyse(stack, days=400):
         return {**result, "status": "collecting", "message": f"{n_days:.0f} days of data so far; the first rough analysis needs a week, a good one a full winter."}
 
     k, n_cal = calibrate(steps, total_kwp)
+    # the solar forecast scales Open-Meteo's forecast, so it needs the calibration against Open-Meteo, also when a
+    # weather station's sunlight is what the analysis uses
+    k_om = k if source == "Open-Meteo" else calibrate(steps, total_kwp, "raw_om")[0]
     for s in steps:
         s["pot"] = s["raw"] * k if (k and s["raw"] is not None) else None
     have_pot = k is not None
@@ -281,6 +289,7 @@ def analyse(stack, days=400):
     winter = any(m[5:] in ("11", "12", "01", "02") for m in months)
     result["data"] = {"days": round(n_days), "from": day_of(steps[0]["t"]), "to": day_of(steps[-1]["t"]),
                       "calibration": round(k, 3) if k else None, "calibration_samples": n_cal, "covers_winter": winter,
+                      "calibration_openmeteo": round(k_om, 3) if k_om else None,
                       "confidence": "low" if n_days < 60 or not have_pot else ("medium" if not winter or n_days < 300 else "good")}
     result["months"] = measured(steps, low_soc)
 
