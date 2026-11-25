@@ -1206,6 +1206,8 @@ def main():
     args = ap.parse_args()
     STACK = args.stack
     if modules.load(STACK, "cameras")["enabled"]:
+        from modules import cameras as cameras_module
+        cameras_module.watch_events(STACK)     # phone notifications with the camera's picture
         protect.listen(STACK)      # UniFi Protect events for the wall display, if set up (the cameras module)
     ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
 

@@ -87,6 +87,22 @@ def api(host, key, method, rel, body=None, timeout=15, opener=None):
     return json.loads(raw) if raw else None
 
 
+def snapshot(host, key, cam_id, timeout=10, opener=None):
+    """The camera's picture now, as JPEG bytes. Raises ProtectError."""
+    req = urllib.request.Request(f"https://{host}{BASE}/cameras/{cam_id}/snapshot?highQuality=false",
+                                 headers={"X-API-Key": key, "Accept": "image/jpeg"})
+    try:
+        with (opener or urllib.request.urlopen)(req, timeout=timeout, context=_ctx()) as r:
+            raw = r.read(8 << 20)
+    except urllib.error.HTTPError as e:
+        raise ProtectError(f"UniFi Protect said {e.code} {e.reason} for the snapshot")
+    except (urllib.error.URLError, OSError) as e:
+        raise ProtectError(f"can't reach {host}: {getattr(e, 'reason', e)}")
+    if not raw.startswith(b"\xff\xd8"):
+        raise ProtectError("the snapshot isn't a JPEG picture")
+    return raw
+
+
 def clean_host(s):
     s = (s or "").strip()
     for p in ("https://", "http://"):
@@ -142,6 +158,7 @@ class Events:
         self.connected = False
         self.error = ""
         self.last_message = 0.0
+        self.listeners = []      # fn(camera id, label, time): called once per event and label (a doorbell ring, a person)
 
     def handle(self, msg, now=None):
         now = now or time.time()
@@ -171,6 +188,16 @@ class Events:
             if len(self.items) > 300:   # forget the oldest
                 for k in sorted(self.items, key=lambda k: self.items[k]["seen"])[:100]:
                     self.items.pop(k)
+            fire = None
+            if cur["device"] and cur["label"] not in cur.setdefault("told", []) and now - cur["start"] < OPEN_MAX_S:
+                cur["told"].append(cur["label"])
+                fire = (cur["device"], cur["label"], cur["start"])
+        if fire:
+            for fn in list(self.listeners):
+                try:
+                    fn(*fire)
+                except Exception:  # noqa: BLE001 - a listener's trouble never stops the event stream
+                    pass
 
     def active(self, highlight_motion=False, now=None):
         """{camera id: {"label", "level", "since"}} for cameras with something going on now or in the last minute."""
