@@ -11,6 +11,7 @@ It's in **two parts, split at the top of the port windows**, so the carrier drop
 - **`cover.stl`:** the upper walls and the top in one piece, with the OLED window, vents and labels. Its lower edge
   closes the slots; the RJ45 passes through a U open at its bottom edge.
 - Four **ears** outside the front and back walls, at the split, hold them together with M3 screws from the top.
+- **`cover-text.stl`:** the cover's lettering on its own, for a second colour (see *Printing*).
 
 ![Base and cover, front](images/both-front.png)
 
@@ -70,14 +71,20 @@ The ESP board's sizes come from Waveshare's outline drawing (`ESP32-P4-ETH.zip` 
 
 - **PETG** (it sits in a warm boiler room; PLA softens at about 55 °C). For PLA, set `fit = 0.15`.
 - 0.2 mm layers, 3 perimeters, 20% infill, no supports.
-- Base: open side up. Cover: top face down (`cover.stl` is already turned over).
+- Base: open side up. Cover: top face down (`cover.stl` is already turned over, by a rotation, so its lettering reads
+  the right way).
+- **Coloured lettering** (multi-colour printers): the labels are 0.6 mm recesses in the cover, and `cover-text.stl` is
+  the lettering that fills them exactly, flush with the surface, in the same position as `cover.stl`. In the slicer,
+  load `cover.stl`, then add `cover-text.stl` to it as a part of the same object (PrusaSlicer/OrcaSlicer: right-click
+  → *Add part* → *Load*; Bambu Studio: *Add part*), and give the text part its own filament. Printed in one colour,
+  the cover alone shows the lettering as recesses.
 - Hardware: 4 × M3 × 6 self-tapping screws for the carrier, 4 × M3 × 12 self-tapping screws to join base and cover,
   4 × M2 × 4 self-tapping screws for the OLED, a 12 mm panel-mount momentary push button (normally open), and 2 × 4 mm screws through the tabs.
 - A cheap fit check first: print only the RJ45 end of the base (cut the STL in the slicer about 25 mm from that end).
 
 ## Rendering
 
-In OpenSCAD: open the `.scad`, set `PART` to `"base"` or `"cover"` at the top, render (F6) and export STL. Without
+In OpenSCAD: open the `.scad`, set `PART` to `"base"`, `"cover"` or `"cover-text"` at the top, render (F6) and export STL. Without
 OpenSCAD installed, the official image works:
 
 ```

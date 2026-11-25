@@ -15,7 +15,7 @@
 // Box coordinates: x from the outside of the RJ45 end wall, y from the outside of the front (RESET side) wall, z up
 // from the bottom. The carrier's front (P1-P4, RESET) is toward y = 0, as on its silkscreen.
 
-PART = "base";             // "base", "cover", or "both" (preview only)
+PART = "base";             // "base", "cover", "cover-text" (the lettering, for a second colour), or "both" (preview only)
 
 /* [Carrier PCB, from ../carrier/build_board.py] */
 car_l = 100.0;
@@ -194,26 +194,28 @@ module shell() {
                     cube([oled_view[0] + top_t + 1, oled_view[1] + top_t + 1, 0.01]);
             }
         }
-        // wake button, labelled on the top
-        if (wake) {
-            translate([wake_c[0], wake_c[1], out_h - top_t - 1]) cylinder(d = wake_d, h = top_t + 2);
-            translate([wake_c[0] - wake_d / 2 - 2, wake_c[1], out_h - 0.6])
-                linear_extrude(1) text("WAKE", size = 3.5, halign = "right", valign = "center");
-        }
-        // labels
-        engrave("RESET", btn_xb, 0, split + 3.5, "front", 2.8);    // on the cover, above the hole in the base
-        engrave("BOOT", btn_xb, 0, split + 3.5, "back", 2.8);
-        for (i = [0 : 3]) {
-            engrave(str("P", i + 1), car_x0 + port_x[i], 0, split + 3.5, "front", 3.5);
-            engrave(str("P", i + 5), car_x0 + port_x[i], 0, split + 3.5, "back", 3.5);
-        }
-        engrave("CT", 0, car_y0 + (ct_y[0] + ct_y[1]) / 2, split + 9, "right", 3.5);
-        for (i = [0 : 2])                                       // each CT pin, above it
-            engrave(["CT1", "B", "CT2"][i], 0, car_y0 + ct_y[0] + i * (ct_y[1] - ct_y[0]) / 2, split + 3.5, "right", 2.2);
-        engrave("HEAT", 0, car_y0 + (heat_y[0] + heat_y[1]) / 2, split + 3.5, "right", 3.5);
-        engrave("USB", 0, esp_y0 + board_w / 2, split + 9, "right", 3);
-        engrave("BOILER PROBES", out_l / 2 + 6, 0, out_h - 7, "front", 4);
+        if (wake) translate([wake_c[0], wake_c[1], out_h - top_t - 1]) cylinder(d = wake_d, h = top_t + 2);
+        labels();
     }
+}
+
+// Every label, as the solid that's cut 0.6 mm into the outside. cover_text() is the same lettering as a separate
+// part that fills those cuts exactly, flush, to print in another colour.
+module labels() {
+    if (wake) translate([wake_c[0] - wake_d / 2 - 2, wake_c[1], out_h - 0.6])
+        linear_extrude(1) text("WAKE", size = 3.5, halign = "right", valign = "center");
+    engrave("RESET", btn_xb, 0, split + 3.5, "front", 2.8);    // on the cover, above the hole in the base
+    engrave("BOOT", btn_xb, 0, split + 3.5, "back", 2.8);
+    for (i = [0 : 3]) {
+        engrave(str("P", i + 1), car_x0 + port_x[i], 0, split + 3.5, "front", 3.5);
+        engrave(str("P", i + 5), car_x0 + port_x[i], 0, split + 3.5, "back", 3.5);
+    }
+    engrave("CT", 0, car_y0 + (ct_y[0] + ct_y[1]) / 2, split + 9, "right", 3.5);
+    for (i = [0 : 2])                                           // each CT pin, above it
+        engrave(["CT1", "B", "CT2"][i], 0, car_y0 + ct_y[0] + i * (ct_y[1] - ct_y[0]) / 2, split + 3.5, "right", 2.2);
+    engrave("HEAT", 0, car_y0 + (heat_y[0] + heat_y[1]) / 2, split + 3.5, "right", 3.5);
+    engrave("USB", 0, esp_y0 + board_w / 2, split + 9, "right", 3);
+    engrave("BOILER PROBES", out_l / 2 + 6, 0, out_h - 7, "front", 4);
 }
 
 // An ear outside the front (s = -1) or back (s = +1) wall at x, its flat face at the split; `up` puts it on the
@@ -260,6 +262,13 @@ module cover() {
     for (e = ears) ear(e[0], e[1], true);
 }
 
+module cover_text() {
+    intersection() { labels(); rbox(out_l, out_w, out_h, corner_r); translate([-big / 2, -big / 2, split]) cube([big, big, big]); }
+}
+
+// The cover prints top face down: turned over (a rotation, not a mirror, so the lettering still reads right).
+module print_flip() { translate([0, out_w, out_h]) rotate([180, 0, 0]) children(); }
+
 // The boards, see-through in the preview (F5) only: never part of an STL.
 module boards_ghost() {
     %union() {
@@ -284,8 +293,9 @@ module boards_ghost() {
 }
 
 if (PART == "base") { base(); boards_ghost(); }
-else if (PART == "cover") translate([0, 0, out_h]) mirror([0, 0, 1]) cover();     // top face down, for printing
-else { base(); boards_ghost(); translate([0, 0, 25]) cover(); }
+else if (PART == "cover") print_flip() cover();
+else if (PART == "cover-text") print_flip() cover_text();
+else { color("#3a9da0") base(); boards_ghost(); translate([0, 0, 25]) { color("#3a9da0") cover(); color("black") render() cover_text(); } }
 
 echo(str("outside: ", out_l, " x ", out_w, " x ", out_h, " mm (plus ", tab_l, " mm tabs each end and ", ear_p,
          " mm ears front and back); split at ", split, " mm"));
