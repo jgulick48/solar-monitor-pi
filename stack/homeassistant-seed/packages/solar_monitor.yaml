@@ -255,7 +255,7 @@ rest:
         # none (no hand-started generator), info (daytime), ok or warn
         value_template: "{{ value_json.advice }}"
         icon: mdi:engine
-        json_attributes: [advice_text, advice_need_kwh, advice_run_hours, advice_empty_at, sunset, generator_mode]
+        json_attributes: [advice_text, advice_need_kwh, advice_run_hours, advice_empty_at, sunset, generator_mode, advice_phase]
       - name: Site daily summary
         unique_id: site_daily_summary
         # the day it covers; the message is in the attributes
@@ -414,6 +414,11 @@ rest:
         value_template: "{{ value_json.box_power_problem }}"
         device_class: problem
         icon: mdi:power-plug-off
+      - name: Site generator can stop
+        unique_id: site_generator_can_stop
+        # a hand-started generator is running and the battery now lasts until the sun is back
+        value_template: "{{ value_json.generator_can_stop | default(false) }}"
+        icon: mdi:engine-off
       - name: Site generator needed
         unique_id: site_generator_needed
         value_template: "{{ value_json.generator_needed }}"
@@ -780,6 +785,29 @@ automation:
           tag: generator
           title: Start the generator
           message: "{{ state_attr('sensor.site_generator_advice', 'advice_text') }}"
+
+  # While it runs, the box works out when the battery has enough to last until the sun is back: say so, once.
+  - id: solar_generator_can_stop
+    alias: "Solar: the generator can be shut down"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_generator_can_stop
+        to: "on"
+        for: "00:02:00"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_generator_can_stop
+        from: "on"
+        to: "off"
+        id: "off"
+    actions:
+      - action: script.solar_notify
+        data:
+          tag: generator_stop
+          title: The generator can be shut down
+          message: >-
+            {% if trigger.id != 'off' %}{{ state_attr('sensor.site_generator_advice', 'advice_text') }}{% else %}clear{% endif %}
 
   - id: solar_generator_running
     alias: "Solar: generator started, clear the reminder"
