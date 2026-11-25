@@ -82,12 +82,29 @@ The probe ports and HEAT plug in from outside the enclosure; so do the clamps, t
 
 ## The display
 
-The OLED shows the readings a few at a time, changing every 4 seconds: floor supply and return with the call for
-heat; boiler supply and return with hot water; the slab and P8; the pump currents and the board's IP address.
+The OLED shows the readings a few at a time, changing every 4 seconds: P1–P4 by name, P5–P8, then the call for
+heat, the pump currents and the board's IP address. The names are the `p1_name`…`p8_name` substitutions at the
+top of the file (the solar monitor's setup page sets its own, below).
 Temperatures are in °F (`oled_unit: C` at the top of the file for Celsius). It turns off after 5 minutes
 (`oled_on_minutes`), because an OLED left on burns in; the lid button, or a restart, turns it on again.
 
-## Flashing
+## Installing from the solar monitor (easiest)
+
+The solar monitor's setup page has a **Boiler probe board** section that does all of this itself:
+
+1. Name the eight ports (they become the sensor names in Home Assistant and on the OLED) and save.
+2. Plug the ESP32's USB-C into one of the Pi's USB ports, **with the board's PoE cable unplugged**, and press
+   **Install over USB**. The box builds the firmware with ESPHome's own container and its own encryption key and
+   update password (kept in `state/secrets.json`); the first build downloads ESPHome and the ESP32 toolchain (about
+   2 GB) and takes a while, later ones a few minutes. The log shows on the page as it goes.
+3. When it's installed, the box adds the board to its Home Assistant with the key (Home Assistant restarts once),
+   so there's nothing to type.
+4. Unplug the USB, plug in PoE. From then on **Update over the network** sends a new build to
+   `boiler-probes.local`: after renaming ports, or when a box update changes this file.
+
+If the board doesn't show up on USB, hold BOOT and press RESET to put it in its download mode, and try again.
+
+## Flashing by hand
 
 1. Copy `secrets.example.yaml` to `secrets.yaml` and replace both values (`openssl rand -base64 32` makes a key).
    The key is what Home Assistant asks for when it adds the board.

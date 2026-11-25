@@ -34,8 +34,11 @@ class ESPHome(unittest.TestCase):
         buses = {m[1].upper(): int(m[0]) for m in re.findall(r"pin: GPIO(\d+), id: (p\d)", self.live)}
         self.assertEqual(buses, carrier_ports())                     # P1-P8, each on the GPIO the board wires it to
         for port, name in PROBES.items():
-            block = re.search(rf"one_wire_id: {port.lower()}\n\s+name: {name}\n", self.live)
+            # each port named by its substitution (the setup page builds it with the box's own names), defaulting to
+            # the probe the README lists
+            block = re.search(rf"one_wire_id: {port.lower()}\n\s+name: \$\{{{port.lower()}_name\}}\n", self.live)
             self.assertTrue(block, f"{port}: {name}")
+            self.assertIn(f"  {port.lower()}_name: {name}\n", self.cfg)
         for block in self.live.split("- platform: dallas_temp")[1:]:  # one probe per bus: no addresses to find
             self.assertNotIn("address:", block.split("- platform:")[0])
         self.assertEqual(self.live.count("platform: dallas_temp"), 8)
