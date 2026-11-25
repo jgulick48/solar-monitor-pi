@@ -370,6 +370,14 @@ rest:
         value_template: "{{ value_json.box_health }}"
         icon: mdi:raspberry-pi
         json_attributes: [box_health_text]
+      # Panels and inverters (solarcheck.py): a string or inverter far below its usual share, the site far below
+      # what the sunlight should give
+      - name: Site solar check
+        unique_id: site_solar_check
+        # ok, note, warn or unknown
+        value_template: "{{ value_json.solar_check }}"
+        icon: mdi:solar-panel
+        json_attributes: [solar_check_text]
       - name: Site box temperature
         unique_id: site_box_cpu_temp
         value_template: "{{ value_json.box_cpu_temp }}"
@@ -447,6 +455,11 @@ rest:
         value_template: "{{ value_json.box_health == 'warn' }}"
         device_class: problem
         icon: mdi:raspberry-pi
+      - name: Site solar needs attention
+        unique_id: site_solar_attention
+        value_template: "{{ value_json.solar_check == 'warn' }}"
+        device_class: problem
+        icon: mdi:solar-panel
       - name: Site box power problem
         unique_id: site_box_power_problem
         value_template: "{{ value_json.box_power_problem }}"
@@ -796,6 +809,37 @@ automation:
           message: >-
             {% if trigger.id != 'off' %}{{ state_attr('sensor.site_box_health', 'box_health_text') }}
             Details on the box's start page.{% else %}clear{% endif %}
+
+  # Panels and inverters: a string or an inverter making far less than usual, or the whole site far below the sunlight.
+  - id: solar_panel_check
+    alias: "Solar: a string or an inverter is making much less than usual"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_solar_needs_attention
+        to: "on"
+        for: "00:15:00"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_solar_needs_attention
+        from: "on"
+        to: "off"
+        for: "00:15:00"
+        id: "off"
+      - trigger: homeassistant
+        event: start
+        id: start
+    actions:
+      - delay: "{{ '00:20:00' if trigger.id == 'start' else '00:00:00' }}"
+      - condition: template
+        value_template: "{{ trigger.id != 'start' or is_state('binary_sensor.site_solar_needs_attention', 'on') }}"
+      - action: script.solar_notify
+        data:
+          tag: solar_check
+          title: Solar panels or an inverter need a look
+          message: >-
+            {% if trigger.id != 'off' %}{{ state_attr('sensor.site_solar_check', 'solar_check_text') }}
+            Details on the solar monitor's Panels page.{% else %}clear{% endif %}
 
   # Hand-started generator: from mid-afternoon on, will the battery last until the sun is back?
   - id: solar_generator_needed

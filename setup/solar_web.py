@@ -39,6 +39,7 @@ import genlog  # noqa: E402
 import history  # noqa: E402
 import modules  # noqa: E402
 import solar_setup as ss  # noqa: E402
+import solarcheck  # noqa: E402
 import tts  # noqa: E402
 import weather  # noqa: E402
 import wx  # noqa: E402
@@ -464,9 +465,10 @@ background:color-mix(in srgb,var(--fg) 3%,var(--bg))} section.own h2{margin:12px
 
 
 NAV = [("/", "Home", "Solar monitor"), ("/check", "Check-up", "Check-up"), ("/setup", "Setup", "Site setup"),
-       ("/battery", "Battery", "Battery health"), ("/history", "History", "History"),
+       ("/battery", "Battery", "Battery health"), ("/panels", "Panels", "Panels and inverters"),
+       ("/history", "History", "History"),
        ("/advisor", "Advisor", "Advisor"), ("/display", "Screen", None)]
-NAV_MODULES_AT = 5          # the enabled modules' pages (backups, generator) go before the Advisor
+NAV_MODULES_AT = 6          # the enabled modules' pages (backups, generator) go before the Advisor
 APPS = [("8123", "Home Assistant"), ("3000", "Grafana")]
 
 
@@ -578,6 +580,7 @@ def status_page(handler):
 {modules.cards(STACK)}
 {box_card()}
 {battery_card(site)}
+{solarcheck.card(solarcheck.status(STACK))}
 {modules.cards(STACK, "access")}
 <div class="card"><b>Screen</b>: {display_line} <a href="/display">preview</a> &nbsp;<a href="/setup#screen">change</a>{display_problem(dsp)}</div>
 <div class="card" id="weather"><b>Sunlight data</b>: {weather_line}
@@ -1166,6 +1169,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, page("Check-up", checkup.render(checkup.core(STACK, site) + modules.checks(STACK), host_of(self))))
         elif self.path == "/battery":
             self.send(200, battery_page(load_site()))
+        elif self.path == "/panels":
+            self.send(200, page("Panels and inverters", solarcheck.render(solarcheck.status(STACK))))
         elif self.path == "/setup":
             self.send(200, setup_page(load_site()))
         elif self.path == "/api/status":

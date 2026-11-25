@@ -130,6 +130,17 @@ def box_check(status):
     return check("The box itself", "ok", f"Temperature, power, disk and services are fine{' (' + summary + ')' if summary else ''}.")
 
 
+def solar_check(status):
+    """status: solarcheck.status()."""
+    title = "Panels and inverters"
+    texts = " ".join(t for _, t in status["findings"])
+    if status["level"] == "unknown":
+        return check(title, "warn", "Not checked yet: it runs every 5 minutes once the inverters report.")
+    if status["level"] in ("warn", "note"):
+        return check(title, "bad" if status["level"] == "warn" else "warn", texts, ("/panels", "Panels"))
+    return check(title, "ok", "Every string and inverter is making what it usually does.")
+
+
 def clock_check(site, run=None):
     run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=10))
     try:
@@ -151,6 +162,7 @@ def core(stack, site):
     """The box's own checks, each guarded: one that can't run says so."""
     import boxhealth
     import display
+    import solarcheck
 
     def guard(title, fn):
         try:
@@ -164,6 +176,7 @@ def core(stack, site):
         guard("Data being recorded", lambda: data_check(display.vm_instant(display.INSTANT["age"]))),
         guard("Home Assistant", lambda: ha_check(stack)),
         guard("Solar forecast", lambda: forecast_check(stack, site)),
+        guard("Panels and inverters", lambda: solar_check(solarcheck.status(stack))),
         guard("The box itself", lambda: box_check(boxhealth.status(stack))),
         guard("Clock", lambda: clock_check(site)),
     ]

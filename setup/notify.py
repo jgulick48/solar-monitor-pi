@@ -35,7 +35,7 @@ PRIORITIES = ("critical", "warning", "info")
 TAG_PRIORITY = {
     "inverter_fault": "critical", "generator": "critical",
     "battery_low": "warning", "dongle_offline": "warning", "no_data": "warning", "backup": "warning",
-    "battery_health": "warning", "box_health": "warning",
+    "battery_health": "warning", "box_health": "warning", "solar_check": "warning",
     "generator_service": "info", "summary": "info",
 }
 CHANNELS = (("ha_app", "Home Assistant app"), ("ntfy", "ntfy"), ("wall", "Wall display"))
