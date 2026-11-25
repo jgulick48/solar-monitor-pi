@@ -273,8 +273,9 @@ class Board:
         self.text("BTN 47 G", 12.3, 53.0, 0.8)
         self.add("Connector_PinHeader_2.54mm", "PinHeader_2x03_P2.54mm_Vertical", "J15", "SPARE", 2.5, 43.0, rot=90,
                  nets={"1": "3V3", "2": "GND", "3": "GPIO48", "4": "GPIO19", "5": "GPIO18", "6": "GPIO15"}).Reference().SetVisible(False)
-        self.text("3V3 48 18", 5.0, 37.8, 0.8)
-        self.text("GND 19 15", 5.0, 48.4, 0.8)
+        # rotated, the header's odd pins (1 = 3V3, square) are the lower row and its even pins the upper row
+        self.text("GND 19 15", 5.0, 37.8, 0.8)
+        self.text("3V3 48 18", 5.0, 48.4, 0.8)
         # socket-side nets that go to the extras
         for k, n in ((3, "HEAT_GPIO46"), (1, "BTN_GPIO47"), (0, "GPIO48")):
             self.repin("J1", k, n)

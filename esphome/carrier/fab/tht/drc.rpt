@@ -1,11 +1,32 @@
 ** Drc report for carrier-tht.kicad_pcb **
-** Created on 2026-11-25T03:11:20+0000 **
+** Created on 2026-11-25T03:15:18+0000 **
 ** Report includes: Errors, Warnings, Exclusions **
 
-** Found 1 DRC violations **
+** Found 7 DRC violations **
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; 3 spokes connected to isolated island)
+    Local override; error
+    @(0.5000 mm, 0.5000 mm): Zone [GND] on B.Cu, priority 0
+    @(66.3500 mm, 38.8900 mm): PTH pad 18 [GND] of J1
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; 1 spokes connected to isolated island)
+    Local override; error
+    @(0.5000 mm, 0.5000 mm): Zone [GND] on B.Cu, priority 0
+    @(66.3500 mm, 21.1100 mm): PTH pad 18 [GND] of J2
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; 4 spokes connected to isolated island)
+    Local override; error
+    @(0.5000 mm, 0.5000 mm): Zone [GND] on B.Cu, priority 0
+    @(54.6600 mm, 35.5000 mm): PTH pad 2 [GND] of R12
 [track_dangling]: Track has unconnected end
     Local override; warning
-    @(57.8159 mm, 37.7135 mm): Track [GPIO19] on B.Cu, length 0.5426 mm
+    @(67.6383 mm, 40.5776 mm): Track [P8_GPIO20] on F.Cu, length 1.1535 mm
+[track_dangling]: Track has unconnected end
+    Local override; warning
+    @(67.6383 mm, 40.5776 mm): Track [P8_GPIO20] on B.Cu, length 1.1535 mm
+[track_dangling]: Track has unconnected end
+    Local override; warning
+    @(64.4022 mm, 34.5000 mm): Track [HC_LED] on F.Cu, length 1.9303 mm
+[track_dangling]: Track has unconnected end
+    Local override; warning
+    @(64.4022 mm, 34.5000 mm): Track [HC_LED] on B.Cu, length 1.9303 mm
 
 ** Found 0 unconnected pads **
 
