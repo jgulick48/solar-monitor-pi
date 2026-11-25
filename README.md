@@ -204,6 +204,25 @@ forecast, the box itself (temperature, power, disk, services) and the clock. Ena
 notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras and freeze
 protection. Open it after first setup, and whenever something seems off.
 
+## Settings file (export and import)
+
+*Setup* &rarr; *Settings file* (`/config`) downloads this box's settings as one JSON file and imports such a file from
+another box, for a replacement box or a second site set up the same way.
+
+- **In the file:** the site details, the wall display, the weather source, updates, the UniFi Protect address and
+  camera choice, and the settings of the generator, notifications, cameras, voice, weather, propane, water, boiler,
+  freeze protection and probe board modules (and whether each is on).
+- **Not in it:** history (that is what backups are for), and what belongs to one box: remote access, remote
+  support, SSH keys, the backup stick, the Zigbee and Z-Wave radios and the box's own passwords.
+- **Secrets** (API keys, tokens, the cameras' stream links, the ntfy topic) are left out. The web page never exports
+  them, since anyone on the network can open it. To include them, encrypted with a passphrase of 8 characters or
+  more (AES-256, PBKDF2), export on the box itself:
+  `sudo python3 /opt/solar-monitor/src/setup/configfile.py export --secrets > solar-config.json`
+- **Import** shows first what would change, setting by setting (secrets as "(hidden)"), and saves nothing until
+  *Import these settings* is pressed. Give the passphrase to bring the secrets too; without it the box keeps its
+  own. Values of the wrong kind and anything this version doesn't know are skipped and listed. The settings as they
+  were are kept in `state/config-before-import.json`.
+
 ## The box's own health and a test notification
 
 The start page's **This box** card (and Home Assistant's *Site box health*, *temperature*, *disk free* and *SSD wear*
