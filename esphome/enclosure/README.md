@@ -14,9 +14,9 @@ It's in **two parts, split at the top of the port windows**, so the carrier drop
 
 ![Base and cover, front](images/both-front.png)
 
-| Back: P5–P8, BOOT | Base, front | Base from above | Base, RJ45 end | Base, USB-C end | Cover: inside | Cover: outside |
-| --- | --- | --- | --- | --- | --- | --- |
-| ![](images/both-back.png) | ![](images/base-front.png) | ![](images/base-top.png) | ![](images/base-rj45-face.png) | ![](images/base-usb.png) | ![](images/cover-inside.png) | ![](images/cover-outside.png) |
+| Back: P5–P8, BOOT | USB-C end: HEAT, USB, CT1 · B · CT2 | Base, front | Base from above | Base, RJ45 end | Base, USB-C end | Cover: inside | Cover: outside |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| ![](images/both-back.png) | ![](images/both-usb.png) | ![](images/base-front.png) | ![](images/base-top.png) | ![](images/base-rj45-face.png) | ![](images/base-usb.png) | ![](images/cover-inside.png) | ![](images/cover-outside.png) |
 
 In the box images the boards show see-through: the carrier, its port blocks, the sockets, the ESP board, its jacks,
 buttons and the PoE module. They're in OpenSCAD's preview only, never in the STL, to check that nothing is in the way.
@@ -30,7 +30,7 @@ buttons and the PoE module. They're in OpenSCAD's preview only, never in the STL
 - **Probe ports:** the pluggable blocks' faces are at the carrier's edges, in long windows in the front (P1–P4) and
   back (P5–P8) walls, so probes plug and unplug from outside. The windows are open-topped slots in the base, closed
   by the cover. The **CT** and **HEAT** blocks are behind windows in the
-  USB-C end wall. Each port's name is engraved above it.
+  USB-C end wall. Each port's name is engraved above it, and the CT block's pins are labelled CT1 · B (BIAS) · CT2.
 - **USB-C:** a 14 × 8 mm tunnel in the end wall, for flashing. The jack is 26 mm in, so it takes a plug with a slim,
   long body; day to day the board updates over the network.
 - **RESET and BOOT:** countersunk holes in the front and back walls in line with the buttons, for a paperclip

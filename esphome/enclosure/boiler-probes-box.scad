@@ -31,7 +31,7 @@ port_x = [32, 48, 64, 80];
 term_w = 15.6;             // a 3-pin 5.08 mm pluggable header's width
 term_h = 13.0;             // MEASURE: the mated plug's height above the carrier
 term_out = 0.6;            // the header's face, past the carrier's edge
-ct_y = [45.5, 55.7];       // CT block's pins, carrier y (front edge = 0): CT2 .. CT1
+ct_y = [45.5, 55.7];       // CT block's first and last pins, carrier y (front edge = 0): CT1 (45.5), BIAS, CT2 (55.7)
 heat_y = [4.8, 15.0];      // HEAT block's pins, carrier y
 
 /* [ESP32-P4-ETH, from Waveshare's drawing] */
@@ -156,7 +156,8 @@ module shell() {
         }
         // RJ45 end: below the split, a slot as wide as the ESP board from just below it; above, a U around the jack
         // (open at the cover's bottom edge). The jack's front is flush with the outside.
-        translate([-1, esp_y0 - 0.5, esp_z - 0.5]) cube([wall + 2, board_w + 1, split - esp_z + 0.5]);
+        // (the slot runs just past the split: ending exactly at it left a paper-thin skin across its top)
+        translate([-1, esp_y0 - 0.5, esp_z - 0.5]) cube([wall + 2, board_w + 1, split - esp_z + 0.51]);
         translate([-1, esp_y0 + rj45_y - 0.4, esp_z]) cube([wall + 2, rj45_w + 0.8, jack_top - esp_z]);
         // probe port windows: one along the front (P1-P4) and one along the back (P5-P8), open to the split
         px = [car_x0 + port_x[0] - term_w / 2 - 0.5, car_x0 + port_x[3] + term_w / 2 + 0.5];
@@ -186,13 +187,15 @@ module shell() {
             }
         }
         // labels
-        engrave("RESET", btn_xb, 0, btn_zb + 5, "front", 2.8);
-        engrave("BOOT", btn_xb, 0, btn_zb + 5, "back", 2.8);
+        engrave("RESET", btn_xb, 0, split + 3.5, "front", 2.8);    // on the cover, above the hole in the base
+        engrave("BOOT", btn_xb, 0, split + 3.5, "back", 2.8);
         for (i = [0 : 3]) {
             engrave(str("P", i + 1), car_x0 + port_x[i], 0, split + 3.5, "front", 3.5);
             engrave(str("P", i + 5), car_x0 + port_x[i], 0, split + 3.5, "back", 3.5);
         }
-        engrave("CT", 0, car_y0 + (ct_y[0] + ct_y[1]) / 2, split + 3.5, "right", 3.5);
+        engrave("CT", 0, car_y0 + (ct_y[0] + ct_y[1]) / 2, split + 9, "right", 3.5);
+        for (i = [0 : 2])                                       // each CT pin, above it
+            engrave(["CT1", "B", "CT2"][i], 0, car_y0 + ct_y[0] + i * (ct_y[1] - ct_y[0]) / 2, split + 3.5, "right", 2.2);
         engrave("HEAT", 0, car_y0 + (heat_y[0] + heat_y[1]) / 2, split + 3.5, "right", 3.5);
         engrave("USB", 0, esp_y0 + board_w / 2, split + 9, "right", 3);
         engrave("BOILER PROBES", out_l / 2 + 6, 0, out_h - 7, "front", 4);
