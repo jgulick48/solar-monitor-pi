@@ -91,7 +91,10 @@ class Forecast(unittest.TestCase):
         self.assertEqual(collector.calibration(stack), (0.71, "calibrated"))
         with open(os.path.join(stack, "state", "advisor.json"), "w") as f:
             json.dump({"source": "weather station", "data": {"calibration": 0.71}}, f)
-        self.assertEqual(collector.calibration(stack), (0.8, "default"))
+        self.assertEqual(collector.calibration(stack), (0.8, "default"))      # a station's calibration doesn't fit
+        with open(os.path.join(stack, "state", "advisor.json"), "w") as f:
+            json.dump({"source": "weather station", "data": {"calibration": 0.71, "calibration_openmeteo": 0.66}}, f)
+        self.assertEqual(collector.calibration(stack), (0.66, "calibrated"))   # with a station: Open-Meteo's own
 
 
 if __name__ == "__main__":
@@ -140,3 +143,42 @@ class BatteryHigh(unittest.TestCase):
     def test_before_dawn_counts_the_whole_day(self):
         h = self.high(35, [8, 8, 8], 5)
         self.assertEqual(h["pct"], 100)
+
+
+class AdvisorWithStation(unittest.TestCase):
+    """With a weather station, the advisor's analysis uses the station's sunlight, but the solar forecast scales
+    Open-Meteo's forecast: build_steps keeps Open-Meteo's potential (raw_om) for that calibration."""
+
+    def test_open_meteo_potential_kept_alongside_the_station(self):
+        import advisor
+        site = {"latitude": "33.4", "longitude": "-112.0", "arrays": [{"panels": "20", "panel_watts": "400", "tilt": "30", "azimuth": "180"}]}
+        t0 = 1795000500                                           # 15-minute steps across a sunny midday
+        ts = [t0 + i * 900 for i in range(400)]
+        S = {"pv": {t: 5000.0 for t in ts}, "load": {t: 1000.0 for t in ts}, "soc": {t: 60 for t in ts},
+             "chg": {}, "dis": {}, "gen": {}, "bms_w": {}, "temp": {t: 20.0 for t in ts},
+             "ghi": {t: 800.0 for t in ts},                       # the station: enough readings to be used
+             "gti": {"1": {(t + 3599) // 3600 * 3600: 900.0 for t in ts}}}
+        steps, source = advisor.build_steps(S, site)
+        self.assertEqual(source, "weather station")
+        self.assertTrue(all(s["raw_om"] is not None for s in steps))
+        # Open-Meteo's potential: 8 kWp x 900 W/m2 with the temperature loss, the same for every step
+        self.assertAlmostEqual(steps[0]["raw_om"], 8 * 0.9 * (1 + advisor.GAMMA * (20 + 900 / 800 * 20 - 25)), places=6)
+        k_om, n = advisor.calibrate(steps, 8.0, "raw_om")
+        self.assertEqual(n, len(steps))
+        self.assertAlmostEqual(k_om, 5.0 / steps[0]["raw_om"], places=6)
+
+
+class SiteChange(unittest.TestCase):
+    def test_a_new_location_fetches_again(self):
+        stack = tempfile.mkdtemp()
+        os.makedirs(os.path.join(stack, "state"))
+        seen = {}
+        self.assertFalse(collector.site_changed(stack, seen))           # the collector starting: no site yet
+        self.assertFalse(collector.site_changed(stack, seen))           # nothing changed
+        with open(os.path.join(stack, "state", "site.json"), "w") as f:
+            json.dump({"latitude": "42.9", "longitude": "-106.3"}, f)
+        self.assertTrue(collector.site_changed(stack, seen))            # the location entered: fetch now
+        self.assertFalse(collector.site_changed(stack, seen))
+        p = os.path.join(stack, "state", "site.json")
+        os.utime(p, ns=(os.stat(p).st_atime_ns, os.stat(p).st_mtime_ns + 1_000_000))
+        self.assertTrue(collector.site_changed(stack, seen))            # saved again (e.g. new arrays)

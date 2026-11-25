@@ -17,7 +17,9 @@
     Open-Meteo (open-meteo.com, free API, no key).
   * From the same requests, the solar forecast: expected output per hour for
     today and the next two days in state/forecast.json, scaled by the
-    advisor's calibration (actual output / irradiance model) when it has one.
+    advisor's calibration against Open-Meteo (actual output / irradiance model)
+    when it has one. Open-Meteo is always the forecast, also with a weather
+    station: a station only has the present.
 """
 import argparse
 import json
@@ -68,10 +70,14 @@ def station_sample(stack):
 
 
 def calibration(stack):
-    """(factor, source): the advisor's actual/model ratio if it was calibrated on Open-Meteo, else a default."""
+    """(factor, source): the advisor's actual/model ratio against Open-Meteo's sunlight (what the forecast scales),
+    also when the advisor itself uses a weather station's; else a default."""
     adv = ss.load_json(os.path.join(stack, "state", "advisor.json"), {})
-    k = (adv.get("data") or {}).get("calibration")
-    if k and adv.get("source") == "Open-Meteo" and 0.3 <= k <= 1.3:
+    data = adv.get("data") or {}
+    k = data.get("calibration_openmeteo")
+    if k is None and adv.get("source") == "Open-Meteo":
+        k = data.get("calibration")              # written before calibration_openmeteo existed
+    if k and 0.3 <= k <= 1.3:
         return k, "calibrated"
     return DEFAULT_DERATE, "default"
 
@@ -130,6 +136,23 @@ def open_meteo_fetch(stack, past_days):
     return n
 
 
+def site_changed(stack, seen):
+    """True when state/site.json (the location, arrays, inverters) changed since the last call (`seen` is the caller's
+    dict): then the forecasts are fetched again at once, rather than up to an hour later. On a new box the collector
+    starts before the location is entered, so without this the first forecast waited for the next hourly fetch."""
+    try:
+        m = os.stat(os.path.join(stack, "state", "site.json")).st_mtime_ns
+    except FileNotFoundError:
+        m = None
+    if "site" not in seen:                      # the first look: just remember it
+        seen["site"] = m
+        return False
+    if m == seen["site"]:
+        return False
+    seen["site"] = m
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--stack", default="/opt/solar-monitor/stack")
@@ -138,6 +161,8 @@ def main():
     marker = os.path.join(args.stack, "state", "openmeteo-backfilled")
     last_om = 0.0
     hooks = {}
+    seen = {}
+    site_changed(args.stack, seen)
     if not args.once:
         hastates.start(args.stack)                  # Home Assistant states for the modules, recorded in VictoriaMetrics
     while True:
@@ -145,6 +170,9 @@ def main():
             station_sample(args.stack)
         except Exception as e:  # noqa: BLE001 - keep collecting
             log("station read failed:", e)
+        if site_changed(args.stack, seen):
+            last_om = 0.0                           # the location or arrays changed: fetch the forecasts now
+            hooks.pop(("weather", 1800), None)      # and the screen's weather forecast (modules/weather)
         if time.time() - last_om >= 3600:
             try:
                 backfill = not os.path.exists(marker)
