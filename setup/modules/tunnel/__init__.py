@@ -85,11 +85,7 @@ def apply_core_change(stack):
     localhost (.storage/http, edited while HA is stopped); restart HA when either changed."""
     core_changed = modules.service("write_ha_core")()
     if engine.public_url(stack) and engine.proxy_edit_needed(stack):
-        r = _run(ss.compose_cmd(stack) + ["stop", "homeassistant"])
-        if r.returncode != 0:
-            return [f"couldn't stop Home Assistant to change its proxy setting: {r.stderr.strip()[-200:]}"]
-        engine.trust_local_proxy(stack)
-        r = _run(ss.compose_cmd(stack) + ["up", "-d", "homeassistant"])
+        return engine.ensure_local_proxy_trusted(stack, _run)       # restarts it, with the new core.yaml too
     elif core_changed:
         r = _run(ss.compose_cmd(stack) + ["restart", "homeassistant"])
     else:

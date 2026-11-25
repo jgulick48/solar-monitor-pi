@@ -240,6 +240,10 @@ def apply_on(stack, d):
     elif not running or msgs:
         r = run(ss.compose_cmd(stack) + ["up", "-d", "cloudflared-support"])
         msgs.append("support tunnel started" if r.returncode == 0 else f"support tunnel didn't start: {r.stderr.strip()[-300:]}")
+    # The helper's Home Assistant hostname reaches it through this cloudflared, on localhost: without trusting
+    # that proxy, Home Assistant answers 400 (seen on site). Left on afterwards: it only trusts this box itself.
+    import tunnel
+    msgs += tunnel.ensure_local_proxy_trusted(stack, run)
     return msgs
 
 

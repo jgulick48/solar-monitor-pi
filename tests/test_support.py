@@ -153,6 +153,31 @@ class Support(unittest.TestCase):
         self.assertTrue(any("--force-recreate" in c and c.endswith("cloudflared-support") for c in self.calls))
         self.assertIn("support tunnel switched to the new token", msgs)
 
+    def test_home_assistant_trusts_the_support_tunnel(self):
+        """The helper's Home Assistant hostname comes through cloudflared-support on localhost: without remote access
+        set up, Home Assistant had never been told to trust it and answered 400 (seen on site)."""
+        store = os.path.join(self.stack, "homeassistant", ".storage", "http")
+        os.makedirs(os.path.dirname(store))
+        with open(store, "w") as f:      # as on the site: no proxy settings at all
+            json.dump({"version": 3, "minor_version": 1, "key": "http",
+                       "data": {"stable": {"server_port": 8123, "ip_ban_enabled": True}, "pending": None,
+                                "yaml_migration_done": True}}, f)
+        msgs = support.enable(self.stack, self.form())
+        ha = [c for c in self.calls if c.endswith("homeassistant")]
+        self.assertEqual(ha, ["fake-compose --project-directory " + self.stack + " stop homeassistant",
+                              "fake-compose --project-directory " + self.stack + " up -d homeassistant"])
+        self.assertIn("Home Assistant now accepts the tunnel (restarted)", msgs)
+        with open(store) as f:
+            stable = json.load(f)["data"]["stable"]
+        self.assertTrue(stable["use_x_forwarded_for"])
+        self.assertEqual(stable["trusted_proxies"], ["127.0.0.1/32", "::1/128"])
+        self.calls.clear()
+        support.check(self.stack)                                       # the next minute: nothing to do
+        self.assertFalse([c for c in self.calls if c.endswith("homeassistant")])
+        support.disable(self.stack)                                     # left on: it only trusts the box itself
+        with open(store) as f:
+            self.assertTrue(json.load(f)["data"]["stable"]["use_x_forwarded_for"])
+
     def test_support_code(self):
         code = support.make_code(TOKEN, KEY)
         self.assertTrue(code.startswith("SOLAR-SUPPORT-1:"))

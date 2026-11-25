@@ -107,6 +107,24 @@ def trust_local_proxy(stack):
     return bool(slots) and ss.write_if_changed(_http_store(stack), json.dumps(doc, indent=2) + "\n", 0o600)
 
 
+
+def ensure_local_proxy_trusted(stack, run=None):
+    """For cloudflared on this box (remote access, or remote support's Home Assistant hostname): Home Assistant
+    answers a forwarded request with 400 unless it trusts localhost as a proxy. Stops Home Assistant, edits
+    .storage/http and starts it again, only when the setting is missing. Returns messages."""
+    if not proxy_edit_needed(stack):
+        return []
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=300))
+    r = run(ss.compose_cmd(stack) + ["stop", "homeassistant"])
+    if r.returncode != 0:
+        return [f"couldn't stop Home Assistant to change its proxy setting: {r.stderr.strip()[-200:]}"]
+    try:
+        trust_local_proxy(stack)
+    finally:
+        r = run(ss.compose_cmd(stack) + ["up", "-d", "homeassistant"])
+    return (["Home Assistant now accepts the tunnel (restarted)"] if r.returncode == 0 else
+            [f"Home Assistant didn't start again: {r.stderr.strip()[-200:]}"])
+
 def ha_has_owner(stack):
     """True once someone has created the Home Assistant owner account (onboarding 'user' step).
     Before that, publishing HA would let anyone on the internet claim it."""
