@@ -39,6 +39,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import genlog  # noqa: E402
+import loadprofile  # noqa: E402
 import screenpower as sp  # noqa: E402
 import solar_setup as ss  # noqa: E402
 from cameras import MAX_CAMERAS, SOUND_KINDS  # noqa: E402,F401 - camera settings live in display.json
@@ -297,11 +298,29 @@ def charger_run(site, need_kwh, vbat=None):
     return {"hours": hours, "kw": round(kw, 2), "amps": amps, "text": text}
 
 
-def generator_advice(site, now_vals, now, tz, fc=None):
+def _flat(load_w):
+    return lambda t: load_w / 1000
+
+
+def drained_at(load, start, kwh, limit_h=240):
+    """When `kwh` runs out at the expected use from `start` (15-minute steps), or None within limit_h hours."""
+    t, step = start, dt.timedelta(minutes=15)
+    for _ in range(limit_h * 4):
+        use = load(t) * 0.25
+        if use >= kwh:
+            return t + step * (kwh / use if use > 0 else 0)
+        kwh -= use
+        t += step
+    return None
+
+
+def generator_advice(site, now_vals, now, tz, fc=None, load=None):
     """For a hand-started generator: will the battery last until the sun is back?
     With a solar forecast the battery is simulated in 15-minute steps (forecast solar against the
-    average use of the last 3 days) until the next sunset after tomorrow's sunrise, so a cloudy
-    tomorrow counts. Without one, solar is assumed to carry the load from 2 h after sunrise."""
+    expected use) until the next sunset after tomorrow's sunrise, so a cloudy tomorrow counts.
+    Without one, solar is assumed to carry the load from 2 h after sunrise.
+    load(local datetime) -> expected use in kW (loadprofile.predictor: the week's pattern where it
+    predicts better); by default the average of the last 3 days at every hour."""
     try:
         lat, lon = float(site["latitude"]), float(site["longitude"])
         kwh = int(site["battery_count"]) * float(site["battery_kwh_each"])
@@ -328,7 +347,7 @@ def generator_advice(site, now_vals, now, tz, fc=None):
         next_set = next_set or sset + dt.timedelta(days=1)
     usable = (soc - floor) / 100 * kwh                # kWh above the alert level
     headroom = (100 - floor) / 100 * kwh
-    load_kw = load_w / 1000
+    load = load or _flat(load_w)
     empty_at, lowest, at_rise = None, usable, None
     if fsum and forecast_kw(fc, next_set.timestamp() - 3600) is not None:
         e, t, step = usable, now, dt.timedelta(minutes=15)
@@ -336,7 +355,7 @@ def generator_advice(site, now_vals, now, tz, fc=None):
             if at_rise is None and t >= next_rise:
                 at_rise = e
             pv = forecast_kw(fc, t.timestamp()) or 0.0
-            e = min(e + (pv - load_kw) * 0.25, headroom)
+            e = min(e + (pv - load(t)) * 0.25, headroom)
             if e < 0 and empty_at is None:
                 empty_at = t
             lowest = min(lowest, e)
@@ -345,12 +364,12 @@ def generator_advice(site, now_vals, now, tz, fc=None):
     else:                                             # no forecast: solar carries the load 2 h after sunrise
         fsum = None
         relief = next_rise + dt.timedelta(hours=2)
-        hours_left = max(0.0, usable) / load_kw
-        if now + dt.timedelta(hours=hours_left) < relief:
-            empty_at = now + dt.timedelta(hours=hours_left)
-        need = max(0.0, (relief - now).total_seconds() / 3600 * load_kw - max(usable, 0))
+        out = drained_at(load, now, max(0.0, usable))
+        if out is not None and out < relief:
+            empty_at = out
+        need = max(0.0, loadprofile.energy_kwh(load, now, relief) - max(usable, 0))
     if at_rise is None:                               # overnight there's no solar: the usual use until sunrise
-        at_rise = usable - max(0.0, (next_rise - now).total_seconds() / 3600) * load_kw
+        at_rise = usable - loadprofile.energy_kwh(load, now, next_rise)
     rise_soc = round(min(100.0, max(0.0, floor + at_rise / kwh * 100)))
     base = {"sunset": sset.strftime("%H:%M"), "empty_at": empty_at and _hhmm(empty_at, now, site),
             "need_kwh": round(need, 1), "forecast_tomorrow_kwh": fsum and fsum["tomorrow"],
@@ -403,11 +422,23 @@ def data(stack, site):
     except ValueError:
         pass
     fc = load_forecast(stack)
-    advice = generator_advice(site, vals, now, tz, fc) if site.get("generator") == "manual" else None
+    load_fn, load_method = loadprofile.predictor(stack, tzname, vals.get("load_avg_3d") or vals.get("load_avg_24h"))
+    advice = generator_advice(site, vals, now, tz, fc, load_fn) if site.get("generator") == "manual" else None
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     so_far = _cached(f"soc_high_{midnight.date()}", 300, lambda: vm_at(
         f"max_over_time((max(lxp_soc))[{max(60, int((now - midnight).total_seconds()))}s])", now.timestamp()))
-    high = battery_high(site, vals, now, tz, fc, so_far)
+    high = battery_high(site, vals, now, tz, fc, so_far, load_fn)
+    expected_tomorrow = runtime_h = None
+    if load_fn:
+        tomorrow = (now + dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        expected_tomorrow = round(loadprofile.energy_kwh(load_fn, tomorrow, tomorrow + dt.timedelta(days=1)), 1)
+        try:
+            floor = float(site.get("low_soc_alert") or 25)
+            usable = max(0.0, (vals["soc"] - floor) / 100 * int(site["battery_count"]) * float(site["battery_kwh_each"]))
+            out = drained_at(load_fn, now, usable)
+            runtime_h = round((out - now).total_seconds() / 3600, 1) if out else 240.0
+        except (KeyError, TypeError, ValueError):
+            pass
     try:
         kwh = round(int(site["battery_count"]) * float(site["battery_kwh_each"]), 1)
     except (KeyError, TypeError, ValueError):
@@ -424,6 +455,8 @@ def data(stack, site):
         "sounds": {}, "sound_cooldown": 60, "sound_gap": 5, "doorbell_always": True,   # the cameras module
         "speak": False, "speak_mode": "after",           # the voice module (when it's on)
         "expected": expected, "forecast": forecast_summary(fc, now, tz), "battery_high": high,
+        # the expected use: "weekly" (the week's pattern, loadprofile.py) or "flat" (the last 3 days' average)
+        "load_method": load_method, "expected_use_tomorrow": expected_tomorrow, "runtime_h": runtime_h,
         "weather": None, "wx_days": 7, "wx_page": 8,    # weather: the weather module (when it's on)
         "main": d.get("main", "solar"), "panel_s": d.get("panel_s", 15), "panels": _module_panels(stack, site),
         **_module_display(stack, site, now),
@@ -518,9 +551,9 @@ NBSP = "\u00a0"             # keeps "at 4:00 PM" on one line on the wall display
 CHARGE_EFFICIENCY = 0.95    # share of surplus solar that ends up stored
 
 
-def battery_high(site, now_vals, now, tz, fc, high_so_far=None):
+def battery_high(site, now_vals, now, tz, fc, high_so_far=None, load=None):
     """Today's estimated highest battery level: the battery simulated in 15-minute steps from now until
-    sunset, forecast solar against the usual use (the last 3 days' average), capped at full; combined
+    sunset, forecast solar against the expected use (`load`, as in generator_advice), capped at full; combined
     with the highest level already reached today. None after sunset, or without a forecast, the
     battery size or the usual use.
     {"pct": 0-100, "at": "2:15 PM" or None (already reached), "full_at": time it fills or None, "text": ...}"""
@@ -535,12 +568,12 @@ def battery_high(site, now_vals, now, tz, fc, high_so_far=None):
     rise, sset = sun_times(lat, lon, now.date(), tz)
     if rise is None or now >= sset or forecast_kw(fc, sset.timestamp() - 1800) is None:
         return None
-    load_kw, step = load_w / 1000, dt.timedelta(minutes=15)
+    load, step = load or _flat(load_w), dt.timedelta(minutes=15)
     e = best = min(soc, 100) / 100 * kwh
     best_t = full_t = None
     t = now
     while t < sset:
-        net = (forecast_kw(fc, t.timestamp()) or 0.0) - load_kw
+        net = (forecast_kw(fc, t.timestamp()) or 0.0) - load(t)
         e = min(max(e + net * 0.25 * (CHARGE_EFFICIENCY if net > 0 else 1.0), 0.0), kwh)
         t += step
         if e > best + 0.0005 * kwh:
@@ -576,8 +609,8 @@ def ha_status(stack, site):
         floor = 25.0
     soc, load_w = v.get("soc"), v.get("load_avg_3d") or v.get("load_avg_24h")
     stored = None if soc is None or kwh is None else soc / 100 * kwh
-    runtime = None
-    if stored is not None and load_w and load_w > 0:
+    runtime = d.get("runtime_h")              # at the expected use, hour by hour (data())
+    if runtime is None and stored is not None and load_w and load_w > 0:
         runtime = max(0.0, (soc - floor) / 100 * kwh) / (load_w / 1000)
     ids = {a["id"] for a in d["alerts"]}
     adv = d["advice"] or {}
@@ -589,6 +622,7 @@ def ha_status(stack, site):
         "generator_today": _r(v.get("gen_today"), 2),
         "battery_stored": _r(stored, 1), "battery_capacity": kwh, "battery_runtime": _r(runtime, 1),
         "usual_load": _r(load_w), "low_battery_level": floor,
+        "expected_use_tomorrow": d.get("expected_use_tomorrow"), "load_method": d.get("load_method"),
         "dongles_connected": _r(v.get("online")), "dongles_expected": d["expected"],
         "fault_code": _r(v.get("fault")) or 0, "warning_code": _r(v.get("warning")) or 0,
         "data_age": _r(v.get("age")),

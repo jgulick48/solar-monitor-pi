@@ -210,6 +210,15 @@ rest:
         unit_of_measurement: kWh
         device_class: energy
         icon: mdi:weather-partly-cloudy
+      - name: Site expected use tomorrow
+        unique_id: site_expected_use_tomorrow
+        # from the week's pattern of use where it predicts better than the 3-day average ("method" says which)
+        availability: "{{ value_json.expected_use_tomorrow is defined and value_json.expected_use_tomorrow is not none }}"
+        value_template: "{{ value_json.expected_use_tomorrow }}"
+        unit_of_measurement: kWh
+        device_class: energy
+        icon: mdi:calendar-week
+        json_attributes: [load_method]
       - name: Site battery stored
         unique_id: site_battery_stored
         value_template: "{{ value_json.battery_stored }}"

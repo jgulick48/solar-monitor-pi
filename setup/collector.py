@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import solar_setup as ss  # noqa: E402
 import modules  # noqa: E402
 import hastates  # noqa: E402
+import loadprofile  # noqa: E402
 import weather  # noqa: E402
 import wx  # noqa: E402
 
@@ -160,6 +161,7 @@ def main():
     args = ap.parse_args()
     marker = os.path.join(args.stack, "state", "openmeteo-backfilled")
     last_om = 0.0
+    last_profile, profile_use = 0.0, None
     hooks = {}
     seen = {}
     site_changed(args.stack, seen)
@@ -185,6 +187,16 @@ def main():
             except Exception as e:  # noqa: BLE001
                 log("Open-Meteo fetch failed:", e)
                 last_om = time.time() - 3000  # retry in ~10 minutes
+        if time.time() - last_profile >= 3600:      # the house's expected use by hour of the week (loadprofile.py)
+            last_profile = time.time()
+            try:
+                site = ss.load_json(os.path.join(args.stack, "state", "site.json"), {})
+                doc = loadprofile.build(args.stack, site.get("time_zone") or ss.host_timezone())
+                if doc["use"] != profile_use:
+                    profile_use = doc["use"]
+                    log(f"expected use: {doc['use']} ({doc['why']})")
+            except Exception as e:  # noqa: BLE001 - keep collecting
+                log("expected-use profile failed:", e)
         modules.run_due(args.stack, hooks)          # the enabled modules' own schedules (remote support, weather, cameras, generator log)
         if args.once:
             return
