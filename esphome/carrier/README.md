@@ -28,6 +28,25 @@ board, screw plug on the cable), such as uxcell's "3-Pin 5.08mm Pitch Right Angl
 ten sets cover all of them. The footprint is KiCad's Phoenix MSTBA (same pin layout); check that the headers' pins
 fit its 1.4 mm holes before ordering.
 
+## Through-hole parts (THT version)
+
+| Ref | Qty | Part | Notes |
+| --- | --- | --- | --- |
+| J1, J2 | 2 | 1×20 female pin header, 2.54 mm, 8.5 mm tall | Sockets for the ESP32-P4-ETH |
+| J3–J12 | 10 | 3-pin 5.08 mm pluggable terminal block (right-angle header + screw plug) | 8 probe ports, HEAT, CT |
+| R1–R8 | 8 | 4.7 kΩ, ¼ W, axial (6.3 mm body) | Probe pull-ups; holes 10.16 mm (0.4") apart |
+| R9–R12 | 4 | 10 kΩ, ¼ W, axial | Heat-call input, heat-call pull-up, clamp bias (×2) |
+| U1 | 1 | PC814 optocoupler, DIP-4 (AC input) | EL814 works too; a DIP-4 socket is optional |
+| C1 | 1 | 1 µF ceramic, 5 mm lead spacing, ≥ 16 V | Heat-call smoothing |
+| C2 | 1 | 10 µF ceramic, 5 mm lead spacing, ≥ 10 V | Clamp bias. A radial MLCC fits the holes; a small electrolytic needs its legs bent to 5 mm, + toward BIAS |
+| C3 | 1 | 100 nF ceramic, 5 mm lead spacing | 3.3 V decoupling |
+| J13 | 1 | 1×4 male pin header, 2.54 mm | OLED lead |
+| J14 | 1 | 1×2 male pin header, 2.54 mm | Lid button |
+| J15 | 1 | 2×3 male pin header, 2.54 mm | Spare GPIOs (optional) |
+
+If the ESP32-P4-ETH came without headers: 2 × 1×20 male headers, soldered with the pins pointing down into the
+sockets.
+
 ## Files
 
 | File | What |
@@ -51,8 +70,8 @@ fit its 1.4 mm holes before ordering.
     files that way);
   - LCSC parts: C17673 (4.7 kΩ), C17414 (10 kΩ) and C49678 (100 nF) are JLCPCB basic parts; C15850 (10 µF),
     C28323 (1 µF) and C500388 (EL814S1(A)(TU)-V, SOP-4) were not confirmed as basic and may add an extended-part fee.
-- **The ESPHome configuration** (`../boiler-probes.yaml`) still has the old two-bus wiring (GPIO20/21); it needs the
-  per-port GPIOs above, the heat call on GPIO46, the clamps on GPIO16/17 and the OLED.
+- **The ESPHome configuration** (`../boiler-probes.yaml`) uses this pinout: a bus per port, the heat call on
+  GPIO46, the clamps on GPIO16/17, the OLED and the button.
 
 ## Building
 
