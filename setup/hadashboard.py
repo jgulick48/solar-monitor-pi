@@ -5,7 +5,7 @@ Assistant app, through remote access).
   * Now: open alerts, the generator advice, the 5-day outlook, battery, solar, house, battery power, generator.
   * Cameras: each UniFi Protect camera in Home Assistant (a snapshot every few seconds; tap for live video), the
     ones picked for the wall display first.
-  * One short section per enabled module: propane, water, boiler, generator.
+  * One short section per enabled module: propane, water, boiler, freeze protection, generator.
   * Today, and links to the full Solar dashboard and Home Assistant's Energy page.
 
 It is written by the box (homeassistant/dashboards/home.yaml, a YAML dashboard registered in the solar monitor's
@@ -65,7 +65,7 @@ def camera_entities(stack):
 def _enabled(stack):
     import modules
     out = set()
-    for m in ("propane", "water", "boiler", "generator"):
+    for m in ("propane", "water", "boiler", "freeze", "generator"):
         try:
             if modules.load(stack, m)["enabled"]:
                 out.add(m)
@@ -133,6 +133,13 @@ def build(stack):
             _tile("sensor.site_boiler_state", "Boiler", color="deep-orange"),
             _tile("sensor.site_floor_heat_today", "Heat to the floor today"),
             _tile("sensor.site_boiler_burner_today", "Burner today")]})
+    if "freeze" in on:
+        sections.append({"type": "grid", "cards": [
+            {"type": "heading", "heading": "Freeze protection", "icon": "mdi:snowflake-alert"},
+            {**_tile("sensor.site_freeze_alert", "Alert", color="red", grid_options={"columns": "full"}),
+             "visibility": _visible_unless("sensor.site_freeze_alert", "none")},
+            _tile("sensor.site_lowest_watched_temperature", "Coldest watched", color="light-blue"),
+            _tile("sensor.site_forecast_low", "Forecast low (24 h)", color="light-blue")]})
     if "generator" in on:
         sections.append({"type": "grid", "cards": [
             {"type": "heading", "heading": "Generator", "icon": "mdi:engine"},

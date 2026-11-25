@@ -96,7 +96,7 @@ class HomeDashboard(unittest.TestCase):
         for kind in ("sensor", "binary_sensor"):
             for t in pkg.get("template", []):
                 ids |= {f"{kind}.{x['name'].lower().replace(' ', '_')}" for x in t.get(kind, [])}
-        for m in ("propane", "water", "boiler", "generator"):
+        for m in ("propane", "water", "boiler", "freeze", "generator"):
             d = modules.load(self.stack, m)
             d["enabled"] = True
             with open(os.path.join(self.stack, "state", "modules", f"{m}.json"), "w") as f:

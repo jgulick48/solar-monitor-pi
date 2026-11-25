@@ -277,6 +277,15 @@ gets low. A storm warning from the weather module (National Weather Service, US)
 notification is sent when the outlook first turns, at most once in 20 hours. The sensor's `outlook_days` attribute
 has each day's solar and use.
 
+**Freeze protection (a module, off by default).** Pick up to 4 temperatures from Home Assistant on the setup page:
+a slab or pipe probe, a room sensor, a thermostat. A critical alert is sent when one stays below the threshold
+(40 °F / 4.4 °C by default) for 5 minutes, and cleared once it is 1 °C above it again. With the weather module on, a
+warning comes hours earlier: when a hard freeze (20 °F / -6.7 °C by default) is forecast in the next 24 hours while
+the boiler module reports a fault or the battery is at its low level. A watched sensor that stops reporting for 30
+minutes raises its own alert. The wall display gets a panel, Home Assistant gets *Site freeze alert*, *Site lowest
+watched temperature* and *Site forecast low*, and the Home dashboard a section. It needs no boiler module and
+switches nothing.
+
 **Expected use.** The advice, "lasts about" and the day's battery high need to know how much the house will use, and
 when. The box learns it per hour of the week from the last 8 weeks (the median, so one-off days don't count), scaled
 by how the last 3 days compare with usual. It checks itself: every hour it replays the last 28 nights (4 PM to
