@@ -247,8 +247,28 @@ def on_disable(stack):
     protect.stop()
 
 
+def checks(stack):
+    d = _display(stack)
+    link = ("/setup#cameras", "Setup")
+    if not d["cameras"]:
+        return [{"title": "Cameras", "state": "off", "link": link, "text": "No cameras picked for the wall display."}]
+    probs = engine.camera_problems(stack)
+    if probs:
+        return [{"title": "Cameras", "state": "bad", "link": link, "text": " ".join(probs.values())}]
+    n = len(d["cameras"])
+    from_protect = any(c.get("protect_id") for c in d["cameras"])
+    if from_protect and not protect.EVENTS.connected:
+        return [{"title": "Cameras", "state": "warn", "link": link,
+                 "text": f"{n} camera{'s' if n != 1 else ''} showing, but UniFi Protect's events aren't connected"
+                         + (f" ({protect.EVENTS.error})" if protect.EVENTS.error else "")
+                         + ": detections, doorbell sounds and picture notifications won't work."}]
+    return [{"title": "Cameras", "state": "ok", "link": None,
+             "text": f"{n} camera{'s' if n != 1 else ''} showing" + (", events connected." if from_protect else ".")}]
+
+
 MODULE = Module(
     id="cameras",
+    checks=checks,
     title="Cameras",
     description="UniFi Protect or other cameras next to the power figures, with chimes when they see someone",
     order=15,
