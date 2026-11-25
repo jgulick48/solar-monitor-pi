@@ -281,6 +281,19 @@ def alert(stack, tag, title, message, priority="warning"):
         return str(getattr(e, "reason", e))
 
 
+def public_image(stack, a):
+    """The alert's picture as a link the ntfy app can fetch from anywhere: Home Assistant's public address (remote
+    access) + its /local path. "" without a picture or without a public address."""
+    if not a.get("image"):
+        return ""
+    try:
+        import modules
+        base = str(modules.ha_core(stack).get("external_url") or "")
+    except Exception:  # noqa: BLE001 - the alert goes without its picture
+        return ""
+    return base.rstrip("/") + a["image"] if base.startswith("https://") else ""
+
+
 def box_token(stack):
     """The token Home Assistant sends with each alert to /notify/send."""
     return ss.secret(stack, "notify_token", lambda: secrets.token_urlsafe(24))
@@ -325,6 +338,9 @@ def send(stack, s, a, channels):
                 server, topic, token = target
                 body = {"topic": topic, "title": a["title"] or "Solar monitor", "message": a["message"],
                         "priority": NTFY_PRIORITY[a["priority"]], "tags": [a["tag"]]}
+                pic = public_image(stack, a)
+                if pic:                      # the ntfy app shows it as a preview, fetched from Home Assistant
+                    body.update(attach=pic, filename="camera.jpg")
                 hdr = {"Authorization": f"Bearer {token}"} if token else {}
                 _post(server.rstrip("/"), body, hdr)
                 res[ch] = "sent"

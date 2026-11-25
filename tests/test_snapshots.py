@@ -104,6 +104,22 @@ class Snapshots(unittest.TestCase):
         for bad in ("https://evil.example/x.jpg", "/local/snap/../secrets.jpg", "/local/other/" + "a" * 32 + ".jpg", ""):
             self.assertNotIn("image", notify.clean({"tag": "t", "message": "x", "image": bad}))
         self.assertNotIn("image", notify.ha_data(notify.clean({"tag": "t", "message": "x"})))
+        # ntfy: the picture as a link on Home Assistant's public address, when remote access gives it one
+        import modules
+        posts, old_post, old_core = [], notify._post, modules.ha_core
+        notify._post = lambda url, body, hdr, timeout=10: posts.append(body) or 200
+        nt = {**notify.DEFAULTS, "ha_app": False, "ntfy": True, "ntfy_topic": "solar-test-topic"}
+        try:
+            modules.ha_core = lambda stack: {}
+            notify.send(self.stack, nt, a, ["ntfy"])
+            modules.ha_core = lambda stack: {"external_url": "https://ha.example.com"}
+            notify.send(self.stack, nt, a, ["ntfy"])
+            notify.send(self.stack, nt, notify.clean({"tag": "t", "message": "x"}), ["ntfy"])
+        finally:
+            notify._post, modules.ha_core = old_post, old_core
+        self.assertNotIn("attach", posts[0])
+        self.assertEqual((posts[1]["attach"], posts[1]["filename"]), ("https://ha.example.com" + img, "camera.jpg"))
+        self.assertNotIn("attach", posts[2])
         # delivered with the picture; one held over quiet hours keeps it
         got = []
         s = {**notify.DEFAULTS, "quiet_from": "22:00", "quiet_to": "07:00"}

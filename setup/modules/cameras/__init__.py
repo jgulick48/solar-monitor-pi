@@ -82,7 +82,7 @@ def form_section(stack):
 <p style="margin-top:16px"><b>Phone notifications with the camera's picture</b> <small style="display:inline">through the notifications module (its phones and quiet hours), when a UniFi Protect camera on the screen's list sees:</small></p>
 <div class="row">{''.join(f"<label><input type='checkbox' name='notify_{k}' value='1'{' checked' if (dsp.get('notify') or {}).get(k) else ''}> {t}</label>" for k, t, _ in engine.NOTIFY_KINDS)}
 <label>The same camera and kind at most every <select name="notify_cooldown">{''.join(f"<option value='{v}'{' selected' if dsp.get('notify_cooldown', 300) == v else ''}>{t}</option>" for v, t in engine.NOTIFY_COOLDOWNS)}</select></label></div>
-<small>The picture shows in the Home Assistant app (ntfy gets the text). During quiet hours they wait until morning.</small>
+<small>The picture shows in the Home Assistant app, and in ntfy while remote access is on (ntfy fetches it from Home Assistant's public address). During quiet hours they wait until morning.</small>
 <p><small>Two cameras at a time are shown next to the power figures, taking turns every 15 seconds. To add one by its stream link instead, in UniFi Protect: open the camera &rarr; Settings &rarr; Advanced &rarr;
 RTSPS, turn on <b>Medium</b> quality and copy its link (<code>rtsps://...:7441/...</code>). The camera pictures are only shown on the
 box's own screen, not to other computers on the network.</small></p>{cams}
