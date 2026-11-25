@@ -11,16 +11,20 @@ for v in ${*:-tht smd}; do
   o=fab/$v; rm -rf "$o"; mkdir -p "$o"
   $KICAD python3 build_board.py place "$v" "$o/carrier-$v-placed.kicad_pcb"
   b=$o/carrier-$v.kicad_pcb
-  # Freerouting's result differs from run to run, and now and then a route doesn't survive the import into KiCad:
-  # route again (up to 4 tries) until KiCad's DRC finds nothing unconnected.
+  # Freerouting's result differs from run to run, and now and then a route doesn't survive the import into KiCad or
+  # crosses another net: route again (up to 4 tries) until KiCad's DRC finds nothing unconnected and no shorts,
+  # clearance errors or crossing tracks.
   try=1
   while :; do
     $JAVA java -jar freerouting.jar -de "$o/carrier-$v-placed.dsn" -do "$o/carrier-$v.ses" -mp 40 --gui.enabled=false \
       > "$o/freerouting.log" 2>&1 || { tail -20 "$o/freerouting.log"; exit 1; }
     $KICAD python3 build_board.py finish "$o/carrier-$v-placed.kicad_pcb" "$o/carrier-$v.ses" "$b"
     $KICAD kicad-cli pcb drc --severity-all -o "$o/drc.rpt" "$b" >/dev/null || true
-    grep -q "Found 0 unconnected pads" "$o/drc.rpt" && break
-    [ "$try" -ge 4 ] && { echo "$v: still unconnected after $try routing tries; see $o/drc.rpt"; exit 1; }
+    if grep -q "Found 0 unconnected pads" "$o/drc.rpt" &&
+       ! grep -q -E "^\[(shorting_items|clearance|tracks_crossing|hole_clearance|copper_edge_clearance)\]" "$o/drc.rpt"; then
+      break
+    fi
+    [ "$try" -ge 4 ] && { echo "$v: still failing DRC after $try routing tries; see $o/drc.rpt"; exit 1; }
     try=$((try + 1))
   done
   echo "$v: routed (try $try)"

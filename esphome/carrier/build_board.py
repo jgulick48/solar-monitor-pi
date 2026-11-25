@@ -265,17 +265,24 @@ class Board:
             self.capacitor("C3", "100nF", 72.0, 30.0, "3V3", "GND", lcsc="C49678")
         # OLED (SSD1306 module order GND VCC SCL SDA), lid button, spare GPIOs: beside the ESP board, clear of the
         # RESET/BOOT paperclip paths at x = 16.1
-        self.add("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical", "J13", "OLED", 3.0, 16.0, rot=90,
+        self.add("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical", "J13", "OLED", 5.0, 10.5, rot=90,
                  nets={"1": "GND", "2": "3V3", "3": "SCL_GPIO8", "4": "SDA_GPIO7"}).Reference().SetVisible(False)
-        self.text("OLED  G V SCL SDA", 7.0, 13.2, 0.8)
-        self.add("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical", "J14", "BTN", 11.0, 50.0, rot=90,
+        self.text("OLED  G V SCL SDA", 8.8, 8.3, 0.8)
+        self.add("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical", "J14", "BTN", 10.5, 53.0, rot=90,
                  nets={"1": "BTN_GPIO47", "2": "GND"}).Reference().SetVisible(False)
-        self.text("BTN 47 G", 12.3, 53.0, 0.8)
-        self.add("Connector_PinHeader_2.54mm", "PinHeader_2x03_P2.54mm_Vertical", "J15", "SPARE", 2.5, 43.0, rot=90,
+        self.text("BTN 47 G", 11.8, 56.0, 0.8)
+        self.add("Connector_PinHeader_2.54mm", "PinHeader_2x03_P2.54mm_Vertical", "J15", "SPARE", 2.5, 48.04, rot=90,
                  nets={"1": "3V3", "2": "GND", "3": "GPIO48", "4": "GPIO19", "5": "GPIO18", "6": "GPIO15"}).Reference().SetVisible(False)
         # rotated, the header's odd pins (1 = 3V3, square) are the lower row and its even pins the upper row
-        self.text("GND 19 15", 5.0, 37.8, 0.8)
-        self.text("3V3 48 18", 5.0, 48.4, 0.8)
+        self.text("GND 19 15", 5.0, 43.0, 0.8)
+        self.text("3V3 48 18", 5.0, 50.6, 0.8)
+        # the headers take Dupont leads, taller than the 11 mm under the ESP board: keep them 2 mm clear of its outline
+        for ref in ("J13", "J14", "J15"):
+            fp = next(f for f in self.b.GetFootprints() if f.GetReference() == ref)
+            for pad in fp.Pads():
+                py = pcbnew.ToMM(pad.GetPosition().y)
+                if ESP_Y0 - 2 - 1.27 < py < ESP_Y0 + ESP_W + 2 + 1.27:
+                    raise SystemExit(f"{ref} pad {pad.GetNumber()} at y={py:.2f} is under (or too near) the ESP board")
         # socket-side nets that go to the extras
         for k, n in ((3, "HEAT_GPIO46"), (1, "BTN_GPIO47"), (0, "GPIO48")):
             self.repin("J1", k, n)
