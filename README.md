@@ -253,6 +253,13 @@ generator"). Its section says how it is started (by hand or auto-start from the 
 start-the-generator advice on the wall display is for a generator started by hand. Turning it off is what "No generator"
 was: no generator tile or advice, no log or reminders.
 
+**When to stop it.** While a hand-started generator runs, the box repeats the same overnight calculation from the
+battery's level now, at any time of day: "Keep the generator running about 40 min more: about 2.7 kWh more is needed
+to last until the sun is back", using the charge rate measured over the last 10 minutes (or the Chargeverter's amps).
+When the battery will last with a margin (the larger of 0.5 kWh and 5% of the battery): "The generator can be shut
+down." That is said once per run by the wall display's voice and sent as a notification; Home Assistant has
+*Site generator can stop*. It only advises: an auto-start generator follows the inverter's own stop setting.
+
 **Expected use.** The advice, "lasts about" and the day's battery high need to know how much the house will use, and
 when. The box learns it per hour of the week from the last 8 weeks (the median, so one-off days don't count), scaled
 by how the last 3 days compare with usual. It checks itself: every hour it replays the last 28 nights (4 PM to

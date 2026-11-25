@@ -156,6 +156,9 @@ INSTANT = {
     "gen": ss.GEN_POWER,
     # charging the inverters didn't do: a generator on a DC charger (Chargeverter); see genlog.py
     "ext_charge": ss.EXT_CHARGE,
+    # what is going into the battery (W, + charging), averaged over 10 minutes: the battery's own figure where the
+    # inverters report it (it includes a DC charger), else the inverters' charge minus discharge
+    "charge_rate": f"avg_over_time((({ss.BMS_POWER}) or (sum(lxp_p_charge) - sum(lxp_p_discharge)))[10m:1m])",
     "vbat": "avg(lxp_v_bat)",          # the battery's voltage: a DC charger's amps x this = the charging power
     "pv_today": "sum(lxp_e_pv_day)",
     "used_today": ss.LOAD_ENERGY_DAY,
@@ -318,13 +321,14 @@ def drained_at(load, start, kwh, limit_h=240):
     return None
 
 
-def generator_advice(site, now_vals, now, tz, fc=None, load=None):
+def generator_advice(site, now_vals, now, tz, fc=None, load=None, force=False):
     """For a hand-started generator: will the battery last until the sun is back?
     With a solar forecast the battery is simulated in 15-minute steps (forecast solar against the
     expected use) until the next sunset after tomorrow's sunrise, so a cloudy tomorrow counts.
     Without one, solar is assumed to carry the load from 2 h after sunrise.
     load(local datetime) -> expected use in kW (loadprofile.predictor: the week's pattern where it
-    predicts better); by default the average of the last 3 days at every hour."""
+    predicts better); by default the average of the last 3 days at every hour.
+    force: judge the coming night at any time of day (generator_stop_advice, while the generator runs)."""
     try:
         lat, lon = float(site["latitude"]), float(site["longitude"])
         kwh = int(site["battery_count"]) * float(site["battery_kwh_each"])
@@ -342,7 +346,7 @@ def generator_advice(site, now_vals, now, tz, fc=None, load=None):
     tomorrow_txt = f" Tomorrow: about {fsum['tomorrow']:.0f} kWh of solar expected." if fsum else ""
     if now < rise:                                  # before dawn: tonight is today's sunrise
         next_rise, next_set = rise, sset
-    elif now < sset - dt.timedelta(hours=4):        # daytime: judge the coming night from mid-afternoon on
+    elif now < sset - dt.timedelta(hours=4) and not force:   # daytime: judge the coming night from mid-afternoon on
         return {"level": "info", "text": f"Sunset {hm(sset, site)}.{tomorrow_txt}", "sunset": sset.strftime("%H:%M"),
                 "forecast_tomorrow_kwh": fsum and fsum["tomorrow"]}
     else:
@@ -371,13 +375,15 @@ def generator_advice(site, now_vals, now, tz, fc=None, load=None):
         out = drained_at(load, now, max(0.0, usable))
         if out is not None and out < relief:
             empty_at = out
+        lowest = usable - loadprofile.energy_kwh(load, now, relief)
         need = max(0.0, loadprofile.energy_kwh(load, now, relief) - max(usable, 0))
     if at_rise is None:                               # overnight there's no solar: the usual use until sunrise
         at_rise = usable - loadprofile.energy_kwh(load, now, next_rise)
     rise_soc = round(min(100.0, max(0.0, floor + at_rise / kwh * 100)))
     base = {"sunset": sset.strftime("%H:%M"), "empty_at": empty_at and _hhmm(empty_at, now, site),
             "need_kwh": round(need, 1), "forecast_tomorrow_kwh": fsum and fsum["tomorrow"],
-            "sunrise": hm(next_rise, site), "sunrise_soc": rise_soc}
+            "sunrise": hm(next_rise, site), "sunrise_soc": rise_soc,
+            "lowest_kwh": round(lowest, 2)}          # the lowest the battery gets above the alert level (below 0: short)
     run = charger_run(site, need, now_vals.get("vbat"))
     base.update(run_hours=run and run["hours"], charge_kw=run and run["kw"])
     run_txt = f" {run['text']}" if run else ""
@@ -394,6 +400,43 @@ def generator_advice(site, now_vals, now, tz, fc=None, load=None):
     nb = lambda t: hm(t, site).replace(" ", NBSP)  # noqa: E731 - keeps "6:51 AM" on one line on the wall display
     return dict(base, level="ok", text=f"No generator needed tonight: about {rise_soc}% at sunrise ({nb(next_rise)}), "
                                          f"above {floor:.0f}% until the sun is back. Sunset {nb(sset)}.{tomorrow_txt}")
+
+
+GEN_RUNNING_W = 200     # generator power above this: it is running (as the generator log counts it)
+
+
+def generator_stop_advice(site, now_vals, now, tz, fc=None, load=None):
+    """While a hand-started generator runs: can it be shut down yet? The same simulation as generator_advice, from
+    the battery level now, at any time of day. Enough means the battery stays above the alert level until the sun
+    is back with a margin (the larger of 0.5 kWh and 5% of the battery).
+    None when the generator isn't running or there's nothing to judge by; else the advice with "phase":
+      "run":  keep it running, with how long from the charge rate measured over the last 10 minutes (or the
+              charger's amps, or just the kWh);
+      "stop": it can be shut down.
+    Advice only: an auto-start generator follows the inverter's own stop setting."""
+    if (now_vals.get("gen") or 0) < GEN_RUNNING_W:
+        return None
+    adv = generator_advice(site, now_vals, now, tz, fc, load, force=True)
+    if not adv or adv.get("lowest_kwh") is None:
+        return None
+    kwh = int(site["battery_count"]) * float(site["battery_kwh_each"])
+    short = max(0.5, 0.05 * kwh) - adv["lowest_kwh"]
+    base = {k: adv.get(k) for k in ("sunset", "sunrise", "sunrise_soc", "forecast_tomorrow_kwh")}
+    if short <= 0:
+        return dict(base, level="ok", phase="stop", need_kwh=0.0, run_hours=0.0, text=(
+            f"The generator can be shut down: the battery will last until the sun is back "
+            f"(about {adv['sunrise_soc']}% at sunrise)."))
+    rate_kw = (now_vals.get("charge_rate") or 0) / 1000
+    hours = None
+    if rate_kw >= 0.3:
+        hours = math.ceil(short / rate_kw * 12) / 12                 # to 5 minutes
+        how_long = f"about {duration(hours)} more"
+    else:
+        run = charger_run(site, short, now_vals.get("vbat"))
+        hours = run and run["hours"]
+        how_long = f"about {duration(hours)} more" if hours else "for now"
+    return dict(base, level="warn", phase="run", need_kwh=round(short, 1), run_hours=hours, text=(
+        f"Keep the generator running {how_long}: about {short:.1f} kWh more is needed to last until the sun is back."))
 
 
 def data(stack, site):
@@ -434,6 +477,8 @@ def data(stack, site):
     fc = load_forecast(stack)
     load_fn, load_method = loadprofile.predictor(stack, tzname, vals.get("load_avg_3d") or vals.get("load_avg_24h"))
     advice = generator_advice(site, vals, now, tz, fc, load_fn) if site.get("generator") == "manual" else None
+    if site.get("generator") == "manual":           # while it runs: how much longer, or that it can be shut down
+        advice = generator_stop_advice(site, vals, now, tz, fc, load_fn) or advice
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     so_far = _cached(f"soc_high_{midnight.date()}", 300, lambda: vm_at(
         f"max_over_time((max(lxp_soc))[{max(60, int((now - midnight).total_seconds()))}s])", now.timestamp()))
@@ -643,7 +688,9 @@ def ha_status(stack, site):
         "advice": adv.get("level") or "none", "advice_text": adv.get("text") or "",
         "advice_need_kwh": adv.get("need_kwh"), "advice_run_hours": adv.get("run_hours"), "advice_empty_at": adv.get("empty_at"), "sunset": adv.get("sunset"),
         "battery_at_sunrise": adv.get("sunrise_soc"), "sunrise": adv.get("sunrise"),
-        "generator_needed": adv.get("level") == "warn",
+        # "needed" is the start reminder: not while it's running and being told how much longer
+        "generator_needed": adv.get("level") == "warn" and adv.get("phase") != "run",
+        "advice_phase": adv.get("phase") or "", "generator_can_stop": adv.get("phase") == "stop",
         "forecast_today": (d["forecast"] or {}).get("today"), "forecast_remaining": (d["forecast"] or {}).get("remaining"),
         "forecast_tomorrow": (d["forecast"] or {}).get("tomorrow"),
         "battery_high_estimate": (d.get("battery_high") or {}).get("pct"),

@@ -80,6 +80,28 @@ class GeneratorModule(unittest.TestCase):
         modules.form_apply(self.stack, {"module_generator_shown": "1", "generator": "manual", "charger_amps": ""})
         self.assertEqual(self.site()["charger_amps"], "")
 
+    def test_stop_is_announced_once_per_run(self):
+        from modules import voice
+        gen = modules.all_modules() and __import__("modules.generator", fromlist=["x"])
+        d = modules.load(self.stack, "voice")
+        d["enabled"] = True
+        os.makedirs(os.path.join(self.stack, "state", "modules"), exist_ok=True)
+        with open(os.path.join(self.stack, "state", "modules", "voice.json"), "w") as f:
+            json.dump(d, f)
+        queue = lambda: [a["text"] for a in modules.ss.load_json(voice._queue_path(self.stack), [])]  # noqa: E731
+        self.assertEqual(gen.announce_stop(self.stack, {"phase": "run", "level": "warn"}, now=1000), [])
+        self.assertEqual(queue(), [])
+        self.assertEqual(len(gen.announce_stop(self.stack, {"phase": "stop", "level": "ok"}, now=1060)), 1)
+        self.assertEqual(len(queue()), 1)
+        self.assertIn("The generator can be shut down", queue()[0])
+        self.assertEqual(gen.announce_stop(self.stack, {"phase": "stop", "level": "ok"}, now=1120), [])   # once
+        self.assertEqual(gen.announce_stop(self.stack, {"phase": "run", "level": "warn"}, now=1180), [])  # a dip: still once
+        self.assertEqual(gen.announce_stop(self.stack, {"phase": "stop", "level": "ok"}, now=1240), [])
+        self.assertEqual(len(queue()), 1)
+        gen.announce_stop(self.stack, {"level": "ok"}, now=5000)                    # generator off: the next run is new
+        self.assertEqual(len(gen.announce_stop(self.stack, {"phase": "stop", "level": "ok"}, now=90000)), 1)
+        self.assertEqual(gen.MODULE.every[60], gen.announce_stop)
+
     def test_page_card_and_log_hook(self):
         self.site(generator="manual")
         self.assertIn(("/generator", "Generator", "Generator"), modules.nav(self.stack))

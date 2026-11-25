@@ -181,6 +181,31 @@ def update_log(stack):
     return [f"generator log: {n} new run(s)"] if n else []
 
 
+def announce_stop(stack, advice=None, now=None):
+    """Every minute: when a hand-started generator has run long enough (display.generator_stop_advice says "stop"),
+    have the wall display say so, once per run. state/generator-stop.json remembers that this run was announced;
+    it is cleared when the generator is off again. Returns messages to log."""
+    import display
+    from modules import voice
+    path = os.path.join(stack, "state", "generator-stop.json")
+    if advice is None:
+        try:
+            advice = display.data(stack, _site(stack)).get("advice") or {}
+        except Exception:  # noqa: BLE001 - never stop the collector's other jobs
+            return []
+    phase = advice.get("phase")
+    said = ss.load_json(path, {}).get("announced")
+    if phase is None:                               # not running (any more): ready for the next run
+        if said:
+            ss.write_if_changed(path, "{}\n", 0o644)
+        return []
+    if phase != "stop" or said:
+        return []
+    ss.write_if_changed(path, json.dumps({"announced": int(now or time.time())}) + "\n", 0o644)
+    voice.announce(stack, "The generator can be shut down. The battery will last until the sun is back.")
+    return ["generator: enough charge, it can be shut down"]
+
+
 MODULE = Module(
     id="generator",
     title="Generator",
@@ -200,5 +225,6 @@ MODULE = Module(
     card=card,
     card_slot="access",                 # right after the battery card, as before
     routes={("GET", "/generator"): lambda stack, form: page(stack), ("POST", "/generator/serviced"): serviced},
-    every={300: update_log},            # runs found in the inverter history
+    every={300: update_log,             # runs found in the inverter history
+           60: announce_stop},          # "the generator can be shut down", once per run
 )

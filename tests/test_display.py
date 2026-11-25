@@ -198,6 +198,36 @@ class Display(unittest.TestCase):
         self.assertIn("more than the 4 kW generator can supply", r["text"])
         self.assertEqual((display.duration(2.25), display.duration(0.5), display.duration(3.0)), ("2 h 15 min", "30 min", "3 h"))
 
+    def test_generator_stop_advice(self):
+        """While a hand-started generator runs: how much longer, then that it can be shut down, with a margin."""
+        eve = dt.datetime(2026, 11, 21, 18, 0, tzinfo=DENVER)
+        base = {"load_avg_3d": 800, "charge_rate": 4000}
+        self.assertIsNone(display.generator_stop_advice(SITE, {**base, "soc": 40, "gen": 0}, eve, DENVER))   # not running
+        # 30.72 kWh, floor 25%, margin 5% = 1.54 kWh. From 6 PM to ~8:53 AM relief at 0.8 kW is ~11.9 kWh.
+        low = display.generator_stop_advice(SITE, {**base, "soc": 40, "gen": 4500}, eve, DENVER)
+        self.assertEqual((low["level"], low["phase"]), ("warn", "run"))
+        short = low["need_kwh"]
+        self.assertAlmostEqual(short, 11.9 - (40 - 25) / 100 * 30.72 + 1.54, delta=0.3)
+        self.assertEqual(low["run_hours"], math.ceil(short / 4.0 * 12) / 12)             # at the measured 4 kW, to 5 minutes
+        self.assertIn(f"Keep the generator running about {display.duration(low['run_hours'])} more", low["text"])
+        self.assertIn(f"about {short:.1f} kWh more is needed", low["text"])
+        # no measured rate: the charger's amps if set, else just the kWh
+        slow = {"load_avg_3d": 800, "charge_rate": 50, "soc": 40, "gen": 4500, "vbat": 52.0}
+        self.assertIn("running for now", display.generator_stop_advice(SITE, slow, eve, DENVER)["text"])
+        amps = display.generator_stop_advice({**SITE, "charger_amps": "40"}, slow, eve, DENVER)
+        self.assertEqual(amps["run_hours"], math.ceil(short / 2.08 * 4) / 4)
+        # enough: 70% leaves 13.8 kWh above the floor, 11.9 needed, 1.9 spare > the 1.54 margin
+        done = display.generator_stop_advice(SITE, {**base, "soc": 70, "gen": 4500}, eve, DENVER)
+        self.assertEqual((done["level"], done["phase"], done["need_kwh"]), ("ok", "stop", 0.0))
+        self.assertIn("The generator can be shut down", done["text"])
+        # just enough without the margin (66%: 12.6 above the floor) keeps it running a little longer
+        edge = display.generator_stop_advice(SITE, {**base, "soc": 66, "gen": 4500}, eve, DENVER)
+        self.assertEqual(edge["phase"], "run")
+        self.assertLess(edge["need_kwh"], 1.6)
+        # at noon too (the start advice only speaks from mid-afternoon): a dull day, generator on
+        noon = dt.datetime(2026, 11, 21, 12, 0, tzinfo=DENVER)
+        self.assertEqual(display.generator_stop_advice(SITE, {**base, "soc": 30, "gen": 4500}, noon, DENVER)["phase"], "run")
+
     def test_save_writes_go2rtc(self):
         stack = tempfile.mkdtemp()
         os.makedirs(os.path.join(stack, "state"))
