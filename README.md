@@ -208,15 +208,25 @@ protection. Open it after first setup, and whenever something seems off.
 
 `http://solar-monitor.local/history` (*History* in the header) shows each of the last 12 months against the same
 month a year earlier, with the change in percent: solar, use, generator hours, and propane and water while those
-modules are on. The month under way is compared with the same days last year, not the whole month. Only days with
+modules are on. The weather is beside them, since a colder or windier month explains more propane or generator
+time: the average outdoor temperature ("5 °F colder"), heating degree days, the average wind and the strongest gust. The month under way is compared with the same days last year, not the whole month. Only days with
 data are counted, and a month that misses days says how many it has. Until the box has a year of data the earlier
 column is empty.
 
 The figures come from per-day totals the collector stores once each day is over (`site_day_solar_kwh`,
 `site_day_used_kwh`, `site_day_generator_hours`, `site_day_generator_kwh`, `site_day_low_soc`,
-`propane_day_used_gal`), with days cut at the site's midnight. On its first runs it goes back to the oldest inverter
+`propane_day_used_gal`, and the weather: `site_day_temp_high_c`, `site_day_temp_low_c`, `site_day_temp_avg_c`,
+`site_day_hdd`, `site_day_wind_avg_ms`, `site_day_gust_max_ms`), with days cut at the site's midnight. The weather
+is the station's when the day has enough of its readings, else Open-Meteo's. On its first runs it goes back to the oldest inverter
 data the box has, 90 days an hour. Grafana has the dashboard *History: this year against last*: 30-day totals and
 daily bars against the same days a year earlier. The data is kept for 5 years.
+
+**Hourly weather, for heat-loss work.** Beside the outdoor temperature and the sunlight, the box now records the
+wind: a weather station's as it reads it (`site_wind_speed_ms`, `site_wind_gust_ms`; average them over an hour), and
+Open-Meteo's for every hour (`site_openmeteo_wind_ms`, `site_openmeteo_gust_ms`, at 10 m), together with Open-Meteo's
+sunlight on level ground (`site_openmeteo_ghi_wm2`, the hour's mean). With the heat the boiler module measures,
+that is what a building's wind-driven heat loss and its solar gain can be told apart from. On the first fetch after
+this update the box brings in the last 92 days of Open-Meteo's wind and sunlight.
 
 ## Settings file (export and import)
 

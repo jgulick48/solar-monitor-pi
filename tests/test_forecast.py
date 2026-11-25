@@ -168,6 +168,22 @@ class AdvisorWithStation(unittest.TestCase):
         self.assertAlmostEqual(k_om, 5.0 / steps[0]["raw_om"], places=6)
 
 
+class WeatherHistory(unittest.TestCase):
+    def test_wind_and_sunlight_kept_with_the_temperature(self):
+        """Open-Meteo's past hours of wind and level-ground sunlight, and a station's wind, as samples."""
+        import collector
+        h = {"time": [3600, 7200, 10800], "wind_speed_10m": [2.5, None, 9.0], "wind_gusts_10m": [6.0, 7.0, 20.0],
+             "shortwave_radiation": [0.0, 310.0, 500.0]}
+        lines = collector.om_weather_lines(h, now=8000)                   # the third hour is still the forecast
+        self.assertEqual(lines, ["site_openmeteo_wind_ms 2.5 3600000", "site_openmeteo_gust_ms 6.0 3600000",
+                                 "site_openmeteo_gust_ms 7.0 7200000", "site_openmeteo_ghi_wm2 0.0 3600000",
+                                 "site_openmeteo_ghi_wm2 310.0 7200000"])
+        self.assertEqual(collector.om_weather_lines({"time": [3600]}, now=8000), [])     # an answer without them
+        self.assertEqual(collector.wind_lines({"wind_ms": 3.456, "gust_ms": 0.0}, "station", 5),
+                         ['site_wind_speed_ms{source="station"} 3.46 5', 'site_wind_gust_ms{source="station"} 0.00 5'])
+        self.assertEqual(collector.wind_lines({"temp_c": 4}, "station", 5), [])
+
+
 class SiteChange(unittest.TestCase):
     def test_a_new_location_fetches_again(self):
         stack = tempfile.mkdtemp()

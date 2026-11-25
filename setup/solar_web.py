@@ -114,9 +114,13 @@ def save_weather(d):
     ss.write_if_changed(path("state", "weather.json"), json.dumps(d, indent=2) + "\n", 0o644)
 
 
-def vm_push(solar, temp_c, source):
+def vm_push(solar, temp_c, source, wind_ms=None, gust_ms=None):
     lines = []
     ts = int(time.time() * 1000)
+    if wind_ms is not None:
+        lines.append(f'site_wind_speed_ms{{source="{source}"}} {wind_ms:.2f} {ts}')
+    if gust_ms is not None:
+        lines.append(f'site_wind_gust_ms{{source="{source}"}} {gust_ms:.2f} {ts}')
     if solar is not None:
         lines.append(f'site_solar_radiation_wm2{{source="{source}"}} {solar} {ts}')
     if temp_c is not None:
@@ -1329,8 +1333,9 @@ class Handler(BaseHTTPRequestHandler):
             solar = float(q["solarradiation"]) if q.get("solarradiation") not in (None, "") else None
             tf = float(q["tempf"]) if q.get("tempf") not in (None, "") else None
             if weather_settings().get("source") == "push":
-                vm_push(solar, weather.f_to_c(tf), kind)
-                wx.save_station(STACK, weather.push_fields(q), kind)
+                fields = weather.push_fields(q)
+                vm_push(solar, weather.f_to_c(tf), kind, fields.get("wind_ms"), fields.get("gust_ms"))
+                wx.save_station(STACK, fields, kind)
             self.send(200, "OK", "text/plain")
         except (ValueError, OSError) as e:
             self.send(400, f"bad data: {e}", "text/plain")
