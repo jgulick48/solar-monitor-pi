@@ -99,6 +99,27 @@ rest:
         availability: "{{ value_json.water_alert is defined and value_json.water_alert is not none }}"
         value_template: "{{ value_json.water_alert }}"
         icon: mdi:water-alert
+      # Freeze protection module: the box raises its alerts itself (through script.solar_notify)
+      - name: Site freeze alert
+        unique_id: site_freeze_alert
+        availability: "{{ value_json.freeze_alert is defined and value_json.freeze_alert is not none }}"
+        value_template: "{{ value_json.freeze_alert }}"
+        icon: mdi:snowflake-alert
+      - name: Site lowest watched temperature
+        unique_id: site_lowest_watched_temperature
+        availability: "{{ value_json.freeze_lowest_c is defined and value_json.freeze_lowest_c is not none }}"
+        value_template: "{{ value_json.freeze_lowest_c }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+      - name: Site forecast low
+        unique_id: site_forecast_low
+        # the coldest hour of the next 24 (the weather module's forecast)
+        availability: "{{ value_json.freeze_forecast_low_c is defined and value_json.freeze_forecast_low_c is not none }}"
+        value_template: "{{ value_json.freeze_forecast_low_c }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        icon: mdi:thermometer-low
       # Boiler module (monitoring only; the probes, plugs and thermostat are Home Assistant's own entities)
       - name: Site boiler state
         unique_id: site_boiler_state
