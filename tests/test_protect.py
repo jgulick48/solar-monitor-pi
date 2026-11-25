@@ -204,6 +204,38 @@ class Display(unittest.TestCase):
             protect.stream_url, protect.stream_tokens, protect.list_cameras = o
         self.assertIn("/NEW?", display.load(self.stack)["cameras"][0]["url"])
 
+    def test_renamed_in_protect(self):
+        """A camera renamed in UniFi Protect gets the new name on the screen and in the announcements (display.json),
+        keeping its stream link; manual cameras are left alone."""
+        display.save(self.stack, {**display.DEFAULTS, "cameras": [{"name": "Shed", "url": "rtsp://10.0.0.9/live"}]})
+        protect.save(self.stack, {**protect.DEFAULTS, "host": "192.0.2.1", "api_key": "k"})
+        o = (protect.stream_url, protect.stream_tokens)
+        protect.stream_url = lambda host, key, cid, quality="medium": f"rtsps://192.0.2.1:7441/T{cid}?enableSrtp"
+        protect.stream_tokens = lambda host, key, cid: {f"T{cid}"}
+        try:
+            protect.apply_cameras(self.stack, ["aaa", "bbb"], [{"id": "aaa", "name": "Front Yard"}, {"id": "bbb", "name": "Gate"}])
+        finally:
+            protect.stream_url, protect.stream_tokens = o
+        self.assertEqual(protect.sync_names(self.stack, [{"id": "aaa", "name": "Front Yard"}, {"id": "bbb", "name": "Gate"}]), {})
+        renamed = protect.sync_names(self.stack, [{"id": "aaa", "name": "Driveway"}, {"id": "bbb", "name": "Gate"},
+                                                  {"id": "ccc", "name": "Not picked"}])
+        self.assertEqual(renamed, {"Front Yard": "Driveway"})
+        cams = display.load(self.stack)["cameras"]
+        self.assertEqual([c["name"] for c in cams], ["Driveway", "Gate", "Shed"])
+        self.assertEqual(cams[0]["url"], "rtsps://192.0.2.1:7441/Taaa?enableSrtp")     # same link: no go2rtc restart
+        self.assertEqual(protect.settings(self.stack)["cameras"], [{"id": "aaa", "name": "Driveway"}, {"id": "bbb", "name": "Gate"}])
+        # a camera missing from Protect's list (offline, or deleted) keeps its name
+        self.assertEqual(protect.sync_names(self.stack, [{"id": "bbb", "name": "Gate"}]), {})
+        self.assertEqual(display.load(self.stack)["cameras"][0]["name"], "Driveway")
+        # the collector's 5-minute job fetches the list itself, and logs the rename
+        o = protect.list_cameras
+        protect.list_cameras = lambda host, key: [{"id": "aaa", "name": "Driveway"}, {"id": "bbb", "name": "Back gate"}]
+        try:
+            self.assertEqual(cameras.sync_names(self.stack), ["camera renamed in Protect: Gate -> Back gate"])
+            self.assertEqual(cameras.sync_names(self.stack), [])
+        finally:
+            protect.list_cameras = o
+
     def test_h265_camera_explained(self):
         display.save(self.stack, {**display.DEFAULTS, "cameras": [{"name": "Driveway", "url": "rtsp://a/1"}, {"name": "Front Yard", "url": "rtsp://a/2"}]})
         with open(os.path.join(self.stack, "state", "camera-check.json"), "w") as f:

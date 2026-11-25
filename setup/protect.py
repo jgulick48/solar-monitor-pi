@@ -432,4 +432,30 @@ def apply_cameras(stack, picked_ids, cams, quality=None):
     return changed
 
 
+
+def sync_names(stack, cams=None):
+    """Picked cameras renamed in Protect get the new name on the screen and in the announcements (display.json),
+    without new stream links. cams: Protect's camera list if already fetched. Returns {old name: new name}."""
+    import display
+    d = settings(stack)
+    if not (d.get("host") and d.get("api_key") and d.get("cameras")):
+        return {}
+    if cams is None:
+        cams = list_cameras(d["host"], d["api_key"])
+    by_id = {c["id"]: c["name"][:30] for c in cams}
+    dsp = display.load(stack)
+    renamed = {}
+    for c in dsp["cameras"]:
+        new = by_id.get(c.get("protect_id"))
+        if new and new != c.get("name"):
+            renamed[c.get("name")] = new
+            c["name"] = new
+    if not renamed:
+        return {}
+    display.save(stack, dsp)
+    for c in d["cameras"]:
+        c["name"] = by_id.get(c["id"], c["name"])
+    save(stack, d)
+    return renamed
+
 LAST_DUPES = []   # manual cameras the last apply_cameras dropped as duplicates (for the setup page's message)

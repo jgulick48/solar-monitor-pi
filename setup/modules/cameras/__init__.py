@@ -141,6 +141,10 @@ def setup_section(stack, msg=""):
     if d["host"] and d["api_key"]:
         try:
             cams = protect.list_cameras(d["host"], d["api_key"])
+            renamed = protect.sync_names(stack, cams)      # renamed in Protect: the screen and voice follow now
+            if renamed:
+                engine.prewarm_voice(stack, renamed.values())
+                d = protect.settings(stack)
             picked = {c["id"] for c in d["cameras"]}
             rows = "".join(
                 f"<label><input type='checkbox' name='cam_{html.escape(c['id'])}' value='1' style='width:auto'"
@@ -256,6 +260,7 @@ MODULE = Module(
     routes={("POST", a): _protect_route(a) for a in ("/protect/connect", "/protect/cameras", "/protect/forget")},
     display_data=display_data,
     display_events=engine.detections,
-    every={3600: engine.refresh},       # Protect's stream links (they change) and each camera's codec
+    every={3600: engine.refresh,        # Protect's stream links (they change) and each camera's codec
+           300: engine.sync_names},     # cameras renamed in Protect
     compose_profiles=lambda stack: ["cameras"],
 )
