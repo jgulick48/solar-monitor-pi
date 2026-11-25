@@ -359,6 +359,11 @@ Helper, the quick way (`tools/support-helper.py`, plain Python, from a clone of 
 3. The owner pastes the code on the setup page (Remote support) and presses *Turn remote support on*.
 4. `tools/support-helper.py ssh neighbor` logs you in (needs `cloudflared`); the setup page is at
    `https://neighbor-setup.example.com`. `list` shows your boxes and whether they're connected; `remove neighbor` deletes it all.
+5. Optional: `tools/support-helper.py ha neighbor open` takes `neighbor-ha` out of the Access app, so only Home
+   Assistant's own login page stands in front of it and its phone app can connect to that address. It is refused
+   until Home Assistant has its owner account (otherwise the first visitor could create it). Home Assistant's login
+   is then reachable from the internet: use a strong password and turn on two-step login for its accounts.
+   `ha neighbor protected` puts the Cloudflare login back. The setup page, Grafana and SSH always stay behind it.
 
 Helper, by hand in the Cloudflare dashboard:
 
