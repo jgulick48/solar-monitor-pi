@@ -37,7 +37,7 @@ FORMAT = 1
 ITERATIONS = 600000
 # modules whose settings describe the site and travel with it; the rest belong to one box
 PORTABLE = ("boiler", "cameras", "freeze", "generator", "notifications", "probeboard", "propane", "voice", "water", "weather")
-LOCAL = ("backup", "hahistory", "ssh", "support", "tunnel", "zigbee", "zwave")
+LOCAL = ("backup", "follow", "hahistory", "share", "ssh", "support", "tunnel", "zigbee", "zwave")
 PLAIN = ("site.json", "display.json", "weather.json", "update.json", "protect.json")
 # per file: keys that are this box's state, not settings (dotted paths), and keys that are the only ones kept
 DROP = {"protect.json": ("ha_added", "applied_quality"), "weather.json": ("probe", "scan", "last_push")}

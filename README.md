@@ -204,6 +204,31 @@ forecast, the box itself (temperature, power, disk, services) and the clock. Ena
 notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras and freeze
 protection. Open it after first setup, and whenever something seems off.
 
+## Following another site
+
+A second box can show a site's inverters as if they were its own: a box at home showing the cabin, say. It must not
+connect to the same dongles (two programs polling a WiFi dongle make it drop out), so the box at the site passes its
+readings on instead.
+
+- **At the site** (the source): Setup &rarr; *Optional features* &rarr; **Share this site**. The box's message broker
+  gets a second listener on the network (port 8883, TLS with a certificate made on the box), and an account that
+  can only read the inverters' raw frames. The bridge starts publishing every reply from the dongles as it came.
+  The section shows a **share code**: the box's addresses, that account's password, the certificate and the dongles'
+  ids. Send it privately. *Make a new code* changes the password, which cuts off every box using the old one.
+- **On the other box** (the follower): *Optional features* &rarr; **Follow a site**, paste the code. It starts one
+  *mirror* per dongle (the bridge image in mirror mode, up to 4), which reads the source's frames and answers this
+  box's bridge like the dongle would. Home Assistant, the dashboards, the wall display and the advice then work
+  unchanged. The mirror checks the source's certificate against the one in the code, only reads, and drops any
+  write: a follower can never change the inverter.
+- **Reaching each other:** the follower must reach the source's address on port 8883: the same network, or a VPN
+  between the sites (enter the VPN address in *The other box's address*). Through the source's remote-access tunnel
+  is not supported yet.
+- **When the source stops getting data** its frames go stale after 2 minutes and the follower shows the inverter
+  offline too. The *Check-up* page says whether each mirror is getting data.
+- **A box with inverters of its own** that also follows a site adds the two together as one system; following is
+  meant for a box without its own. On the same network, the follower stops reading a followed dongle directly and
+  the hourly scan leaves it alone.
+
 ## History: this year against last
 
 `http://solar-monitor.local/history` (*History* in the header) shows each of the last 12 months against the same

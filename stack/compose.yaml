@@ -9,18 +9,54 @@ services:
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./mosquitto/passwd:/mosquitto/config/passwd
+      - ./mosquitto/conf.d:/mosquitto/config/conf.d
       - mosquitto-data:/mosquitto/data
     ports:
       # Home Assistant runs on the host network and connects here; not exposed to the LAN.
       - "127.0.0.1:1883:1883"
+      # The "Share this site" module's listener (TLS, a read-only account; setup/sharing.py). On localhost, where
+      # nothing listens, unless the module is on: then .env has SHARE_BIND=0.0.0.0.
+      - "${SHARE_BIND:-127.0.0.1}:8883:8883"
 
   bridge:
-    image: jgulick48/lxp-bridge-go:2026.11.23-0324
+    image: jgulick48/lxp-bridge-go:2026.11.25-0531
     restart: unless-stopped
     command: ["-configFile", "/config/config.yml"]
     volumes:
       - ./bridge/config.yml:/config/config.yml:ro
     depends_on: [mosquitto]
+
+  # Following another site (setup page -> Follow a site; setup/sharing.py): the bridge image in mirror mode, one per
+  # followed dongle. Each reads that dongle's raw frames from the source box's Mosquitto and answers this box's
+  # bridge like the dongle would (read only). Off unless COMPOSE_PROFILES has follow1..follow4.
+  mirror1:
+    image: jgulick48/lxp-bridge-go:2026.11.25-0531
+    profiles: [follow1]
+    restart: unless-stopped
+    command: ["-configFile", "/config/mirror1.yml"]
+    volumes: ["./mirror:/config:ro"]
+    ports: ["127.0.0.1:18081:8080"]
+  mirror2:
+    image: jgulick48/lxp-bridge-go:2026.11.25-0531
+    profiles: [follow2]
+    restart: unless-stopped
+    command: ["-configFile", "/config/mirror2.yml"]
+    volumes: ["./mirror:/config:ro"]
+    ports: ["127.0.0.1:18082:8080"]
+  mirror3:
+    image: jgulick48/lxp-bridge-go:2026.11.25-0531
+    profiles: [follow3]
+    restart: unless-stopped
+    command: ["-configFile", "/config/mirror3.yml"]
+    volumes: ["./mirror:/config:ro"]
+    ports: ["127.0.0.1:18083:8080"]
+  mirror4:
+    image: jgulick48/lxp-bridge-go:2026.11.25-0531
+    profiles: [follow4]
+    restart: unless-stopped
+    command: ["-configFile", "/config/mirror4.yml"]
+    volumes: ["./mirror:/config:ro"]
+    ports: ["127.0.0.1:18084:8080"]
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.156.0

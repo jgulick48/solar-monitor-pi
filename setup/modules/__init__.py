@@ -54,6 +54,7 @@ class Module:
     migrate: Optional[Callable] = None  # (stack, old settings or None, old version) -> settings
     on_disable: Optional[Callable] = None  # (stack): stop whatever it runs before it's turned off
     on_enable: Optional[Callable] = None   # (stack): start what it runs once it's turned on
+    after_disable: Optional[Callable] = None  # (stack): once it is off and .env is rewritten: undo what it set up elsewhere
     ha_fields: Optional[Callable] = None  # (stack, site) -> {"<id>_...": value} for /api/ha
     ha_core: Optional[Callable] = None  # (stack) -> {key: value} added to Home Assistant's core.yaml
     nav: Optional[tuple] = None         # (href, label, page title): a page linked in the web pages' header
@@ -167,6 +168,8 @@ def set_enabled(stack, module_id, on):
         hastates.apply(stack)
     if on and m.on_enable:
         m.on_enable(stack)
+    if not on and m.after_disable:
+        m.after_disable(stack)
 
 
 def _write(stack, module_id, d):
