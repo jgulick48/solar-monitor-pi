@@ -30,23 +30,45 @@ fit its 1.4 mm holes before ordering.
 
 ## Through-hole parts (THT version)
 
+Soldered to the board (checked against `fab/tht/carrier-tht.kicad_pcb`):
+
 | Ref | Qty | Part | Notes |
 | --- | --- | --- | --- |
 | J1, J2 | 2 | 1×20 female pin header, 2.54 mm, 8.5 mm tall | Sockets for the ESP32-P4-ETH |
-| J3–J11 | 9 | 3-pin 5.08 mm pluggable terminal block (right-angle header + screw plug) | 8 probe ports, HEAT |
-| J12, J16 | 2 | 3.5 mm stereo jack, CUI SJ1-3523N (through-hole, right-angle) | Pump clamps CT1, CT2 (both board versions: soldered by hand) |
+| J3–J10 | 8 | 3-pin 5.08 mm pluggable terminal block (right-angle header + screw plug) | Probe ports P1–P8 |
+| J11 | 1 | 3-pin 5.08 mm pluggable terminal block, as above | HEAT (24 VAC on the outer pins) |
+| J12, J16 | 2 | 3.5 mm stereo jack, CUI SJ1-3523N (through-hole, right-angle) | Pump clamps CT1, CT2. Use this part or a pin-compatible one: the holes are made for it |
+| J13 | 1 | 1×4 male pin header, 2.54 mm | OLED lead |
+| J14 | 1 | 1×2 male pin header, 2.54 mm | WAKE button lead |
+| J15 | 1 | 2×3 male pin header, 2.54 mm | Spare GPIOs (optional) |
 | R1–R8 | 8 | 4.7 kΩ, ¼ W, axial (6.3 mm body) | Probe pull-ups; holes 10.16 mm (0.4") apart |
-| R9–R12 | 4 | 10 kΩ, ¼ W, axial | Heat-call input, heat-call pull-up, clamp bias (×2) |
+| R9 | 1 | 10 kΩ, ¼ W, axial | Heat-call input (24 VAC side) |
+| R10 | 1 | 10 kΩ, ¼ W, axial | Heat-call pull-up (GPIO46) |
+| R11, R12 | 2 | 10 kΩ, ¼ W, axial | Clamp bias divider |
 | U1 | 1 | PC814 optocoupler, DIP-4 (AC input) | EL814 works too; a DIP-4 socket is optional |
 | C1 | 1 | 1 µF ceramic, 5 mm lead spacing, ≥ 16 V | Heat-call smoothing |
 | C2 | 1 | 10 µF ceramic, 5 mm lead spacing, ≥ 10 V | Clamp bias. A radial MLCC fits the holes; a small electrolytic needs its legs bent to 5 mm, + toward BIAS |
 | C3 | 1 | 100 nF ceramic, 5 mm lead spacing | 3.3 V decoupling |
-| J13 | 1 | 1×4 male pin header, 2.54 mm | OLED lead |
-| J14 | 1 | 1×2 male pin header, 2.54 mm | Lid button |
-| J15 | 1 | 2×3 male pin header, 2.54 mm | Spare GPIOs (optional) |
 
-If the ESP32-P4-ETH came without headers: 2 × 1×20 male headers, soldered with the pins pointing down into the
-sockets.
+In short: 2 female 1×20 headers, 9 pluggable 3-pin blocks, 2 jacks, 8 × 4.7 kΩ, 4 × 10 kΩ, 1 PC814, 3 capacitors
+(1 µF, 10 µF, 100 nF) and 3 small male headers. If the ESP32-P4-ETH came without headers: 2 × 1×20 male headers,
+soldered with the pins pointing down into the sockets.
+
+To go with it (enclosure and wiring):
+
+| Qty | Part | For |
+| --- | --- | --- |
+| 1 | Waveshare ESP32-P4-ETH with its PoE module (B) | The board itself |
+| 1 | 0.96" SSD1306 I²C OLED module, 4 pins (GND VCC SCL SDA) | Display behind the top's window |
+| 1 | 4-wire female-female Dupont lead, about 15 cm | OLED to J13 |
+| 1 | 12 mm panel-mount momentary push button, normally open | WAKE, in the top |
+| 1 | 2-wire lead with a 2-pin female Dupont housing | WAKE button to J14 |
+| 4 | M3 × 6 self-tapping screws | Carrier onto the enclosure's standoffs |
+| 4 | M3 × 12 self-tapping screws | Joining base and cover |
+| 4 | M2 × 4 self-tapping screws | OLED onto its posts |
+| 2 | 4 mm (#8) screws | The enclosure's mounting tabs |
+| 3–8 | DS18B20 waterproof probes, silicone cable | One per port (G, D, V) |
+| 0–2 | SCT-013 current clamps, 1 V output | CT1, CT2: plug straight in |
 
 ## Files
 
