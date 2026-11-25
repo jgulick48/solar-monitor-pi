@@ -410,6 +410,7 @@ async function tick(){
   chart(d.series||{});
   weather(d.weather,{days:d.wx_days,page:d.wx_page});
   const notes=[...(d.alerts||[])]; if(d.advice)notes.push(d.advice);
+  if(d.spare)notes.push(d.spare);            // solar the house can't use or store: a good time for big loads
   // a module's alert stays in sight while its panel waits its turn (and the main module's note, always)
   for(const p of d.panels||[])if(p.note&&(p.level==="bad"||(mainPanel&&p.id===mainPanel.id)))notes.unshift({level:p.level||"",text:p.title+": "+p.note});
   for(const a of (d.weather&&d.weather.alerts)||[]){         // National Weather Service alerts
