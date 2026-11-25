@@ -58,7 +58,7 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
   (charging/discharging) and **generator**, with today's totals and the last 24 hours as a chart.
 - **Notes**: dongles offline, inverter faults, low battery and, for a hand-started generator, from mid-afternoon on
   whether the battery lasts until the sun is back ("Start the generator before dark: ... about 4.2 kWh more is
-  needed"), from the average use over the last three days and the solar forecast: a dull day tomorrow counts too
+  needed"), from the house's expected use and the solar forecast: a dull day tomorrow counts too
   ("tomorrow looks dull (about 6 kWh of solar expected) ...").
 - **Any screen**: the screen mode comes from the TV's EDID: its own preferred mode, except that screens bigger than
   1920x1200 (4K TVs) run at 1920x1080, which the Pi handles much better with cameras and the TV scales up. The layout
@@ -252,6 +252,13 @@ The generator is an optional feature (setup page: *Optional features* → *Gener
 generator"). Its section says how it is started (by hand or auto-start from the dry contact), its size and fuel; the
 start-the-generator advice on the wall display is for a generator started by hand. Turning it off is what "No generator"
 was: no generator tile or advice, no log or reminders.
+
+**Expected use.** The advice, "lasts about" and the day's battery high need to know how much the house will use, and
+when. The box learns it per hour of the week from the last 8 weeks (the median, so one-off days don't count), scaled
+by how the last 3 days compare with usual. It checks itself: every hour it replays the last 28 nights (4 PM to
+9 AM) both ways, and uses the weekly profile only where it predicted better than the plain average of the last 3
+days; otherwise, and until there are 2 weeks of history, it stays with that average. The collector's log says which
+is in use and why; Home Assistant gets *Site expected use tomorrow* (kWh), with the method as an attribute.
 
 With a **Chargeverter** (or another DC charger), enter the current it's set to (for example 40 A). The advice then also
 says how long to run the generator: "About 4.2 kWh more is needed. Run it about 2 h with the charger at 40 A (2.1 kW)."
