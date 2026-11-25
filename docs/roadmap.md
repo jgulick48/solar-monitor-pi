@@ -12,6 +12,52 @@ health, remote support.
 2. **Upgrade test**: a box on an older release updating itself to the newest one (new container images, the generator
    log reading back through a year of history on its first run).
 
+## Planned (decided 2026-11-25)
+
+Eleven features in four phases, each its own PR and release. The design, with the reasons, is on the wiki:
+[Planned features](https://github.com/jgulick48/solar-monitor-pi/wiki/Planned-features).
+
+**Phase 1: foundations**
+
+- **Weekly usage prediction.** Expected load for each hour of the week (the median of the last 4 to 8 weeks, scaled
+  by how the last 3 days compare with their usual level) instead of a flat 3-day average. Used by the generator
+  advice, "lasts about" and the Phase 2 features. The box backtests it against the flat average on the site's own
+  history and uses whichever predicts better; flat until there are 2 weeks of data.
+- **Dongle health.** Per dongle: time since its last data and reconnects per day, on the setup page and in Home
+  Assistant, with an alert for "connected but quiet", which the offline alert misses.
+
+**Phase 2: advice**
+
+- **"Stop the generator".** While it runs, the overnight simulation is repeated from the current battery level:
+  "about 40 minutes more" (from the measured charge rate), then "the generator can be shut down", announced once
+  per run on the display, by voice and by phone.
+- **"Good time to run big loads".** With the battery nearly full and more solar forecast than the expected use:
+  "about 2 kW spare until 3 PM" on the display and as a Home Assistant sensor. Phone notification off by default.
+- **Storm and dull-spell outlook.** A daily look 3 to 5 days ahead (forecast solar against expected use): "three dull
+  days ahead: expect about 6 generator hours; propane is at 34%". Weather warnings add a short checklist. Needs the
+  solar forecast extended from 2 days to 5.
+- **Freeze protection.** A critical alert when a chosen temperature (slab, probe, room) falls below a threshold
+  (40 °F by default), and earlier when a hard freeze is forecast while the boiler is faulted or the battery is low.
+  Works without the boiler module, with any Home Assistant temperature sensor.
+
+**Phase 3: convenience**
+
+- **Snapshot notifications.** Doorbell and person alerts with the camera's picture, through the notifications
+  module's quiet hours, with a cooldown per camera. Home Assistant app first, then ntfy.
+- **First-run check.** One page with a green or red line per item (dongles, data being recorded, Home Assistant,
+  forecast, notifications, cameras, backup, remote access, disk and temperature); each module adds its own checks.
+- **Config export and import.** The settings as one file, imported on another box with a preview. Passwords and API
+  keys are left out unless asked for, and then encrypted with a passphrase. History stays with backups.
+- **Year-over-year comparison.** A History page: each month against the same month last year (solar, use, generator
+  hours, propane, water), and a Grafana dashboard.
+
+**Phase 4: follow another site**
+
+- A "Share this site" switch on the source box (the bridge's raw-frame feed and a read-only share code); the
+  following box pastes the code and runs the bridge's mirror, so the remote inverter appears like a local one
+  without a second connection to the dongle. Same network or VPN first; through the source's remote-access tunnel
+  later (needs MQTT over WebSocket in the bridge).
+
 ## Feature ideas
 
 Most useful first.
