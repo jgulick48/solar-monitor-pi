@@ -29,6 +29,36 @@ class SSHAccess(Support):
     def ak(self):
         return open(self.f("home/solar/.ssh/authorized_keys")).read()
 
+    def test_put_back_after_a_restore(self):
+        sshaccess.enable(self.stack, KEY, sudo=True)
+        # a backup restored onto a new drive: the settings are back, nothing outside them is, SSH is off
+        os.remove(self.f("home/solar/.ssh/authorized_keys"))
+        os.remove(self.f(sshaccess.SUDOERS))
+        os.remove(self.f(sshaccess.SSHD_DROPIN))
+        self.ssh_on = self.ssh_boot = False
+        msgs = sshaccess.check(self.stack)
+        self.assertEqual(msgs, ["SSH access keys put back", "administrator rights put back", "SSH started (keys only)"])
+        self.assertIn(f"{sshaccess.MARK_BEGIN}\n{KEY}\n{sshaccess.MARK_END}", self.ak())
+        self.assertEqual(open(self.f(sshaccess.SUDOERS)).read(), sshaccess.SUDO_RULE)
+        self.assertEqual(open(self.f(sshaccess.SSHD_DROPIN)).read(), sshaccess.SSHD_CONF)
+        self.assertTrue(self.ssh_on and self.ssh_boot)                      # running, and again after a reboot
+        # nothing missing: nothing touched, SSH not restarted
+        self.calls.clear()
+        self.assertEqual(sshaccess.check(self.stack), [])
+        self.assertFalse([c for c in self.calls if "restart" in c or c.startswith("systemctl enable")], self.calls)
+
+    def test_check_keeps_the_owners_other_keys_and_settings(self):
+        os.makedirs(self.f("home/solar/.ssh"))
+        with open(self.f("home/solar/.ssh/authorized_keys"), "w") as f:
+            f.write(OWNER_KEY + "\n")
+        sshaccess.enable(self.stack, KEY, sudo=False)
+        os.remove(self.f(sshaccess.SSHD_DROPIN))
+        self.assertEqual(sshaccess.check(self.stack), ["SSH started (keys only)"])
+        self.assertTrue(self.ak().startswith(OWNER_KEY + "\n"))              # the owner's own key stays
+        self.assertFalse(os.path.exists(self.f(sshaccess.SUDOERS)))          # no administrator rights: none added
+        sshaccess.disable(self.stack)
+        self.assertEqual(sshaccess.check(self.stack), [])                   # off: leaves everything alone
+
     def test_on_and_off(self):
         msgs = sshaccess.enable(self.stack, KEY, sudo=True)
         self.assertEqual(msgs, ["SSH started (keys only)"])

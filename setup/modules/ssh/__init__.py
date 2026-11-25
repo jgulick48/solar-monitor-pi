@@ -77,4 +77,5 @@ MODULE = Module(
     card_slot="access",
     setup_section=setup_section,
     routes={("POST", "/ssh"): turn_on, ("POST", "/ssh/off"): turn_off},
+    every={300: engine.check},         # keep the box matching the setting (after a restore onto a new drive or box)
 )
