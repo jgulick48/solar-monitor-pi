@@ -20,8 +20,10 @@ the few lines below). The console's certificate is self-signed, so it isn't chec
 address entered on the setup page.
 """
 import base64
+import datetime
 import json
 import os
+import secrets
 import socket
 import ssl
 import struct
@@ -457,5 +459,88 @@ def sync_names(stack, cams=None):
         c["name"] = by_id.get(c["id"], c["name"])
     save(stack, d)
     return renamed
+
+
+# --------------------------------------------------------------------------
+# Home Assistant's own UniFi Protect integration, with the same API key
+# --------------------------------------------------------------------------
+# Home Assistant 2026.11 connects to Protect with only an API key ("api_key_only"): cameras (live and snapshots),
+# detections, doorbell events and sensors; not the settings that need a Protect login (recording mode and so on).
+# The box adds it once Protect is set up here, so the cameras are in Home Assistant (and the phone app) with
+# nothing more to type. If the owner deletes it in Home Assistant it stays deleted ("ha_added" remembers); an
+# integration the owner added themselves (with a login) is left alone.
+HA_CONN = "api_key_only"
+
+
+def _entries_path(stack):
+    return os.path.join(stack, "homeassistant", ".storage", "core.config_entries")
+
+
+def ha_entries(stack):
+    doc = ss.load_json(_entries_path(stack), {})
+    return [e for e in (doc.get("data") or {}).get("entries", []) if e.get("domain") == "unifiprotect"]
+
+
+def _ours(e, d):
+    return (e.get("data") or {}).get("connection_mode") == HA_CONN and (e.get("data") or {}).get("host") == d["host"]
+
+
+def ha_action(stack):
+    """What the Home Assistant integration needs now: "add", "key" (the box's key changed), or ""."""
+    d = settings(stack)
+    if not (d.get("host") and d.get("api_key")) or not os.path.exists(_entries_path(stack)):
+        return ""                   # nothing to add, or Home Assistant isn't set up yet
+    entries = ha_entries(stack)
+    ours = [e for e in entries if _ours(e, d)]
+    if ours:
+        return "key" if ours[0]["data"].get("api_key") != d["api_key"] else ""
+    if entries or d.get("ha_added"):
+        return ""                   # the owner's own integration, or one the owner deleted
+    return "add"
+
+
+def write_ha_entry(stack):
+    """Add the integration, or put the box's current key in it (Home Assistant stopped). True when changed."""
+    d = settings(stack)
+    path = _entries_path(stack)
+    doc = ss.load_json(path, None)
+    if not doc:
+        return False
+    entries = doc.setdefault("data", {}).setdefault("entries", [])
+    for e in entries:
+        if e.get("domain") == "unifiprotect" and _ours(e, d):
+            if e["data"].get("api_key") == d["api_key"]:
+                return False
+            e["data"]["api_key"] = d["api_key"]
+            break
+    else:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        entries.append({
+            "created_at": now, "modified_at": now, "domain": "unifiprotect", "entry_id": secrets.token_hex(16),
+            "data": {"host": d["host"], "port": 443, "verify_ssl": False, "api_key": d["api_key"],
+                     "connection_mode": HA_CONN, "id": "UniFi Protect"},
+            "options": {"disable_rtsp": False, "all_updates": False, "override_connection_host": False, "max_media": 1000},
+            "disabled_by": None, "discovery_keys": {}, "pref_disable_new_entities": False, "pref_disable_polling": False,
+            "source": "user", "subentries": [], "title": "UniFi Protect",
+            "unique_id": None,              # Home Assistant sets the console's MAC address when it first connects
+            "version": 2, "minor_version": 1})
+    return ss.write_if_changed(path, json.dumps(doc, indent=2) + "\n", 0o600)
+
+
+def ensure_in_ha(stack, run=None):
+    """Add Protect to Home Assistant, or update its key, when needed (restarting Home Assistant once). Returns
+    messages."""
+    action = ha_action(stack)
+    if not action:
+        return []
+    changed, err = ss.ha_stopped_edit(stack, lambda: write_ha_entry(stack), run)
+    if changed:
+        d = settings(stack)
+        d["ha_added"] = True
+        save(stack, d)
+    if err:
+        return [err]
+    return (["cameras added to Home Assistant (UniFi Protect integration)" if action == "add"
+             else "Home Assistant's UniFi Protect integration has the new API key"] if changed else [])
 
 LAST_DUPES = []   # manual cameras the last apply_cameras dropped as duplicates (for the setup page's message)

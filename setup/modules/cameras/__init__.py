@@ -185,6 +185,10 @@ def _protect(stack, action, f):
                 return "the API key is needed"
             cams = protect.list_cameras(host, key)
             protect.save(stack, {**d, "host": host, "api_key": key})
+            if protect.ha_action(stack):            # into Home Assistant too, in the background (it restarts once)
+                threading.Thread(target=engine.sync_names, args=(stack,), daemon=True).start()
+                return (f"connected: {len(cams)} camera(s). Tick the ones for the screen. They're being added to "
+                        "Home Assistant as well (it restarts once).")
             return f"connected: {len(cams)} camera(s). Tick the ones for the screen."
         if action == "/protect/forget":
             changed = protect.apply_cameras(stack, [], [])
