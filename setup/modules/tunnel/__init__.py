@@ -127,8 +127,26 @@ def on_disable(stack):
         apply_core_change(stack)
 
 
+def checks(stack):
+    d = engine.settings(stack)
+    link = ("/setup#remote", "Setup")
+    if not d["enabled"]:
+        return [{"title": "Remote access", "state": "off", "link": link,
+                 "text": "Off: Home Assistant is only reachable on this network."}]
+    st = engine.tunnel_status(stack)
+    url = engine.public_url(stack)
+    if st == "healthy":
+        return [{"title": "Remote access", "state": "ok", "link": None, "text": f"Home Assistant is reachable at {url}."}]
+    if not st:
+        return [{"title": "Remote access", "state": "warn", "link": link,
+                 "text": "On, but Cloudflare couldn't be asked about the tunnel just now (internet, or the API token)."}]
+    return [{"title": "Remote access", "state": "bad", "link": link,
+             "text": f"On, but Cloudflare says the tunnel is {st}: {url} won't open. Check the box's internet connection."}]
+
+
 MODULE = Module(
     id="tunnel",
+    checks=checks,
     title="Remote access",
     description="Home Assistant away from home, through your own Cloudflare Tunnel",
     order=20,

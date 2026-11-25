@@ -194,6 +194,16 @@ Home Assistant comes with a **Solar** dashboard in the sidebar and alerts, from 
 The package and the dashboard are replaced on every update (and Home Assistant restarted when they change), so edit
 copies, not the originals: make your own dashboard in Settings -> Dashboards and your own automations.
 
+## Check-up
+
+`http://solar-monitor.local/check` (*Check-up* in the header) answers "is everything set up and working?" with one
+line per item: green works, yellow works but deserves a look, red doesn't work, grey is optional and not set up.
+Problems come first, each with what to do and a link to where it is fixed. The box checks the site details, the
+inverter dongles, that data is being recorded, Home Assistant (running, and its owner account made), the solar
+forecast, the box itself (temperature, power, disk, services) and the clock. Enabled modules add their own lines:
+notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras and freeze
+protection. Open it after first setup, and whenever something seems off.
+
 ## The box's own health and a test notification
 
 The start page's **This box** card (and Home Assistant's *Site box health*, *temperature*, *disk free* and *SSD wear*

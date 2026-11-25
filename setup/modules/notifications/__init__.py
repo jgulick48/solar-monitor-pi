@@ -245,8 +245,32 @@ def due(stack):
     return notify.due(stack, settings(stack), voice_on=_voice_on(stack))
 
 
+def checks(stack):
+    """The check-up page: is there anywhere for an alert to go, and did the last one get there?"""
+    s = settings(stack)
+    names = dict(notify.CHANNELS)
+    chans = [c for c in notify.channels_for(stack, s, "warning", False)]
+    link = ("/setup#notifications", "Setup")
+    if not chans:
+        return [{"title": "Notifications", "state": "bad", "link": link,
+                 "text": "Alerts have nowhere to go: sign in to the Home Assistant app on a phone, or set up ntfy. "
+                         "Then send a test from the start page."}]
+    log = notify.log(stack)
+    last = log[-1] if log else None
+    failed = [f"{names.get(k, k)}: {v}" for k, v in ((last or {}).get("result") or {}).items() if str(v).startswith("failed")]
+    to = " and ".join(names[c] for c in chans)
+    if failed:
+        return [{"title": "Notifications", "state": "bad", "link": ("/notifications", "Alerts sent"),
+                 "text": f"The last alert didn't get through ({'; '.join(failed)})."}]
+    if not last:
+        return [{"title": "Notifications", "state": "warn", "link": ("/", "Start page"),
+                 "text": f"Set up for {to}, but nothing has been sent yet: send a test notification to see it arrive."}]
+    return [{"title": "Notifications", "state": "ok", "link": None, "text": f"Alerts go to {to}; the last one was delivered."}]
+
+
 MODULE = Module(
     id="notifications",
+    checks=checks,
     title="Notifications",
     description="where alerts go: the Home Assistant app, ntfy, the wall display; quiet hours",
     order=15,

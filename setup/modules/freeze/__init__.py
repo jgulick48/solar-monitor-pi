@@ -195,8 +195,26 @@ def every_minute(stack):
                        boiler_fault=_boiler_fault(stack, site), low=engine.forecast_low(stack))
 
 
+def checks(stack):
+    s = settings(stack)
+    link = ("/setup#freeze", "Setup")
+    if not s["sensors"]:
+        return [{"title": "Freeze protection", "state": "bad", "link": link,
+                 "text": "On, but no temperature is picked, so it watches nothing."}]
+    site = _site(stack)
+    rd = engine.readings(stack, s, site)
+    silent = [r["name"] for r in rd if not r["ok"]]
+    if silent:
+        return [{"title": "Freeze protection", "state": "bad", "link": link,
+                 "text": f"No reading from {', '.join(silent)}: check the sensor in Home Assistant."}]
+    us = engine.us(site)
+    return [{"title": "Freeze protection", "state": "ok", "link": None,
+             "text": ", ".join(f"{r['name']} {engine.show(r['c'], us)}" for r in rd) + f"; alert below {engine.show(s['below_c'], us)}."}]
+
+
 MODULE = Module(
     id="freeze",
+    checks=checks,
     title="Freeze protection",
     description="an alert when a slab, pipe or room temperature nears freezing, and earlier when a hard freeze is forecast with the heat or battery in doubt",
     order=63,

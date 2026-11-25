@@ -29,6 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import advisor  # noqa: E402
 import boxhealth  # noqa: E402
+import checkup  # noqa: E402
 import battery  # noqa: E402
 import display  # noqa: E402
 import protect  # noqa: E402
@@ -424,6 +425,9 @@ legend{font-weight:600;padding:0 6px}
 h2{margin:48px 0 8px;padding-top:20px;border-top:2px solid var(--line)}
 button{font:inherit;padding:8px 18px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
 .err{color:#c33;font-weight:600}
+.checks td{vertical-align:top}.ck-mark{width:2em;text-align:center;font-weight:700}.sr{position:absolute;left:-999em}
+.ck-ok .ck-mark{color:#0a6}.ck-warn .ck-mark{color:#b80}.ck-bad .ck-mark{color:#c33}.ck-off{color:var(--muted)}
+.ck-sum.ck-ok{border-color:#0a6}.ck-sum.ck-warn{border-color:#b80}.ck-sum.ck-bad{border-color:#c33}
 .notice{border-width:1px 1px 1px 6px}.notice.ok{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--bg))}
 .notice.err{border-color:#c33;background:color-mix(in srgb,#c33 9%,var(--bg));font-weight:600}
 header.nav{position:sticky;top:0;z-index:15;display:flex;align-items:center;gap:12px;margin:-16px -16px 12px;padding:10px 16px;
@@ -452,9 +456,9 @@ background:color-mix(in srgb,var(--fg) 3%,var(--bg))} section.own h2{margin:12px
 @media (max-width:600px){body{padding:12px} fieldset{padding:6px 12px 14px} .row label{flex-basis:100%} .savebar{margin:16px -12px 0;padding:8px 12px}}"""
 
 
-NAV = [("/", "Home", "Solar monitor"), ("/setup", "Setup", "Site setup"),
+NAV = [("/", "Home", "Solar monitor"), ("/check", "Check-up", "Check-up"), ("/setup", "Setup", "Site setup"),
        ("/battery", "Battery", "Battery health"), ("/advisor", "Advisor", "Advisor"), ("/display", "Screen", None)]
-NAV_MODULES_AT = 3          # the enabled modules' pages (backups, generator) go before the Advisor
+NAV_MODULES_AT = 4          # the enabled modules' pages (backups, generator) go before the Advisor
 APPS = [("8123", "Home Assistant"), ("3000", "Grafana")]
 
 
@@ -1022,6 +1026,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(display.data(STACK, load_site())), "application/json")
         elif self.path == "/api/ha":
             self.send(200, json.dumps(display.ha_status(STACK, load_site())), "application/json")
+        elif self.path == "/check":
+            site = load_site()
+            self.send(200, page("Check-up", checkup.render(checkup.core(STACK, site) + modules.checks(STACK), host_of(self))))
         elif self.path == "/battery":
             self.send(200, battery_page(load_site()))
         elif self.path == "/setup":

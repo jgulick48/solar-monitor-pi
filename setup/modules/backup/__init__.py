@@ -130,8 +130,24 @@ def restore(stack, form):
     return page(stack, "Restoring: this takes a few minutes. Reload this page to see when it's done.")
 
 
+def checks(stack):
+    f = ha_fields(stack)
+    link = ("/backup", "Backups")
+    if not f["backup_configured"]:
+        return [{"title": "Backup", "state": "warn", "link": link,
+                 "text": "No backup stick chosen: the history and settings are only on the SSD. Plug a USB stick in and choose it."}]
+    if f["backup_overdue"]:
+        return [{"title": "Backup", "state": "bad", "link": link,
+                 "text": f"No good backup for over 2 days. {f['backup_message']}".strip()}]
+    if not f["backup_last_ok"]:
+        return [{"title": "Backup", "state": "warn", "link": link, "text": "A stick is chosen; the first backup runs tonight."}]
+    when = dt.datetime.fromisoformat(f["backup_last_ok"]).astimezone().strftime("%b %-d %H:%M")
+    return [{"title": "Backup", "state": "ok", "link": None, "text": f"Last good backup {when}."}]
+
+
 MODULE = Module(
     id="backup",
+    checks=checks,
     title="Backups",
     description="nightly to a USB stick, and restoring from one",
     order=10,

@@ -73,6 +73,8 @@ class Module:
     display_events: Optional[Callable] = None  # (stack) -> fields added to the wall display's fast poll (/display/events)
     ha_entities: Optional[Callable] = None  # (stack) -> Home Assistant entity ids it reads (hastates.get); each is
     #                                       also recorded in VictoriaMetrics
+    checks: Optional[Callable] = None   # (stack) -> its lines on the check-up page (checkup.py):
+    #                                       [{"title", "state": "ok" | "warn" | "bad" | "off", "text", "link": (href, label) or None}]
     display_panel: Optional[Callable] = None  # (stack, site) -> its panel on the wall display, or None: data, never HTML:
     #   {"title", "level": "" | "warn" | "bad", "note": "", "tiles": [{"k": label, "v": value, "s": below it,
     #    "tone": "fg" | "solar" | "load" | "batt" | "gen" | "warn" | "bad" | "muted", "bar": 0-100 or None}]}
@@ -249,6 +251,12 @@ def ha_entities(stack):
     for _, ents in _each(stack, "ha_entities"):
         out.update(e for e in ents if e)
     return sorted(out)
+
+
+def checks(stack):
+    """The enabled modules' check-up lines; a module whose checks fail gets one line saying so."""
+    failed = lambda m, e: [{"title": m.title, "state": "warn", "text": f"Couldn't be checked ({type(e).__name__}).", "link": None}]  # noqa: E731
+    return [c for _, got in _each(stack, "checks", default=failed) for c in got or []]
 
 
 def nav(stack):
