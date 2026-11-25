@@ -154,6 +154,7 @@ INSTANT = {
     "gen": ss.GEN_POWER,
     # charging the inverters didn't do: a generator on a DC charger (Chargeverter); see genlog.py
     "ext_charge": ss.EXT_CHARGE,
+    "vbat": "avg(lxp_v_bat)",          # the battery's voltage: a DC charger's amps x this = the charging power
     "pv_today": "sum(lxp_e_pv_day)",
     "used_today": ss.LOAD_ENERGY_DAY,
     "charged_today": "sum(lxp_e_chg_day)",
@@ -263,6 +264,39 @@ def _hhmm(t, now, site=None):
     return hm(t, site) + (" tomorrow" if t.date() > now.date() else "")
 
 
+NOMINAL_V = 51.2       # a 48 V lithium (16-cell LiFePO4) bank, when the inverters don't report the battery's voltage
+
+
+def duration(hours):
+    """2.25 -> "2 h 15 min", 0.5 -> "30 min"."""
+    m = int(round(hours * 60))
+    return f"{m // 60} h {m % 60:02d} min".replace(" 00 min", "") if m >= 60 else f"{m} min"
+
+
+def charger_run(site, need_kwh, vbat=None):
+    """With a DC charger (Chargeverter) set to a known current: how long the generator should run to put need_kwh
+    into the battery. The charger's amps go straight into the battery, so its power is amps x the battery's voltage
+    (the resting voltage now: it rises while charging, so this errs on the long side). Rounded up to 15 minutes.
+    None without a current, or with nothing needed."""
+    try:
+        amps = float(site.get("charger_amps") or 0)
+    except (TypeError, ValueError):
+        return None
+    if amps <= 0 or not need_kwh or need_kwh <= 0:
+        return None
+    v = vbat if vbat and 20 <= vbat <= 70 else NOMINAL_V
+    kw = amps * v / 1000
+    hours = math.ceil(need_kwh / kw * 4) / 4
+    text = f"Run it about {duration(hours)} with the charger at {amps:g} A ({kw:.1f} kW)."
+    try:
+        gen_kw = float(site.get("generator_kw") or 0)
+    except (TypeError, ValueError):
+        gen_kw = 0
+    if gen_kw and kw / 0.9 > gen_kw:                  # the charger takes more than the generator can give
+        text += f" That's more than the {gen_kw:g} kW generator can supply: turn the charger down."
+    return {"hours": hours, "kw": round(kw, 2), "amps": amps, "text": text}
+
+
 def generator_advice(site, now_vals, now, tz, fc=None):
     """For a hand-started generator: will the battery last until the sun is back?
     With a solar forecast the battery is simulated in 15-minute steps (forecast solar against the
@@ -321,16 +355,19 @@ def generator_advice(site, now_vals, now, tz, fc=None):
     base = {"sunset": sset.strftime("%H:%M"), "empty_at": empty_at and _hhmm(empty_at, now, site),
             "need_kwh": round(need, 1), "forecast_tomorrow_kwh": fsum and fsum["tomorrow"],
             "sunrise": hm(next_rise, site), "sunrise_soc": rise_soc}
+    run = charger_run(site, need, now_vals.get("vbat"))
+    base.update(run_hours=run and run["hours"], charge_kw=run and run["kw"])
+    run_txt = f" {run['text']}" if run else ""
     when = "now" if now >= sset - dt.timedelta(minutes=30) or now < rise else f"before dark ({hm(sset, site)})"
     if empty_at is not None and empty_at < next_rise + dt.timedelta(hours=2):
         return dict(base, level="warn", text=(f"Start the generator {when}: at the usual use the battery reaches "
                                               f"{floor:.0f}% about {_hhmm(empty_at, now, site)}, before the sun is back. "
-                                              f"About {need:.1f} kWh more is needed.{tomorrow_txt}"))
+                                              f"About {need:.1f} kWh more is needed.{run_txt}{tomorrow_txt}"))
     if empty_at is not None:                          # lasts the night, but the next day is too dull to recover
         return dict(base, level="warn", text=(f"Start the generator {when}: tomorrow looks dull (about "
                                               f"{fsum['tomorrow']:.0f} kWh of solar expected), so at the usual use the "
                                               f"battery reaches {floor:.0f}% about {_hhmm(empty_at, now, site)}. "
-                                              f"About {need:.1f} kWh more is needed."))
+                                              f"About {need:.1f} kWh more is needed.{run_txt}"))
     nb = lambda t: hm(t, site).replace(" ", NBSP)  # noqa: E731 - keeps "6:51 AM" on one line on the wall display
     return dict(base, level="ok", text=f"No generator needed tonight: about {rise_soc}% at sunrise ({nb(next_rise)}), "
                                          f"above {floor:.0f}% until the sun is back. Sunset {nb(sset)}.{tomorrow_txt}")
@@ -560,7 +597,7 @@ def ha_status(stack, site):
         "alerts": [a["text"] for a in d["alerts"]],
         "generator_mode": site.get("generator") or "none",
         "advice": adv.get("level") or "none", "advice_text": adv.get("text") or "",
-        "advice_need_kwh": adv.get("need_kwh"), "advice_empty_at": adv.get("empty_at"), "sunset": adv.get("sunset"),
+        "advice_need_kwh": adv.get("need_kwh"), "advice_run_hours": adv.get("run_hours"), "advice_empty_at": adv.get("empty_at"), "sunset": adv.get("sunset"),
         "battery_at_sunrise": adv.get("sunrise_soc"), "sunrise": adv.get("sunrise"),
         "generator_needed": adv.get("level") == "warn",
         "forecast_today": (d["forecast"] or {}).get("today"), "forecast_remaining": (d["forecast"] or {}).get("remaining"),

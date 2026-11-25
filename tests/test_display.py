@@ -3,6 +3,7 @@ Run: python3 -m unittest discover -s tests -v"""
 import datetime as dt
 import http.server
 import json
+import math
 import os
 import re
 import sys
@@ -137,6 +138,30 @@ class Display(unittest.TestCase):
         late = dt.datetime(2026, 11, 21, 20, 0, tzinfo=DENVER)
         self.assertIn("now", display.generator_advice(SITE, {"soc": 40, "load_avg_3d": 800}, late, DENVER)["text"])
         self.assertIsNone(display.generator_advice(SITE, {"soc": None}, eve, DENVER))
+
+    def test_generator_run_time_with_a_chargeverter(self):
+        """With the Chargeverter's amps set, the advice says how long to run the generator: the kWh needed over
+        amps x the battery's voltage, rounded up to 15 minutes."""
+        eve = dt.datetime(2026, 11, 21, 15, 0, tzinfo=DENVER)
+        plain = display.generator_advice(SITE, {"soc": 50, "load_avg_3d": 800}, eve, DENVER)
+        self.assertIsNone(plain["run_hours"])                             # no amps set: no run time
+        self.assertNotIn("Run it", plain["text"])
+        site = {**SITE, "charger_amps": "40"}
+        a = display.generator_advice(site, {"soc": 50, "load_avg_3d": 800, "vbat": 52.0}, eve, DENVER)
+        need = a["need_kwh"]
+        self.assertGreater(need, 0)
+        self.assertEqual(a["charge_kw"], 2.08)                            # 40 A x 52.0 V
+        self.assertEqual(a["run_hours"], math.ceil(need / 2.08 * 4) / 4)
+        self.assertIn(f"About {need:.1f} kWh more is needed. Run it about {display.duration(a['run_hours'])} "
+                      "with the charger at 40 A (2.1 kW).", a["text"])
+        # without a voltage reading: a 48 V lithium bank's nominal 51.2 V
+        self.assertEqual(display.generator_advice(site, {"soc": 50, "load_avg_3d": 800}, eve, DENVER)["charge_kw"], 2.05)
+        # nothing needed: no run time
+        self.assertIsNone(display.generator_advice(site, {"soc": 95, "load_avg_3d": 800}, eve, DENVER)["run_hours"])
+        # a charger bigger than the generator
+        r = display.charger_run({**site, "charger_amps": "100", "generator_kw": "4"}, 10, 52.0)
+        self.assertIn("more than the 4 kW generator can supply", r["text"])
+        self.assertEqual((display.duration(2.25), display.duration(0.5), display.duration(3.0)), ("2 h 15 min", "30 min", "3 h"))
 
     def test_save_writes_go2rtc(self):
         stack = tempfile.mkdtemp()

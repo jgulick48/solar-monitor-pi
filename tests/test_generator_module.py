@@ -68,6 +68,17 @@ class GeneratorModule(unittest.TestCase):
         s = self.site()
         self.assertEqual((s["generator"], s["generator_kw"], s["generator_fuel"]), ("automatic", "22.0", "propane"))
         self.assertEqual(modules.settings(self.stack, "generator"), {"mode": "automatic"})
+        # the Chargeverter's current: "40", "40 A" and "40a" all mean 40; nonsense and 0 are refused; empty clears it
+        self.assertIn("name='charger_amps'", modules.form_sections(self.stack))
+        for bad in ("lots", "0", "500"):
+            with self.assertRaises(modules.FieldError) as e:
+                modules.form_check(self.stack, {"module_generator_shown": "1", "charger_amps": bad})
+            self.assertEqual(e.exception.field, "charger_amps")
+        for given in ("40", "40 A", "40a"):
+            modules.form_apply(self.stack, {"module_generator_shown": "1", "generator": "manual", "charger_amps": given})
+            self.assertEqual(self.site()["charger_amps"], "40")
+        modules.form_apply(self.stack, {"module_generator_shown": "1", "generator": "manual", "charger_amps": ""})
+        self.assertEqual(self.site()["charger_amps"], "")
 
     def test_page_card_and_log_hook(self):
         self.site(generator="manual")
