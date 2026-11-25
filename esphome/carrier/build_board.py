@@ -24,6 +24,7 @@ PORTS = [("P1", "front", 32, "GPIO33"), ("P2", "front", 48, "GPIO27"), ("P3", "f
          ("P7", "back", 64, "GPIO22"), ("P8", "back", 80, "GPIO20")]
 
 W, H = 100.0, 60.0             # board; y = 0 is the back (BOOT) edge, y = 60 the front (RESET) edge; x = 0 the RJ45 end
+HOLES = ((4.0, 4.0), (4.0, 56.0), (96.0, 6.0), (30.0, 30.0))   # M3 mounting holes (the enclosure's standoffs: car_holes)
 ESP_X0 = -1.9                  # the ESP board's RJ45 edge (its jack ends flush with the enclosure's outside)
 ESP_Y0, ESP_W = 19.5, 21.0     # its back edge, width
 ROW_BOOT = ESP_Y0 + 1.61       # header rows 17.78 apart, centred on the 21 mm board
@@ -293,7 +294,7 @@ class Board:
             k = (RESET_ROW if row == "J1" else BOOT_ROW).index(gpio)
             self.repin(row, k, f"{name}_{gpio}")
         # mounting holes (M3) in the corners left free
-        for i, (x, y) in enumerate(((4.0, 4.0), (4.0, 56.0), (96.0, 6.0), (30.0, 30.0))):
+        for i, (x, y) in enumerate(HOLES):
             self.add("MountingHole", "MountingHole_3.2mm_M3", f"H{i + 1}", "M3", x, y).Reference().SetVisible(False)
         self.text("Boiler probe carrier  ESP32-P4-ETH  " + ("THT" if tht else "SMD") + "  v2", 52.0, 57.0, 1.2,
                   layer=pcbnew.B_SilkS, bold=True)
