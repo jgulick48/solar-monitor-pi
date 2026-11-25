@@ -455,6 +455,20 @@ def seed_homeassistant(stack, sec):
     return True
 
 
+
+def ha_stopped_edit(stack, edit, run=None):
+    """Change Home Assistant's .storage files: stop it (it would overwrite them), call edit(), start it again.
+    Returns (edit()'s result, a message or "" when all went well)."""
+    run = run or (lambda cmd: subprocess.run(cmd, capture_output=True, text=True, timeout=300))
+    r = run(compose_cmd(stack) + ["stop", "homeassistant"])
+    if r.returncode != 0:
+        return None, f"couldn't stop Home Assistant: {r.stderr.strip()[-200:]}"
+    try:
+        out = edit()
+    finally:
+        r = run(compose_cmd(stack) + ["up", "-d", "homeassistant"])
+    return out, "" if r.returncode == 0 else f"Home Assistant didn't start again: {r.stderr.strip()[-200:]}"
+
 def secret(stack, key, make):
     """A value kept in state/secrets.json, made with make() the first time."""
     path = os.path.join(stack, "state", "secrets.json")
@@ -636,6 +650,8 @@ def sync_homeassistant(stack):
         if os.path.exists(src):
             with open(src) as f:
                 changed |= write_if_changed(os.path.join(stack, "homeassistant", rel), f.read(), 0o644)
+    import hadashboard   # the Home dashboard: Home Assistant re-reads it when it's opened, so it doesn't count here
+    hadashboard.write(stack)
     return changed
 
 

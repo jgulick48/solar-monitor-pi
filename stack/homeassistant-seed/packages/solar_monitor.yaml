@@ -782,6 +782,14 @@ automation:
 
 lovelace:
   dashboards:
+    # phone-first: alerts, cameras, the enabled modules (written by the box: setup/hadashboard.py)
+    solar-home:
+      mode: yaml
+      filename: dashboards/home.yaml
+      title: Home
+      icon: mdi:home
+      show_in_sidebar: true
+      require_admin: false
     solar-site:
       mode: yaml
       filename: dashboards/solar.yaml

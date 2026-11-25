@@ -3,6 +3,7 @@ Run: python3 -m unittest discover -s tests -v"""
 import json
 import os
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -231,10 +232,55 @@ class Display(unittest.TestCase):
         o = protect.list_cameras
         protect.list_cameras = lambda host, key: [{"id": "aaa", "name": "Driveway"}, {"id": "bbb", "name": "Back gate"}]
         try:
-            self.assertEqual(cameras.sync_names(self.stack), ["camera renamed in Protect: Gate -> Back gate"])
+            self.assertEqual(cameras.sync_names(self.stack)[0], "camera renamed in Protect: Gate -> Back gate")
             self.assertEqual(cameras.sync_names(self.stack), [])
         finally:
             protect.list_cameras = o
+
+    def test_added_to_home_assistant(self):
+        """Protect goes into Home Assistant with the box's API key (API-key-only mode), once: an integration the
+        owner added, or one they deleted, is left alone; a new key on the box is put in the box's entry."""
+        store = os.path.join(self.stack, "homeassistant", ".storage", "core.config_entries")
+        calls = []
+        run = lambda cmd: (calls.append(cmd[-2:]), subprocess.CompletedProcess(cmd, 0, "", ""))[1]  # noqa: E731
+        os.environ["SOLAR_COMPOSE"] = "fake-compose"
+        try:
+            protect.save(self.stack, {**protect.DEFAULTS, "host": "192.0.2.1", "api_key": "k1"})
+            self.assertEqual(protect.ensure_in_ha(self.stack, run), [])          # Home Assistant not set up yet
+            os.makedirs(os.path.dirname(store))
+            with open(store, "w") as f:
+                json.dump({"version": 1, "minor_version": 5, "key": "core.config_entries",
+                           "data": {"entries": [{"domain": "mqtt", "entry_id": "m", "data": {}}]}}, f)
+            self.assertEqual(protect.ensure_in_ha(self.stack, run), ["cameras added to Home Assistant (UniFi Protect integration)"])
+            self.assertEqual(calls, [["stop", "homeassistant"], ["-d", "homeassistant"]])
+            e = protect.ha_entries(self.stack)[0]
+            self.assertEqual(e["data"], {"host": "192.0.2.1", "port": 443, "verify_ssl": False, "api_key": "k1",
+                                         "connection_mode": "api_key_only", "id": "UniFi Protect"})
+            self.assertEqual((e["version"], e["unique_id"]), (2, None))
+            self.assertEqual(oct(os.stat(store).st_mode & 0o777), "0o600")
+            calls.clear()
+            self.assertEqual(protect.ensure_in_ha(self.stack, run), [])          # there: nothing to do
+            self.assertEqual(calls, [])
+            protect.save(self.stack, {**protect.settings(self.stack), "api_key": "k2"})
+            self.assertEqual(protect.ensure_in_ha(self.stack, run), ["Home Assistant's UniFi Protect integration has the new API key"])
+            self.assertEqual([x["data"]["api_key"] for x in protect.ha_entries(self.stack)], ["k2"])
+            # deleted by the owner in Home Assistant: stays deleted
+            with open(store) as f:
+                doc = json.load(f)
+            doc["data"]["entries"] = [x for x in doc["data"]["entries"] if x["domain"] != "unifiprotect"]
+            with open(store, "w") as f:
+                json.dump(doc, f)
+            calls.clear()
+            self.assertEqual(protect.ensure_in_ha(self.stack, run), [])
+            self.assertEqual(calls, [])
+            # the owner's own integration (a Protect login) on a box that never added one: left alone
+            protect.save(self.stack, {**protect.DEFAULTS, "host": "192.0.2.1", "api_key": "k2"})
+            doc["data"]["entries"].append({"domain": "unifiprotect", "data": {"host": "192.0.2.1", "username": "u"}})
+            with open(store, "w") as f:
+                json.dump(doc, f)
+            self.assertEqual(protect.ha_action(self.stack), "")
+        finally:
+            os.environ.pop("SOLAR_COMPOSE", None)
 
     def test_h265_camera_explained(self):
         display.save(self.stack, {**display.DEFAULTS, "cameras": [{"name": "Driveway", "url": "rtsp://a/1"}, {"name": "Front Yard", "url": "rtsp://a/2"}]})

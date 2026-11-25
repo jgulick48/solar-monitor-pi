@@ -139,17 +139,23 @@ def camera_problems(stack):
 
 
 def sync_names(stack):
-    """Every 5 minutes: cameras renamed in UniFi Protect take the new name on the screen and in the announcements,
-    whose phrases are made ahead of time again when the voice is on. Returns messages to log."""
+    """Every 5 minutes: Protect in Home Assistant (added once), cameras renamed in UniFi Protect take the new name
+    on the screen and in the announcements (whose phrases are made ahead of time again when the voice is on), and
+    the Home dashboard follows Home Assistant's camera entities. Returns messages to log."""
+    import hadashboard
     import protect
+    msgs = protect.ensure_in_ha(stack)      # the cameras in Home Assistant too (once; restarts it then)
     try:
         renamed = protect.sync_names(stack)
     except (OSError, ValueError, protect.ProtectError) as e:
-        return [f"camera name check failed: {e}"]
-    if not renamed:
-        return []
-    prewarm_voice(stack, renamed.values())
-    return [f"camera renamed in Protect: {old} -> {new}" for old, new in renamed.items()]
+        renamed = {}
+        msgs.append(f"camera name check failed: {e}")
+    if renamed:
+        prewarm_voice(stack, renamed.values())
+        msgs += [f"camera renamed in Protect: {old} -> {new}" for old, new in renamed.items()]
+    if hadashboard.write(stack):            # new camera entities in Home Assistant, or renamed ones
+        msgs.append("Home dashboard updated")
+    return msgs
 
 
 def prewarm_voice(stack, names):
