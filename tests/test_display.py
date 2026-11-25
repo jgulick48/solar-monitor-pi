@@ -261,6 +261,56 @@ class Display(unittest.TestCase):
         self.assertIsNone(display.spare_power(SITE, vals, at(11), DENVER, None))
         self.assertIsNone(display.spare_power({}, vals, at(11), DENVER, sunny))
 
+    def test_outlook(self):
+        """The next 5 days: dull days (solar under the use) that take the battery below the alert level."""
+        now = dt.datetime(2026, 11, 24, 18, 0, tzinfo=DENVER)             # a Tuesday evening
+
+        def fc(daily):                   # kWh of solar on each of the next days, spread over 9 AM to 3 PM
+            hours = []
+            for h in range(0, 24 * (len(daily) + 1)):
+                t = now.replace(hour=0) + dt.timedelta(hours=h)
+                kw = daily[h // 24 - 1] / 6 if h >= 24 and 9 <= t.hour < 15 else 0.0
+                hours.append([int((t + dt.timedelta(hours=1)).timestamp()), kw])
+            return {"hours": hours}
+        site = dict(SITE, generator="manual", low_soc_alert="25")
+        vals = {"soc": 85, "load_avg_3d": 1000}                          # 24 kWh a day; 30.72 kWh battery
+        sunny = display.outlook(site, vals, now, DENVER, fc([30, 30, 30, 30, 30]))
+        self.assertEqual((sunny["level"], sunny["text"], sunny["dull_days"], len(sunny["days"])), ("ok", "", 0, 5))
+        self.assertEqual(sunny["days"][0], {"date": "2026-11-25", "solar_kwh": 30.0, "use_kwh": 24.0, "dull": False})
+        # one dull day the battery rides through: nothing to say
+        self.assertEqual(display.outlook(site, vals, now, DENVER, fc([30, 8, 30, 30, 30]))["level"], "ok")
+        # Thursday to Saturday at 6 kWh a day against 24: the generator makes up the difference
+        o = display.outlook(site, vals, now, DENVER, fc([30, 6, 6, 6, 30]))
+        self.assertEqual((o["level"], o["dull_days"]), ("dull", 3))
+        # 18.4 kWh usable on Tuesday evening, full (23 kWh) on Wednesday afternoon, 5 left on Thursday morning;
+        # then three days with nothing to charge from and 18 h of use each night: 3 x 18 - 5
+        self.assertEqual(o["short_kwh"], 49.0)
+        self.assertEqual(o["text"], f"3 dull days ahead (Thursday to Saturday): expect the generator to add about "
+                                    f"{o['short_kwh']:.0f} kWh.")
+        self.assertEqual(o["empty_at"].strftime("%a %H"), "Thu 20")        # 5 kWh left at 3 PM, 1 kW
+        # a charger current: hours; a propane generator: the tank
+        o = display.outlook(dict(site, charger_amps="80", generator_fuel="propane"), vals, now, DENVER,
+                            fc([30, 6, 6, 6, 30]), propane=34)
+        self.assertIsNotNone(o["generator_hours"])
+        self.assertRegex(o["text"], r"expect about \d+ h( \d\d min)? of generator \(\d+ kWh\); propane is at 34%\.$")
+        # not in a row
+        o = display.outlook(site, {**vals, "soc": 40}, now, DENVER, fc([4, 30, 4, 30, 30]))
+        self.assertIn("2 of the next 5 days look dull (tomorrow and Friday)", o["text"])
+        # no generator: when the battery gets low
+        o = display.outlook(dict(site, generator="none"), vals, now, DENVER, fc([30, 6, 6, 6, 30]))
+        self.assertRegex(o["text"], r"the battery reaches 25% Thursday about \d+:\d\d [AP]M\. Go easy on big loads\.$")
+        # a storm warning adds a checklist, also with good solar ahead; other alerts don't
+        o = display.outlook(site, vals, now, DENVER, fc([30, 30, 30, 30, 30]),
+                            alerts=[{"event": "Winter Storm Warning"}, {"event": "Air Quality Alert"}])
+        self.assertEqual(o["level"], "storm")
+        self.assertEqual(o["text"], "Winter Storm Warning: before it arrives, check the generator's fuel and oil, "
+                                    "charge the battery (now 85%), charge phones and lights.")
+        self.assertEqual(display.outlook(site, vals, now, DENVER, fc([30] * 5), alerts=[{"event": "Air Quality Alert"}])["level"], "ok")
+        # a forecast that only reaches tomorrow, none at all, no battery size
+        self.assertIsNone(display.outlook(site, vals, now, DENVER, fc([30])))
+        self.assertIsNone(display.outlook(site, vals, now, DENVER, None))
+        self.assertIsNone(display.outlook({}, vals, now, DENVER, fc([30] * 5)))
+
     def test_save_writes_go2rtc(self):
         stack = tempfile.mkdtemp()
         os.makedirs(os.path.join(stack, "state"))

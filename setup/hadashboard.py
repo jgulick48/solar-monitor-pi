@@ -2,7 +2,7 @@
 """The Home dashboard in Home Assistant: one phone-first page for checking on the place from anywhere (the Home
 Assistant app, through remote access).
 
-  * Now: open alerts, the generator advice, battery, solar, house, battery power, generator.
+  * Now: open alerts, the generator advice, the 5-day outlook, battery, solar, house, battery power, generator.
   * Cameras: each UniFi Protect camera in Home Assistant (a snapshot every few seconds; tap for live video), the
     ones picked for the wall display first.
   * One short section per enabled module: propane, water, boiler, generator.
@@ -91,6 +91,11 @@ def build(stack):
                     "{{ state_attr('sensor.site_generator_advice', 'advice_text') }}</ha-alert>",
          "visibility": [{"condition": "state", "entity": "sensor.site_generator_advice", "state_not": s}
                         for s in ("none", "info", "unavailable", "unknown")]},
+        {"type": "markdown", "grid_options": {"columns": "full"},
+         "content": "<ha-alert alert-type=\"{{ 'warning' if is_state('sensor.site_outlook', 'storm') else 'info' }}\">"
+                    "{{ state_attr('sensor.site_outlook', 'outlook_text') }}</ha-alert>",
+         "visibility": [{"condition": "state", "entity": "sensor.site_outlook", "state_not": s}
+                        for s in ("none", "ok", "unavailable", "unknown")]},
         _tile("sensor.site_battery_level", "Battery", color="green"),
         _tile("sensor.site_battery_runtime", "Lasts about"),
         _tile("sensor.site_solar_power", "Solar", color="amber"),
