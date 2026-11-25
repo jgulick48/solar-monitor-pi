@@ -130,13 +130,17 @@ class Board:
     def resistor(self, ref, value, x, y, n1, n2, rot=0, lcsc=""):
         """A resistor from pad 1 at (x, y), along x (rot 0) or y (rot 90 = up)."""
         if self.variant == "tht":
-            return self.add("Resistor_THT", "R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal", ref, value, x, y, rot,
-                            {"1": n1, "2": n2})
+            fp = self.add("Resistor_THT", "R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal", ref, value, x, y, rot,
+                          {"1": n1, "2": n2})
+            self.ref_inside(fp)
+            return fp
         return self.add("Resistor_SMD", "R_0805_2012Metric", ref, value, x, y, rot, {"1": n1, "2": n2}, lcsc)
 
     def capacitor(self, ref, value, x, y, n1, n2, rot=0, lcsc=""):
         if self.variant == "tht":
-            return self.add("Capacitor_THT", "C_Disc_D5.0mm_W2.5mm_P5.00mm", ref, value, x, y, rot, {"1": n1, "2": n2})
+            fp = self.add("Capacitor_THT", "C_Disc_D5.0mm_W2.5mm_P5.00mm", ref, value, x, y, rot, {"1": n1, "2": n2})
+            self.ref_inside(fp)
+            return fp
         return self.add("Capacitor_SMD", "C_0805_2012Metric", ref, value, x, y, rot, {"1": n1, "2": n2}, lcsc)
 
     def terminal(self, ref, label, x, y, side, nets):
@@ -148,7 +152,34 @@ class Board:
         fp = self.add("Connector_Phoenix_MSTB", "PhoenixContact_MSTBA_2,5_3-G-5,08_1x03_P5.08mm_Horizontal",
                       ref, label, x, y, rot, nets, crtyd=(-2.72, -2.5, 12.88, 10.6))
         fp.Reference().SetVisible(False)          # the port label names it
+        # The library's silkscreen is for Phoenix's wider block (neighbours' outlines crossed, and its pin-1 triangle
+        # sat in the "G"): instead, a plain outline of the real block, kept inside the board's edge.
+        for g in fp.GraphicalItems():            # moved to the fabrication drawing, not printed (removing them from a
+            if g.GetLayer() in (pcbnew.F_SilkS, pcbnew.B_SilkS):   # footprint on the board upsets KiCad's Python)
+                g.SetLayer(pcbnew.F_Fab)
+        # the block's outline (-2.72..12.88 along the pins, -2.5..10.6 across, from pad 1), turned with it
+        bx0, by0, bx1, by1 = {"front": (x - 2.72, y - 2.5, x + 12.88, y + 10.6),
+                              "back": (x - 12.88, y - 10.6, x + 2.72, y + 2.5),
+                              "right": (x - 2.5, y - 12.88, x + 10.6, y + 2.72)}[side]
+        x0, y0 = max(bx0 + 0.15, 0.2), max(by0 + 0.15, 0.2)
+        x1, y1 = min(bx1 - 0.15, W - 0.2), min(by1 - 0.15, H - 0.2)
+        r = pcbnew.PCB_SHAPE(self.b)
+        r.SetShape(pcbnew.SHAPE_T_RECT)
+        r.SetStart(pt(x0, y0)); r.SetEnd(pt(x1, y1))
+        r.SetLayer(pcbnew.F_SilkS); r.SetWidth(MM(0.12))
+        self.b.Add(r)
         return fp
+
+    def ref_inside(self, fp, size=0.8):
+        """Put a part's reference inside its own body outline (the middle of its pads), small: it can't collide."""
+        pads = [p.GetPosition() for p in fp.Pads()]
+        cx = sum(p.x for p in pads) // len(pads)
+        cy = sum(p.y for p in pads) // len(pads)
+        t = fp.Reference()
+        t.SetPosition(pcbnew.VECTOR2I(cx, cy))
+        t.SetTextSize(pcbnew.VECTOR2I(MM(size), MM(size)))
+        t.SetTextThickness(MM(size * 0.15))
+        t.SetTextAngleDegrees(0)
 
     def pin_labels(self, ref, labels, dx, dy, layer=pcbnew.F_SilkS, size=1.0):
         """A label beside each pad of `ref` (pad 1 first), offset (dx, dy) from the pad."""
@@ -182,14 +213,16 @@ class Board:
             if tht:     # the back row sits 1.6 mm further left, clear of the CT1 jack
                 self.resistor(f"R{1 + i}", "4.7k", cx - (5.08 if side == "front" else 6.7), ry, n, "3V3")
             else:
-                self.resistor(f"R{1 + i}", "4.7k", cx - 1.0, ry, n, "3V3", lcsc="C17673")
+                r = self.resistor(f"R{1 + i}", "4.7k", cx - 1.0, ry, n, "3V3", lcsc="C17673")
+                if side == "back":              # its name below it, clear of the pin letters above
+                    r.Reference().SetPosition(pt(cx, ry + 1.7))
             ty = 57.2 if side == "front" else 2.6
             self.text(f"{name}  {gpio}", cx, ty, 1.2)
-            self.pin_labels(f"J{3 + i}", ("G", "D", "V"), 0, -2.7 if side == "front" else 2.7)
+            self.pin_labels(f"J{3 + i}", ("G", "D", "V"), 0, -3.4 if side == "front" else 3.4)
         # heat call (24 VAC, isolated): J11 pins 1 and 3, PC814 (AC input). The circuit sits between the ESP sockets,
         # under the ESP board (11 mm above: room for low parts).
         self.terminal("J11", "HEAT", 90.5, 55.16, "right", {"1": "HC_A", "3": "HC_B"})
-        self.pin_labels("J11", ("24VAC", "", "24VAC"), -4.6, 0, pcbnew.B_SilkS, 0.8)
+        self.pin_labels("J11", ("AC", "", "AC"), -3.0, 0, pcbnew.B_SilkS, 0.8)    # 24 VAC, on the outer pins
         self.text("HEAT", 96.0, 41.0, 0.9)
         # pump current clamps: two 3.5 mm jacks (CUI SJ1-3523N), plug face flush with the right edge. The SCT-013's
         # plug uses tip and sleeve only: sleeve to the ADC input, tip to BIAS (OpenEnergyMonitor's convention), ring
@@ -201,6 +234,14 @@ class Board:
             for g in list(jk.GraphicalItems()):      # the library footprint draws a board-edge cutout: not wanted here
                 if g.GetLayer() == pcbnew.Edge_Cuts:
                     jk.Remove(g)
+            for g in jk.GraphicalItems():            # its silkscreen runs past the edge (the plug end is flush with
+                if g.GetLayer() == pcbnew.F_SilkS:   # it): to the fabrication drawing, and a plain outline instead
+                    g.SetLayer(pcbnew.F_Fab)
+            r = pcbnew.PCB_SHAPE(self.b)
+            r.SetShape(pcbnew.SHAPE_T_RECT)
+            r.SetStart(pt(W - 6.3 - 7.7 + 0.1, y - 6.0)); r.SetEnd(pt(W - 0.2, y + 6.0))
+            r.SetLayer(pcbnew.F_SilkS); r.SetWidth(MM(0.12))
+            self.b.Add(r)
             self.text(label, 81.5, y, 1.0, bold=True)
         if tht:
             self.resistor("R10", "10k", 44.5, 25.0, "HEAT_GPIO46", "3V3")
@@ -208,8 +249,8 @@ class Board:
             self.capacitor("C2", "10uF", 52.5, 28.5, "BIAS", "GND")
             self.resistor("R11", "10k", 44.5, 32.0, "3V3", "BIAS")
             self.resistor("R12", "10k", 44.5, 35.5, "BIAS", "GND")
-            self.add("Package_DIP", "DIP-4_W7.62mm", "U1", "PC814", 61.0, 27.0, 0,
-                     {"1": "HC_LED", "2": "HC_B", "3": "GND", "4": "HEAT_GPIO46"})
+            self.ref_inside(self.add("Package_DIP", "DIP-4_W7.62mm", "U1", "PC814", 61.0, 27.0, 0,
+                                     {"1": "HC_LED", "2": "HC_B", "3": "GND", "4": "HEAT_GPIO46"}))
             self.resistor("R9", "10k", 58.5, 34.5, "HC_A", "HC_LED")
             self.capacitor("C3", "100nF", 72.0, 27.0, "3V3", "GND", rot=-90)
         else:
@@ -224,16 +265,24 @@ class Board:
             self.capacitor("C3", "100nF", 72.0, 30.0, "3V3", "GND", lcsc="C49678")
         # OLED (SSD1306 module order GND VCC SCL SDA), lid button, spare GPIOs: beside the ESP board, clear of the
         # RESET/BOOT paperclip paths at x = 16.1
-        self.add("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical", "J13", "OLED", 3.0, 16.0, rot=90,
-                 nets={"1": "GND", "2": "3V3", "3": "SCL_GPIO8", "4": "SDA_GPIO7"})
-        self.text("OLED  G V SCL SDA", 7.0, 13.2, 0.8)
-        self.add("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical", "J14", "BTN", 11.0, 50.0, rot=90,
-                 nets={"1": "BTN_GPIO47", "2": "GND"})
-        self.text("BTN 47 G", 12.3, 53.0, 0.8)
-        self.add("Connector_PinHeader_2.54mm", "PinHeader_2x03_P2.54mm_Vertical", "J15", "SPARE", 2.5, 43.0, rot=90,
-                 nets={"1": "3V3", "2": "GND", "3": "GPIO48", "4": "GPIO19", "5": "GPIO18", "6": "GPIO15"})
-        self.text("3V3 48 18", 5.0, 40.4, 0.8)
-        self.text("GND 19 15", 5.0, 48.4, 0.8)
+        self.add("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical", "J13", "OLED", 5.0, 10.5, rot=90,
+                 nets={"1": "GND", "2": "3V3", "3": "SCL_GPIO8", "4": "SDA_GPIO7"}).Reference().SetVisible(False)
+        self.text("OLED  G V SCL SDA", 8.8, 8.3, 0.8)
+        self.add("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical", "J14", "BTN", 10.5, 53.0, rot=90,
+                 nets={"1": "BTN_GPIO47", "2": "GND"}).Reference().SetVisible(False)
+        self.text("BTN 47 G", 11.8, 56.0, 0.8)
+        self.add("Connector_PinHeader_2.54mm", "PinHeader_2x03_P2.54mm_Vertical", "J15", "SPARE", 2.5, 48.04, rot=90,
+                 nets={"1": "3V3", "2": "GND", "3": "GPIO48", "4": "GPIO19", "5": "GPIO18", "6": "GPIO15"}).Reference().SetVisible(False)
+        # rotated, the header's odd pins (1 = 3V3, square) are the lower row and its even pins the upper row
+        self.text("GND 19 15", 5.0, 43.0, 0.8)
+        self.text("3V3 48 18", 5.0, 50.6, 0.8)
+        # the headers take Dupont leads, taller than the 11 mm under the ESP board: keep them 2 mm clear of its outline
+        for ref in ("J13", "J14", "J15"):
+            fp = next(f for f in self.b.GetFootprints() if f.GetReference() == ref)
+            for pad in fp.Pads():
+                py = pcbnew.ToMM(pad.GetPosition().y)
+                if ESP_Y0 - 2 - 1.27 < py < ESP_Y0 + ESP_W + 2 + 1.27:
+                    raise SystemExit(f"{ref} pad {pad.GetNumber()} at y={py:.2f} is under (or too near) the ESP board")
         # socket-side nets that go to the extras
         for k, n in ((3, "HEAT_GPIO46"), (1, "BTN_GPIO47"), (0, "GPIO48")):
             self.repin("J1", k, n)
@@ -246,7 +295,7 @@ class Board:
         # mounting holes (M3) in the corners left free
         for i, (x, y) in enumerate(((4.0, 4.0), (4.0, 56.0), (96.0, 6.0), (30.0, 30.0))):
             self.add("MountingHole", "MountingHole_3.2mm_M3", f"H{i + 1}", "M3", x, y).Reference().SetVisible(False)
-        self.text("Boiler probe carrier  ESP32-P4-ETH  " + ("THT" if tht else "SMD") + "  v2", 50.0, 30.0, 1.3,
+        self.text("Boiler probe carrier  ESP32-P4-ETH  " + ("THT" if tht else "SMD") + "  v2", 52.0, 57.0, 1.2,
                   layer=pcbnew.B_SilkS, bold=True)
         self.text("RESET >", 16.1, 41.8, 0.8)
         self.text("< BOOT", 16.1, 18.2, 0.8)

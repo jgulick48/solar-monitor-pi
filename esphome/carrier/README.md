@@ -40,7 +40,7 @@ Soldered to the board (checked against `fab/tht/carrier-tht.kicad_pcb`):
 | J12, J16 | 2 | 3.5 mm stereo jack, CUI SJ1-3523N (through-hole, right-angle) | Pump clamps CT1, CT2. Use this part or a pin-compatible one: the holes are made for it |
 | J13 | 1 | 1×4 male pin header, 2.54 mm | OLED lead |
 | J14 | 1 | 1×2 male pin header, 2.54 mm | WAKE button lead |
-| J15 | 1 | 2×3 male pin header, 2.54 mm | Spare GPIOs (optional) |
+| J15 | 1 | 2×3 male pin header, 2.54 mm | Spare GPIOs (optional): 3V3, GPIO48, GPIO18 on the row with the square pad; GND, GPIO19, GPIO15 on the other |
 | R1–R8 | 8 | 4.7 kΩ, ¼ W, axial (6.3 mm body) | Probe pull-ups; holes 10.16 mm (0.4") apart |
 | R9 | 1 | 10 kΩ, ¼ W, axial | Heat-call input (24 VAC side) |
 | R10 | 1 | 10 kΩ, ¼ W, axial | Heat-call pull-up (GPIO46) |
