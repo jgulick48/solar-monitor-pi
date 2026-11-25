@@ -402,6 +402,55 @@ def generator_advice(site, now_vals, now, tz, fc=None, load=None, force=False):
                                          f"above {floor:.0f}% until the sun is back. Sunset {nb(sset)}.{tomorrow_txt}")
 
 
+SPARE_MIN_KW = 1.0      # spare power worth mentioning
+SPARE_FULL = 0.90       # the battery counts as full enough from here: charging tapers, and the rest is thrown away
+
+
+def spare_power(site, now_vals, now, tz, fc=None, load=None):
+    """Solar the house can't use or store: a good time to run big loads. With the battery at 90% or reaching it
+    within the hour, what the panels could make (the forecast) beyond the expected use, for as long as that stays
+    above 1 kW. None unless there is at least 1 kW for at least an hour, or while a generator runs.
+    {"kw": what can be counted on for the next hour (to 0.5 kW), "until": local datetime, "from": datetime or None
+     (now), "text": "About 2 kW of solar to spare until 3:00 PM: a good time to run big loads."}
+    The box only says so; an owner's Home Assistant automation can act on it."""
+    try:
+        kwh = int(site["battery_count"]) * float(site["battery_kwh_each"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    soc, load_w = now_vals.get("soc"), now_vals.get("load_avg_3d") or now_vals.get("load_avg_24h")
+    if not fc or soc is None or kwh <= 0 or (now_vals.get("gen") or 0) >= GEN_RUNNING_W:
+        return None
+    load = load or (_flat(load_w) if load_w and load_w > 0 else None)
+    if load is None:
+        return None
+    step, e, t = dt.timedelta(minutes=15), min(soc, 100) / 100 * kwh, now
+    start, surplus = None, []                    # from when the battery is full enough; (time, kW beyond the use)
+    for _ in range(16 * 4):                      # at most the next 16 hours
+        pv = forecast_kw(fc, t.timestamp() + 450)      # the middle of the step: a step starting on the hour
+        if pv is None:                                 # belongs to the hour ahead
+            break
+        net = pv - load(t)
+        if start is None and e >= SPARE_FULL * kwh:
+            start = t
+        if start is not None:
+            if net < SPARE_MIN_KW:
+                break
+            surplus.append((t, net))
+        elif t - now >= dt.timedelta(hours=1):
+            return None                          # not full within the hour: nothing to spare yet
+        e = min(max(e + net * 0.25 * (CHARGE_EFFICIENCY if net > 0 else 1.0), 0.0), kwh)
+        t += step
+    if start is None or len(surplus) < 4:        # under an hour of it
+        return None
+    until = _quarter(surplus[-1][0] + step)
+    kw = math.floor(min(s for _, s in surplus[:4]) * 2) / 2
+    if kw < SPARE_MIN_KW:
+        return None
+    when = "" if start <= now else f" from about {hm(_quarter(start), site)}"
+    return {"kw": kw, "until": until, "from": None if start <= now else start,
+            "text": f"About {kw:g} kW of solar to spare{when} until {hm(until, site)}: a good time to run big loads."}
+
+
 GEN_RUNNING_W = 200     # generator power above this: it is running (as the generator log counts it)
 
 
@@ -483,6 +532,7 @@ def data(stack, site):
     so_far = _cached(f"soc_high_{midnight.date()}", 300, lambda: vm_at(
         f"max_over_time((max(lxp_soc))[{max(60, int((now - midnight).total_seconds()))}s])", now.timestamp()))
     high = battery_high(site, vals, now, tz, fc, so_far, load_fn)
+    spare = spare_power(site, vals, now, tz, fc, load_fn)
     expected_tomorrow = runtime_h = None
     if load_fn:
         tomorrow = (now + dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -512,6 +562,9 @@ def data(stack, site):
         "expected": expected, "forecast": forecast_summary(fc, now, tz), "battery_high": high,
         # the expected use: "weekly" (the week's pattern, loadprofile.py) or "flat" (the last 3 days' average)
         "load_method": load_method, "expected_use_tomorrow": expected_tomorrow, "runtime_h": runtime_h,
+        # solar beyond what the house can use or store (spare_power): shown as a note, and a Home Assistant sensor
+        "spare": spare and {"kw": spare["kw"], "until": hm(spare["until"], site), "text": spare["text"],
+                            "level": "ok", "now": spare["from"] is None},
         "weather": None, "wx_days": 7, "wx_page": 8,    # weather: the weather module (when it's on)
         "main": d.get("main", "solar"), "panel_s": d.get("panel_s", 15), "panels": _module_panels(stack, site),
         **_module_display(stack, site, now),
@@ -691,6 +744,10 @@ def ha_status(stack, site):
         # "needed" is the start reminder: not while it's running and being told how much longer
         "generator_needed": adv.get("level") == "warn" and adv.get("phase") != "run",
         "advice_phase": adv.get("phase") or "", "generator_can_stop": adv.get("phase") == "stop",
+        # spare solar now (W; 0 when there's none or it hasn't started yet), until when, and whether to notify
+        "spare_power": int((d.get("spare") or {}).get("kw", 0) * 1000) if (d.get("spare") or {}).get("now") else 0,
+        "spare_until": (d.get("spare") or {}).get("until") or "", "spare_text": (d.get("spare") or {}).get("text") or "",
+        "spare_notify": bool(site.get("spare_notify")),
         "forecast_today": (d["forecast"] or {}).get("today"), "forecast_remaining": (d["forecast"] or {}).get("remaining"),
         "forecast_tomorrow": (d["forecast"] or {}).get("tomorrow"),
         "battery_high_estimate": (d.get("battery_high") or {}).get("pct"),

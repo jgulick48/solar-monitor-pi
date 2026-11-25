@@ -228,6 +228,39 @@ class Display(unittest.TestCase):
         noon = dt.datetime(2026, 11, 21, 12, 0, tzinfo=DENVER)
         self.assertEqual(display.generator_stop_advice(SITE, {**base, "soc": 30, "gen": 4500}, noon, DENVER)["phase"], "run")
 
+    def test_spare_power(self):
+        """Solar the house can't use or store: said when the battery is (nearly) full and there is at least 1 kW
+        beyond the expected use for an hour."""
+        day = dt.datetime(2026, 6, 20, 0, 0, tzinfo=DENVER)
+
+        def fc(by_hour):                 # {hour of the day: kW during that hour}; hours are stamped at their end
+            return {"hours": [[int((day + dt.timedelta(hours=h + 1)).timestamp()), by_hour.get(h, 0.0)] for h in range(24)]}
+        sunny = fc({9: 2.0, 10: 4.0, 11: 5.0, 12: 5.5, 13: 5.0, 14: 3.4, 15: 1.5, 16: 0.5})
+        at = lambda h, m=0: day.replace(hour=h, minute=m)  # noqa: E731
+        vals = {"soc": 96, "load_avg_3d": 1000}
+        # 11:00, full: 5.0 - 1.0 = 4 kW now, 4.5 at noon, 4.0, then 2.4 at 2 PM; under 1 kW from 3 PM (1.5 - 1.0)
+        s = display.spare_power(SITE, vals, at(11), DENVER, sunny)
+        self.assertEqual((s["kw"], s["until"], s["from"]), (4.0, at(15), None))
+        self.assertEqual(s["text"], "About 4 kW of solar to spare until 3:00 PM: a good time to run big loads.")
+        # what can be counted on for the next hour: at 1:30 PM it is 4.0 then 2.4 -> 2 kW (to the half kW below)
+        self.assertEqual(display.spare_power(SITE, vals, at(13, 30), DENVER, sunny)["kw"], 2.0)
+        # under an hour of it left
+        self.assertIsNone(display.spare_power(SITE, vals, at(14, 15), DENVER, sunny))
+        # the battery has room: nothing to spare (60% of 30.72 kWh needs 9 kWh to reach 90%)
+        self.assertIsNone(display.spare_power(SITE, {**vals, "soc": 60}, at(11), DENVER, sunny))
+        # nearly there: 88% reaches 90% within the hour (4 kW charging) -> "from about"
+        soon = display.spare_power(SITE, {**vals, "soc": 88}, at(11), DENVER, sunny)
+        self.assertIsNotNone(soon["from"])
+        self.assertIn("to spare from about 11:15 AM until 3:00 PM", soon["text"])
+        # a heavy afternoon in the expected use: less to spare, ending sooner
+        busy = display.spare_power(SITE, vals, at(11), DENVER, sunny, load=lambda t: 3.0 if t.hour >= 13 else 1.0)
+        self.assertEqual((busy["kw"], busy["until"]), (4.0, at(14)))        # 5.0 - 3.0 = 2 kW at 1 PM; 0.4 from 2 PM
+        # a dull day, a running generator, no forecast, no battery size
+        self.assertIsNone(display.spare_power(SITE, vals, at(11), DENVER, fc({h: 1.5 for h in range(9, 16)})))
+        self.assertIsNone(display.spare_power(SITE, {**vals, "gen": 3000}, at(11), DENVER, sunny))
+        self.assertIsNone(display.spare_power(SITE, vals, at(11), DENVER, None))
+        self.assertIsNone(display.spare_power({}, vals, at(11), DENVER, sunny))
+
     def test_save_writes_go2rtc(self):
         stack = tempfile.mkdtemp()
         os.makedirs(os.path.join(stack, "state"))

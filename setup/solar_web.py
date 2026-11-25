@@ -65,6 +65,7 @@ DEFAULT_SITE = {
     "generator_fuel": "gasoline",
     "future_generator_kw": "28",
     "low_soc_alert": "25",
+    "spare_notify": False,
     "inverter_model": "6000xp",
     "summary_enabled": True,
     "summary_time": "00:00",
@@ -235,6 +236,7 @@ def validate(form):
         **{k: cur[k] for k in ("generator", "generator_kw", "generator_fuel")},
         "future_generator_kw": num(form, "future_generator_kw", 1, 200, required=False),
         "low_soc_alert": num(form, "low_soc_alert", 5, 80, integer=True),
+        "spare_notify": bool(form.get("spare_notify")),
         "inverter_model": form.get("inverter_model") if form.get("inverter_model") in advisor.INVERTERS else "6000xp",
         "costs": {k: num(form, f"cost_{k}", 0, 100000, required=False) for k, _ in COST_FIELDS},
         "arrays": [],
@@ -711,7 +713,10 @@ button at the bottom of the window. The test and restart buttons among them act 
 <label>Number of batteries {inp('battery_count', site['battery_count'], 'number', 'min=1')}</label>
 <label>kWh per battery {inp('battery_kwh_each', site['battery_kwh_each'], 'text', "inputmode='decimal'")}</label></div>
 <small>EG4 LifePower4 48V 100Ah = 5.12 kWh; EG4 LL-S = 5.12 kWh; EG4 WallMount 280Ah = 14.3 kWh.</small>
-<label>Low battery alert at (%) {inp('low_soc_alert', site['low_soc_alert'], 'number', 'min=5 max=80')}</label></fieldset>
+<label>Low battery alert at (%) {inp('low_soc_alert', site['low_soc_alert'], 'number', 'min=5 max=80')}</label>
+<label><input type="checkbox" name="spare_notify" value="1" style="width:auto"{' checked' if site.get('spare_notify') else ''}>
+ Notify when there is solar to spare (the battery is full and the panels could make at least 1 kW more than the house uses, for an hour or more; at most once a day)</label>
+<small>The wall display and Home Assistant (<i>Site spare power</i>) show it either way.</small></fieldset>
 <fieldset><legend>Daily summary</legend>
 <label><input type="checkbox" name="summary_enabled" value="1" style="width:auto"{' checked' if site.get('summary_enabled', True) else ''}> Send a daily summary to the Home Assistant app</label>
 <label>At {inp('summary_time', site.get('summary_time') or '00:00', 'time', "style='max-width:140px'")}</label>

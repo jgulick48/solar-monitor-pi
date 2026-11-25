@@ -260,6 +260,13 @@ When the battery will last with a margin (the larger of 0.5 kWh and 5% of the ba
 down." That is said once per run by the wall display's voice and sent as a notification; Home Assistant has
 *Site generator can stop*. It only advises: an auto-start generator follows the inverter's own stop setting.
 
+**Solar to spare.** Once the battery is full, solar the house doesn't use is thrown away. With the battery at 90% or
+reaching it within the hour, and the panels able to make at least 1 kW more than the expected use for an hour or
+more, the wall display says "About 2 kW of solar to spare until 3:00 PM: a good time to run big loads" (the figure
+is what can be counted on for the next hour). Home Assistant has *Site spare power* (W, 0 when there is none), which
+an automation of your own can use to start a water heater or a charger; the box switches nothing. A phone
+notification, at most once a day, is a checkbox under *Batteries* on the setup page, off by default.
+
 **Expected use.** The advice, "lasts about" and the day's battery high need to know how much the house will use, and
 when. The box learns it per hour of the week from the last 8 weeks (the median, so one-off days don't count), scaled
 by how the last 3 days compare with usual. It checks itself: every hour it replays the last 28 nights (4 PM to

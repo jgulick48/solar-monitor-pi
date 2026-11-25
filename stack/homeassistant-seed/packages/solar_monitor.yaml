@@ -210,6 +210,16 @@ rest:
         unit_of_measurement: kWh
         device_class: energy
         icon: mdi:weather-partly-cloudy
+      - name: Site spare power
+        unique_id: site_spare_power
+        # solar the house can't use or store right now (battery full): 0 when there is none. An automation of
+        # your own can start a water heater or a charger on it; the box itself switches nothing.
+        value_template: "{{ value_json.spare_power | default(0) }}"
+        unit_of_measurement: W
+        device_class: power
+        state_class: measurement
+        icon: mdi:solar-power
+        json_attributes: [spare_until, spare_text, spare_notify]
       - name: Site expected use tomorrow
         unique_id: site_expected_use_tomorrow
         # from the week's pattern of use where it predicts better than the 3-day average ("method" says which)
@@ -785,6 +795,31 @@ automation:
           tag: generator
           title: Start the generator
           message: "{{ state_attr('sensor.site_generator_advice', 'advice_text') }}"
+
+  # Solar to spare (battery full, at least 1 kW beyond the house's use for an hour): only if the owner asked for it
+  # on the setup page, and once a day.
+  - id: solar_spare_power
+    alias: "Solar: power to spare"
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.site_spare_power
+        above: 900
+        for: "00:10:00"
+    conditions:
+      - condition: template
+        value_template: "{{ state_attr('sensor.site_spare_power', 'spare_notify') == true }}"
+      - condition: template
+        value_template: >-
+          {{ this.attributes.last_triggered is none
+             or this.attributes.last_triggered | as_local < today_at('00:00') }}
+    actions:
+      - action: script.solar_notify
+        data:
+          tag: spare_power
+          priority: info
+          title: Solar power to spare
+          message: "{{ state_attr('sensor.site_spare_power', 'spare_text') }}"
 
   # While it runs, the box works out when the battery has enough to last until the sun is back: say so, once.
   - id: solar_generator_can_stop
