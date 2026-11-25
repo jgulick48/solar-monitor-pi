@@ -116,5 +116,14 @@ class TestNotification(unittest.TestCase):
                 solar_web.STACK = old
 
 
+    def test_dongle_text(self):
+        t = boxhealth.dongle_text
+        self.assertEqual(t(None), ("", False))                                          # the bridge doesn't know it yet
+        self.assertEqual(t({"connected": True, "age": 4.2, "drops": 0}), ("data 4 s ago", False))
+        self.assertEqual(t({"connected": True, "age": 4.2, "drops": 3}), ("data 4 s ago, 3 drop-outs in 24 h", False))
+        self.assertEqual(t({"connected": True, "age": 600, "drops": 0}), ("connected but silent for 10 min", True))
+        self.assertEqual(t({"connected": False, "age": 900, "drops": 1}), ("not connected", True))
+        self.assertEqual(t({"connected": True, "age": None, "drops": 0}), ("connected, no data yet", False))
+
 if __name__ == "__main__":
     unittest.main()

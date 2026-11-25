@@ -367,6 +367,11 @@ rest:
         unique_id: site_data_stale
         value_template: "{{ value_json.data_stale }}"
         device_class: problem
+      - name: Site dongle quiet
+        unique_id: site_dongle_quiet
+        # connected, but no data for 3 minutes
+        value_template: "{{ value_json.dongle_quiet | default(false) }}"
+        device_class: problem
       - name: Site dongle offline
         unique_id: site_dongle_offline
         value_template: "{{ value_json.dongle_offline }}"
@@ -560,6 +565,31 @@ automation:
             {% if trigger.id != 'off' %}Only {{ states('sensor.site_dongles_connected') }} of
             {{ state_attr('sensor.site_dongles_connected', 'dongles_expected') }} inverter dongles are connected.
             Check the dongle's WiFi or network cable.{% else %}clear{% endif %}
+
+  - id: solar_dongle_quiet
+    alias: "Solar: dongle quiet"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_dongle_quiet
+        to: "on"
+        for: "00:05:00"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_dongle_quiet
+        from: "on"
+        to: "off"
+        for: "00:02:00"
+        id: "off"
+    actions:
+      - action: script.solar_notify
+        data:
+          tag: dongle_quiet
+          title: Inverter dongle not sending data
+          message: >-
+            {% if trigger.id != 'off' %}An inverter dongle is connected but has sent nothing for several minutes.
+            If it doesn't recover, unplug the dongle and plug it back in. Dongles cope badly with several
+            programs reading them at once.{% else %}clear{% endif %}
 
   - id: solar_no_data
     alias: "Solar: no data"
