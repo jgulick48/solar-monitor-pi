@@ -6,12 +6,13 @@
 
   * Every minute, if a local weather station is configured (state/weather.json
     {"source": "station", "station": {...}}), its solar radiation and outdoor
-    temperature: site_solar_radiation_wm2, site_outdoor_temp_c.
+    temperature: site_solar_radiation_wm2, site_outdoor_temp_c, and its wind: site_wind_speed_ms, site_wind_gust_ms.
     (Stations that push instead are handled by solar_web.py.)
   * Every hour, Open-Meteo's irradiance on the plane of each solar array
     (global_tilted_irradiance for the array's tilt and direction, hourly means)
-    and the air temperature, for the last two days:
-    site_openmeteo_gti_wm2{array="1"}, site_openmeteo_temp_c. On the first run
+    and the air temperature, wind and level-ground sunlight, for the last two days:
+    site_openmeteo_gti_wm2{array="1"}, site_openmeteo_temp_c, site_openmeteo_wind_ms,
+    site_openmeteo_gust_ms, site_openmeteo_ghi_wm2. On the first run
     it backfills 92 days. Timestamps are the end of each hour (Open-Meteo
     reports the mean of the preceding hour). This sends the site's location to
     Open-Meteo (open-meteo.com, free API, no key).
@@ -33,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import solar_setup as ss  # noqa: E402
 import modules  # noqa: E402
 import hastates  # noqa: E402
+import history  # noqa: E402
 import loadprofile  # noqa: E402
 import weather  # noqa: E402
 import wx  # noqa: E402
@@ -67,7 +69,37 @@ def station_sample(stack):
         lines.append(f'site_solar_radiation_wm2{{source="station"}} {r["solar_wm2"]} {ts}')
     if r.get("temp_c") is not None:
         lines.append(f'site_outdoor_temp_c{{source="station"}} {r["temp_c"]:.2f} {ts}')
+    lines += wind_lines(r, "station", ts)
     vm_import(lines)
+
+
+def wind_lines(r, source, ts):
+    """A station reading's wind (m/s) for VictoriaMetrics: with the outdoor temperature and the sunlight it is what
+    a building's heat loss and solar gain are worked out from."""
+    out = []
+    if r.get("wind_ms") is not None:
+        out.append(f'site_wind_speed_ms{{source="{source}"}} {r["wind_ms"]:.2f} {ts}')
+    if r.get("gust_ms") is not None:
+        out.append(f'site_wind_gust_ms{{source="{source}"}} {r["gust_ms"]:.2f} {ts}')
+    return out
+
+
+# Open-Meteo's hourly weather for the site, kept beside its sunlight on the panels and stamped the same way. Wind
+# is at 10 m, in m/s: the reading at each hour (Open-Meteo gives no hourly mean for it; a station's samples do
+# average to one). The sunlight here is the hour's mean on level ground (what falls on a building, where the
+# panels' figure is for their tilt).
+OM_WEATHER = (("wind_speed_10m", "site_openmeteo_wind_ms"), ("wind_gusts_10m", "site_openmeteo_gust_ms"),
+              ("shortwave_radiation", "site_openmeteo_ghi_wm2"))
+
+
+def om_weather_lines(h, now):
+    """The past hours of Open-Meteo's wind and level-ground sunlight as samples."""
+    lines = []
+    for key, name in OM_WEATHER:
+        for t, v in zip(h["time"], h.get(key) or []):
+            if t <= now and v is not None:
+                lines.append(f"{name} {v} {t * 1000}")
+    return lines
 
 
 def calibration(stack):
@@ -108,7 +140,8 @@ def open_meteo_fetch(stack, past_days):
     for i, a in enumerate(site["arrays"], start=1):
         q = {
             "latitude": site["latitude"], "longitude": site["longitude"],
-            "hourly": "global_tilted_irradiance,temperature_2m",
+            "hourly": "global_tilted_irradiance,temperature_2m" + ("," + ",".join(k for k, _ in OM_WEATHER) if i == 1 else ""),
+            "wind_speed_unit": "ms",
             "tilt": a["tilt"],
             "azimuth": (int(a["azimuth"]) - 180 + 540) % 360 - 180,  # Open-Meteo: 0 = south, -90 = east, 90 = west
             "past_days": past_days, "forecast_days": 6, "timezone": "UTC", "timeformat": "unixtime",
@@ -126,6 +159,8 @@ def open_meteo_fetch(stack, past_days):
             lines.append(f'site_openmeteo_gti_wm2{{array="{i}"}} {gti} {t * 1000}')
             if not temp_done and temp is not None:
                 lines.append(f"site_openmeteo_temp_c {temp} {t * 1000}")
+        if not temp_done:
+            lines += om_weather_lines(h, now)
         temp_done = True
         vm_import(lines)
         n += len(lines)
@@ -160,8 +195,10 @@ def main():
     ap.add_argument("--once", action="store_true", help="one station sample and one Open-Meteo fetch, then exit")
     args = ap.parse_args()
     marker = os.path.join(args.stack, "state", "openmeteo-backfilled")
+    wind_marker = os.path.join(args.stack, "state", history.WEATHER_MARKER)
     last_om = 0.0
     last_profile, profile_use = 0.0, None
+    last_history = time.time() - 3300               # first a few minutes after starting, then hourly
     hooks = {}
     seen = {}
     site_changed(args.stack, seen)
@@ -177,10 +214,13 @@ def main():
             hooks.pop(("weather", 1800), None)      # and the screen's weather forecast (modules/weather)
         if time.time() - last_om >= 3600:
             try:
-                backfill = not os.path.exists(marker)
+                # the first fetch goes back 92 days; once more on a box from before wind was recorded
+                backfill = not os.path.exists(marker) or not os.path.exists(wind_marker)
                 n = open_meteo_fetch(args.stack, 92 if backfill else 2)
                 if n and backfill:
-                    open(marker, "w").write(time.strftime("%Y-%m-%d %H:%M\n"))
+                    for m in (marker, wind_marker):
+                        if not os.path.exists(m):
+                            open(m, "w").write(time.strftime("%Y-%m-%d %H:%M\n"))
                 if n:
                     log(f"Open-Meteo: {n} samples")
                 last_om = time.time()
@@ -197,6 +237,13 @@ def main():
                     log(f"expected use: {doc['use']} ({doc['why']})")
             except Exception as e:  # noqa: BLE001 - keep collecting
                 log("expected-use profile failed:", e)
+        if time.time() - last_history >= 3600:      # finished days as their own samples, for the History page
+            last_history = time.time()
+            try:
+                for line in history.collect(args.stack):
+                    log(line)
+            except Exception as e:  # noqa: BLE001 - keep collecting
+                log("history: storing days failed:", e)
         modules.run_due(args.stack, hooks)          # the enabled modules' own schedules (remote support, weather, cameras, generator log)
         if args.once:
             return

@@ -1,0 +1,1082 @@
+{
+ "uid": "history",
+ "title": "History: this year against last",
+ "tags": [
+  "solar"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "refresh": "1h",
+ "time": {
+  "from": "now-90d",
+  "to": "now"
+ },
+ "description": "Per-day totals stored by the box (site_day_*), against the same days a year earlier. The box's History page has the months as a table.",
+ "annotations": {
+  "list": []
+ },
+ "templating": {
+  "list": []
+ },
+ "panels": [
+  {
+   "type": "timeseries",
+   "title": "Solar: 30-day total against last year",
+   "description": "Each point is the total of the 30 days before it; the dashed line is the same 30 days a year earlier.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(site_day_solar_kwh[30d])",
+     "legendFormat": "the last 30 days",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(site_day_solar_kwh[30d] offset 365d)",
+     "legendFormat": "the same 30 days a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "kwatth",
+     "min": 0,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 0,
+      "drawStyle": "line",
+      "spanNulls": true,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "the same 30 days a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.lineStyle",
+        "value": {
+         "fill": "dash",
+         "dash": [
+          6,
+          6
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 1,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Solar per day",
+   "description": "One bar per day; the line is the same day a year earlier.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_solar_kwh[1d])",
+     "legendFormat": "this year",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_solar_kwh[1d] offset 365d)",
+     "legendFormat": "a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "kwatth",
+     "min": 0,
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 70,
+      "drawStyle": "bars",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.drawStyle",
+        "value": "line"
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
+       },
+       {
+        "id": "custom.lineWidth",
+        "value": 2
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 2,
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Used: 30-day total against last year",
+   "description": "Each point is the total of the 30 days before it; the dashed line is the same 30 days a year earlier.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(site_day_used_kwh[30d])",
+     "legendFormat": "the last 30 days",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(site_day_used_kwh[30d] offset 365d)",
+     "legendFormat": "the same 30 days a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "kwatth",
+     "min": 0,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 0,
+      "drawStyle": "line",
+      "spanNulls": true,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "the same 30 days a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.lineStyle",
+        "value": {
+         "fill": "dash",
+         "dash": [
+          6,
+          6
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 3,
+   "gridPos": {
+    "x": 0,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Used per day",
+   "description": "One bar per day; the line is the same day a year earlier.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_used_kwh[1d])",
+     "legendFormat": "this year",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_used_kwh[1d] offset 365d)",
+     "legendFormat": "a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "kwatth",
+     "min": 0,
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 70,
+      "drawStyle": "bars",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.drawStyle",
+        "value": "line"
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
+       },
+       {
+        "id": "custom.lineWidth",
+        "value": 2
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 4,
+   "gridPos": {
+    "x": 12,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Generator hours: 30-day total against last year",
+   "description": "Each point is the total of the 30 days before it; the dashed line is the same 30 days a year earlier.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(site_day_generator_hours[30d])",
+     "legendFormat": "the last 30 days",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(site_day_generator_hours[30d] offset 365d)",
+     "legendFormat": "the same 30 days a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "h",
+     "min": 0,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 0,
+      "drawStyle": "line",
+      "spanNulls": true,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "the same 30 days a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.lineStyle",
+        "value": {
+         "fill": "dash",
+         "dash": [
+          6,
+          6
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 5,
+   "gridPos": {
+    "x": 0,
+    "y": 16,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Generator hours per day",
+   "description": "One bar per day; the line is the same day a year earlier.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_generator_hours[1d])",
+     "legendFormat": "this year",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_generator_hours[1d] offset 365d)",
+     "legendFormat": "a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "h",
+     "min": 0,
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 70,
+      "drawStyle": "bars",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.drawStyle",
+        "value": "line"
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
+       },
+       {
+        "id": "custom.lineWidth",
+        "value": 2
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 6,
+   "gridPos": {
+    "x": 12,
+    "y": 16,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Propane used: 30-day total against last year",
+   "description": "Each point is the total of the 30 days before it; the dashed line is the same 30 days a year earlier. Empty unless the propane module is on.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(propane_day_used_gal[30d])",
+     "legendFormat": "the last 30 days",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(propane_day_used_gal[30d] offset 365d)",
+     "legendFormat": "the same 30 days a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "gallons",
+     "min": 0,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 0,
+      "drawStyle": "line",
+      "spanNulls": true,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "the same 30 days a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.lineStyle",
+        "value": {
+         "fill": "dash",
+         "dash": [
+          6,
+          6
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 7,
+   "gridPos": {
+    "x": 0,
+    "y": 24,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Water used: 30-day total against last year",
+   "description": "Each point is the total of the 30 days before it; the dashed line is the same 30 days a year earlier. Empty unless the water module is on.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(sum(water_day_used_gal)[30d])",
+     "legendFormat": "the last 30 days",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(sum(water_day_used_gal)[30d] offset 365d)",
+     "legendFormat": "the same 30 days a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "gallons",
+     "min": 0,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 0,
+      "drawStyle": "line",
+      "spanNulls": true,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "the same 30 days a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.lineStyle",
+        "value": {
+         "fill": "dash",
+         "dash": [
+          6,
+          6
+         ]
+        }
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 8,
+   "gridPos": {
+    "x": 12,
+    "y": 24,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Outdoor temperature, daily average",
+   "description": "Each day's average outdoor temperature (the weather station's, else Open-Meteo's); the grey line is the same day a year earlier.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_temp_avg_c[1d])",
+     "legendFormat": "this year",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_temp_avg_c[1d] offset 365d)",
+     "legendFormat": "a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "celsius",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 0,
+      "drawStyle": "line",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.drawStyle",
+        "value": "line"
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
+       },
+       {
+        "id": "custom.lineWidth",
+        "value": 2
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 9,
+   "gridPos": {
+    "x": 0,
+    "y": 32,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Wind, daily average",
+   "description": "Each day's average wind; the line is the same day a year earlier. Recorded from the day this was added (Open-Meteo's goes back 92 days).",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_wind_avg_ms[1d])",
+     "legendFormat": "this year",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_wind_avg_ms[1d] offset 365d)",
+     "legendFormat": "a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "velocityms",
+     "min": 0,
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 70,
+      "drawStyle": "bars",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.drawStyle",
+        "value": "line"
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
+       },
+       {
+        "id": "custom.lineWidth",
+        "value": 2
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 10,
+   "gridPos": {
+    "x": 12,
+    "y": 32,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Heating degree days",
+   "description": "Degrees Fahrenheit the day's average was under 65 \u00b0F: what heating demand follows. The line is the same day a year earlier.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_hdd[1d])",
+     "legendFormat": "this year",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_hdd[1d] offset 365d)",
+     "legendFormat": "a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "min": 0,
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 70,
+      "drawStyle": "bars",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.drawStyle",
+        "value": "line"
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
+       },
+       {
+        "id": "custom.lineWidth",
+        "value": 2
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 11,
+   "gridPos": {
+    "x": 0,
+    "y": 40,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Strongest gust of the day",
+   "description": "The line is the same day a year earlier.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_gust_max_ms[1d])",
+     "legendFormat": "this year",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_gust_max_ms[1d] offset 365d)",
+     "legendFormat": "a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "velocityms",
+     "min": 0,
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 70,
+      "drawStyle": "bars",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.drawStyle",
+        "value": "line"
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
+       },
+       {
+        "id": "custom.lineWidth",
+        "value": 2
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 12,
+   "gridPos": {
+    "x": 12,
+    "y": 40,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  }
+ ],
+ "editable": false,
+ "graphTooltip": 1
+}

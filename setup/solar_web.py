@@ -36,6 +36,7 @@ import display  # noqa: E402
 import protect  # noqa: E402
 import screenpower as sp  # noqa: E402
 import genlog  # noqa: E402
+import history  # noqa: E402
 import modules  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import tts  # noqa: E402
@@ -113,9 +114,13 @@ def save_weather(d):
     ss.write_if_changed(path("state", "weather.json"), json.dumps(d, indent=2) + "\n", 0o644)
 
 
-def vm_push(solar, temp_c, source):
+def vm_push(solar, temp_c, source, wind_ms=None, gust_ms=None):
     lines = []
     ts = int(time.time() * 1000)
+    if wind_ms is not None:
+        lines.append(f'site_wind_speed_ms{{source="{source}"}} {wind_ms:.2f} {ts}')
+    if gust_ms is not None:
+        lines.append(f'site_wind_gust_ms{{source="{source}"}} {gust_ms:.2f} {ts}')
     if solar is not None:
         lines.append(f'site_solar_radiation_wm2{{source="{source}"}} {solar} {ts}')
     if temp_c is not None:
@@ -426,6 +431,7 @@ legend{font-weight:600;padding:0 6px}
 h2{margin:48px 0 8px;padding-top:20px;border-top:2px solid var(--line)}
 button{font:inherit;padding:8px 18px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
 .err{color:#c33;font-weight:600}
+.hist td.n,.hist th.n{text-align:right;font-variant-numeric:tabular-nums}.hist tr.total td{border-top:2px solid var(--muted)}
 .checks td{vertical-align:top}.ck-mark{width:2em;text-align:center;font-weight:700}.sr{position:absolute;left:-999em}
 .ck-ok .ck-mark{color:#0a6}.ck-warn .ck-mark{color:#b80}.ck-bad .ck-mark{color:#c33}.ck-off{color:var(--muted)}
 .ck-sum.ck-ok{border-color:#0a6}.ck-sum.ck-warn{border-color:#b80}.ck-sum.ck-bad{border-color:#c33}
@@ -458,8 +464,9 @@ background:color-mix(in srgb,var(--fg) 3%,var(--bg))} section.own h2{margin:12px
 
 
 NAV = [("/", "Home", "Solar monitor"), ("/check", "Check-up", "Check-up"), ("/setup", "Setup", "Site setup"),
-       ("/battery", "Battery", "Battery health"), ("/advisor", "Advisor", "Advisor"), ("/display", "Screen", None)]
-NAV_MODULES_AT = 4          # the enabled modules' pages (backups, generator) go before the Advisor
+       ("/battery", "Battery", "Battery health"), ("/history", "History", "History"),
+       ("/advisor", "Advisor", "Advisor"), ("/display", "Screen", None)]
+NAV_MODULES_AT = 5          # the enabled modules' pages (backups, generator) go before the Advisor
 APPS = [("8123", "Home Assistant"), ("3000", "Grafana")]
 
 
@@ -1140,6 +1147,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(display.data(STACK, load_site())), "application/json")
         elif self.path == "/api/ha":
             self.send(200, json.dumps(display.ha_status(STACK, load_site())), "application/json")
+        elif self.path == "/history":
+            try:
+                body = history.render(boxhealth.cached("history", 900, lambda: history.build(STACK, load_site())))
+            except (OSError, ValueError) as e:
+                body = f"<h1>History</h1><div class='card warn'>The history couldn't be read just now ({html.escape(str(e))}). Try again in a minute.</div>"
+            self.send(200, page("History", body))
         elif self.path == "/config":
             self.send(200, config_page())
         elif self.path == "/config/export":
@@ -1320,8 +1333,9 @@ class Handler(BaseHTTPRequestHandler):
             solar = float(q["solarradiation"]) if q.get("solarradiation") not in (None, "") else None
             tf = float(q["tempf"]) if q.get("tempf") not in (None, "") else None
             if weather_settings().get("source") == "push":
-                vm_push(solar, weather.f_to_c(tf), kind)
-                wx.save_station(STACK, weather.push_fields(q), kind)
+                fields = weather.push_fields(q)
+                vm_push(solar, weather.f_to_c(tf), kind, fields.get("wind_ms"), fields.get("gust_ms"))
+                wx.save_station(STACK, fields, kind)
             self.send(200, "OK", "text/plain")
         except (ValueError, OSError) as e:
             self.send(400, f"bad data: {e}", "text/plain")
