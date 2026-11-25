@@ -21,7 +21,8 @@ PART = "base";             // "base", "base-text", "cover", "cover-text" (the -t
 car_l = 100.0;
 car_w = 60.0;
 car_t = 1.6;
-car_holes = [[4, 4], [4, 56], [96, 24.5], [96, 35.5]];   // M3, in carrier coordinates (x, y from the front edge)
+car_holes = [[4, 56], [4, 4], [96, 54], [30, 30]];     // M3, in carrier coordinates (x, y from the front edge): HOLES
+                                                       // in build_board.py, whose y runs from the back edge
 car_under = 5.0;           // standoff height: room for the through-hole pins under the carrier
 // The ESP board's RJ45 edge sits at carrier x = -1.9, its front edge at carrier y = 19.5 (centred, 21 wide)
 esp_x = -1.9;
@@ -35,8 +36,8 @@ term_out = 0.6;            // the header's face, past the carrier's edge
 // front edge: CT1 and CT2
 ct_jack_y = [41.0, 28.0];
 ct_axis_h = 3.0;           // MEASURE: the jack's bore centre above the carrier
-ct_hole_d = 8.5;           // the plug's moulded body reaches 2.7 mm into the wall
-heat_y = [4.8, 15.0];      // HEAT block's pins, carrier y
+ct_hole_d = 8.5;           // the plug's moulded body reaches 2.7 mm into the wall (a round hole prints fine this size)
+heat_y = [4.84, 15.0];     // HEAT block's pins, carrier y
 
 /* [ESP32-P4-ETH, from Waveshare's drawing] */
 board_l = 78.0;
@@ -178,11 +179,9 @@ module shell() {
         // right end: the HEAT window, the CT jacks' holes and a tunnel for a USB-C plug (for flashing; it's 26 mm in)
         translate([out_l - wall - 1, car_y0 + (heat_y[0] + heat_y[1]) / 2 - term_w / 2 - 0.5, term_z[0]])
             cube([wall + 2, term_w + 1, split - term_z[0] + 0.01]);
-        for (y = ct_jack_y)                                     // teardrops (point up): they print without support
-            translate([out_l - wall - 1, car_y0 + y, car_z + car_t + ct_axis_h]) rotate([0, 90, 0]) {
+        for (y = ct_jack_y)
+            translate([out_l - wall - 1, car_y0 + y, car_z + car_t + ct_axis_h]) rotate([0, 90, 0])
                 cylinder(d = ct_hole_d, h = wall + 2);
-                rotate([0, 0, 180]) linear_extrude(wall + 2) polygon([[0, -ct_hole_d / 2 / sqrt(2)], [ct_hole_d / 2 * sqrt(2), 0], [0, ct_hole_d / 2 / sqrt(2)]]);
-            }
         translate([out_l - wall - 1, esp_y0 + board_w / 2 - 7, esp_z + pcb_t + usbc_h / 2 - 4]) cube([wall + 2, 14, 8]);
         button_hole("front");
         button_hole("back");

@@ -31,8 +31,8 @@ buttons and the PoE module. They're in OpenSCAD's preview only, never in the STL
 - **Probe ports:** the pluggable blocks' faces are at the carrier's edges, in long windows in the front (P1–P4) and
   back (P5–P8) walls, so probes plug and unplug from outside. The windows are open-topped slots in the base, closed
   by the cover. The **HEAT** block is behind a window in the USB-C end
-  wall, and the pump clamps' plugs go into the carrier's 3.5 mm jacks through two teardrop holes below the USB
-  opening, labelled **CT1** and **CT2** (the teardrops' points print without support). Each port's name is engraved
+  wall, and the pump clamps' plugs go into the carrier's 3.5 mm jacks through two round 8.5 mm holes below the USB
+  opening, labelled **CT1** and **CT2**. Each port's name is engraved
   above or below it.
 - **USB-C:** a 14 × 8 mm tunnel in the end wall, for flashing. The jack is 26 mm in, so it takes a plug with a slim,
   long body; day to day the board updates over the network.
