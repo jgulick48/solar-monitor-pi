@@ -6,7 +6,9 @@ Turning it on:
   - with "administrator rights", lets `solar` use sudo without a password (/etc/sudoers.d/solar-ssh-access);
   - makes SSH listen on the network for keys only (/etc/ssh/sshd_config.d/01-solar-ssh-access.conf) and starts it,
     also at boot, if it wasn't running already.
-Turning it off undoes all of that. If SSH was running before (the owner turned it on themselves), it is left
+Turning it off undoes all of that. While it's on, check() (the collector, every 5 minutes) puts back whatever is
+missing: after a backup is restored onto a new drive or box, the settings come back but the keys, the sudo rule and
+the SSH settings live outside them. If SSH was running before (the owner turned it on themselves), it is left
 running with their own settings. Remote support (support.py) also uses SSH, limited to the box itself; the two
 share it: whichever is turned off last stops it.
 
@@ -26,6 +28,7 @@ SSHD_CONF = ("# Written by the solar monitor while SSH access is on; removed whe
              "ListenAddress 0.0.0.0\nListenAddress ::\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n"
              "PermitRootLogin no\n")
 DEFAULTS = {"enabled": False, "keys": "", "sudo": True, "started_ssh": False, "since": 0, "message": ""}
+SUDO_RULE = f"# solar monitor SSH access (removed when it is turned off)\n{support.USER} ALL=(ALL) NOPASSWD:ALL\n"
 
 
 def settings(stack):
@@ -63,11 +66,45 @@ def enable(stack, keys, sudo, now=None):
     msgs = []
     support._set_keys(keys, MARK_BEGIN, MARK_END)
     if sudo:
-        support._write(support.p(SUDOERS), f"# solar monitor SSH access (removed when it is turned off)\n{support.USER} ALL=(ALL) NOPASSWD:ALL\n", 0o440)
+        support._write(support.p(SUDOERS), SUDO_RULE, 0o440)
     else:
         support._remove(support.p(SUDOERS))
     changed = support._write(support.p(SSHD_DROPIN), SSHD_CONF, 0o644)
     if d["started_ssh"]:
+        support.run(["systemctl", "enable", "ssh"])
+    if changed or not support.ssh_active():
+        r = support.run(["systemctl", "restart", "ssh"])
+        msgs.append("SSH started (keys only)" if r.returncode == 0 else f"SSH didn't start: {r.stderr.strip()[-200:]}")
+    return msgs
+
+
+def _keys_in_place(keys):
+    try:
+        with open(os.path.join(support.home(), ".ssh", "authorized_keys")) as f:
+            text = f.read()
+    except FileNotFoundError:
+        return False
+    return f"{MARK_BEGIN}\n{keys}\n{MARK_END}" in text
+
+
+def check(stack, now=None):
+    """Collector, every 5 minutes: while SSH access is on, keep the box matching it (the keys, the sudo rule, the SSH
+    settings, SSH running and, if this module started it, starting at boot). Touches nothing that's already right.
+    Returns messages."""
+    if not is_on(stack):
+        return []
+    d = settings(stack)
+    msgs = []
+    if d["keys"] and not _keys_in_place(d["keys"]):
+        support._set_keys(d["keys"], MARK_BEGIN, MARK_END)
+        msgs.append("SSH access keys put back")
+    if d["sudo"]:
+        if support._write(support.p(SUDOERS), SUDO_RULE, 0o440):
+            msgs.append("administrator rights put back")
+    elif support._remove(support.p(SUDOERS)):
+        msgs.append("administrator rights removed (they're off in the settings)")
+    changed = support._write(support.p(SSHD_DROPIN), SSHD_CONF, 0o644)
+    if d["started_ssh"] and not _ssh_enabled_at_boot():
         support.run(["systemctl", "enable", "ssh"])
     if changed or not support.ssh_active():
         r = support.run(["systemctl", "restart", "ssh"])
