@@ -321,14 +321,23 @@ def ensure_secrets(stack):
         write_if_changed(path, json.dumps(s, indent=2) + "\n", 0o600)
     passwd = os.path.join(stack, "mosquitto", "passwd")
     if not os.path.exists(passwd) or changed:
-        lines = [f"bridge:{mosquitto_hash(s['mqtt_bridge'])}", f"homeassistant:{mosquitto_hash(s['mqtt_homeassistant'])}"]
-        if os.geteuid() == 0:
-            # Mosquitto runs as uid/gid 1883 in its image and wants to own a 0600 file.
-            write_if_changed(passwd, "\n".join(lines) + "\n", 0o600)
-            os.chown(passwd, 1883, 1883)
-        else:
-            write_if_changed(passwd, "\n".join(lines) + "\n", 0o644)  # dev runs: can't chown, keep it readable
+        write_mosquitto_passwd(stack, s)
     return s
+
+
+def write_mosquitto_passwd(stack, s):
+    """Mosquitto's accounts: the bridge, Home Assistant, and `share` once the "Share this site" module has made its
+    password. Each write has new salts, so this is only called when an account changes."""
+    passwd = os.path.join(stack, "mosquitto", "passwd")
+    lines = [f"bridge:{mosquitto_hash(s['mqtt_bridge'])}", f"homeassistant:{mosquitto_hash(s['mqtt_homeassistant'])}"]
+    if s.get("mqtt_share"):
+        lines.append(f"share:{mosquitto_hash(s['mqtt_share'])}")
+    if os.geteuid() == 0:
+        # Mosquitto runs as uid/gid 1883 in its image and wants to own a 0600 file.
+        write_if_changed(passwd, "\n".join(lines) + "\n", 0o600)
+        os.chown(passwd, 1883, 1883)
+    else:
+        write_if_changed(passwd, "\n".join(lines) + "\n", 0o644)  # dev runs: can't chown, keep it readable
 
 
 def host_timezone():
@@ -381,6 +390,11 @@ def lan_ip():
         return "127.0.0.1"
 
 
+def _sharing(stack):
+    import sharing
+    return sharing.is_sharing(stack)
+
+
 def write_bridge_config(stack, inverters, sec):
     # JSON is valid YAML, so no YAML library is needed.
     cfg = {
@@ -409,6 +423,8 @@ def write_bridge_config(stack, inverters, sec):
             "password": sec["mqtt_bridge"],
             "namespace": "lxp",
             "homeassistant": {"enabled": True, "prefix": "homeassistant"},
+            # every reply from a dongle as it came, for boxes that follow this site (sharing.py)
+            **({"publish_raw_frames": True} if _sharing(stack) else {}),
         },
         "statsd": {"server": ""},
         "prometheus": {"enabled": True},
@@ -706,13 +722,17 @@ def main():
         import display  # the camera service's config (no cameras until the setup page adds them)
         display.save(stack, display.load(stack))
 
-    known_hosts = [inv["host"] for inv in inverters.values()]
+    # dongles followed from another site (sharing.py) are read through their mirror: never scanned for, and never
+    # connected to directly, also when the real dongle is on this network
+    known_hosts = [inv["host"] for inv in inverters.values() if not inv.get("remote")]
     nets = [] if args.no_scan else local_networks()
     found = scan(nets, args.host + known_hosts)
     now = time.strftime("%Y-%m-%d %H:%M")
     for inv in inverters.values():
-        inv["present"] = False
+        inv["present"] = bool(inv.get("remote"))
     for r in found:
+        if inverters.get(r["datalog"], {}).get("remote"):
+            continue
         cur = inverters.setdefault(r["datalog"], {})
         if cur.get("host") and cur["host"] != r["host"]:
             log(f"dongle {r['datalog']} moved {cur['host']} -> {r['host']}")

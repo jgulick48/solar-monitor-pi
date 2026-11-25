@@ -51,7 +51,7 @@ Eleven features in four phases, each its own PR and release. The design, with th
 - **Year-over-year comparison.** A History page: each month against the same month last year (solar, use, generator
   hours, propane, water), and a Grafana dashboard.
 
-**Phase 4: follow another site**
+**Phase 4: follow another site** (same network or VPN: built; through the tunnel: later)
 
 - A "Share this site" switch on the source box (the bridge's raw-frame feed and a read-only share code); the
   following box pastes the code and runs the bridge's mirror, so the remote inverter appears like a local one

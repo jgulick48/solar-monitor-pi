@@ -1,0 +1,2 @@
+Optional Mosquitto settings written by the box (setup/sharing.py): share.conf, acl, share.crt, share.key.
+Only files ending in .conf are read.

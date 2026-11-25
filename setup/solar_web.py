@@ -521,7 +521,8 @@ def status_page(handler):
         return f"<b class='err'>{html.escape(txt)}</b>" if bad else html.escape(txt)
     rows = "".join(
         f"<tr><td>{html.escape(dl)}</td><td>{html.escape(i.get('serial') or 'not seen yet')}</td>"
-        f"<td>{html.escape(i.get('host', ''))}</td><td>{html.escape(i.get('last_seen', ''))}</td>"
+        f"<td>{html.escape('followed from ' + (i.get('site') or 'another site') if i.get('remote') else i.get('host', ''))}</td>"
+        f"<td>{html.escape(i.get('last_seen', ''))}</td>"
         f"<td>{live_cell(dl)}</td>"
         f"<td>{'yes' if i.get('present') else '<b>not found in last scan</b>'}"
         + ("" if i.get("present") else
