@@ -179,6 +179,35 @@ class Helper(unittest.TestCase):
         with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
             self.run_cmd("rename", old="debleed", new="x")                                # gone
 
+    def test_ha_own_login(self):
+        """Home Assistant's hostname taken out of the Access app (its own login only): refused without an owner
+        account, kept through a rename, and put back."""
+        self.init()
+        self.run_cmd("new", name="neighbor", out=None)
+        uris = lambda: {d["uri"] for a in self.cf.apps.values() for d in a["destinations"]}  # noqa: E731
+        old = helper.ha_owner
+        try:
+            for owner in (False, None):
+                helper.ha_owner = lambda cfg, name: owner
+                with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+                    self.run_cmd("ha", name="neighbor", state="open", force=False)
+                self.assertIn("neighbor-ha.example.com", uris())
+            helper.ha_owner = lambda cfg, name: True
+            _, err = self.run_cmd("ha", name="neighbor", state="open", force=False)
+            self.assertIn("except neighbor-ha.example.com", err)
+        finally:
+            helper.ha_owner = old
+        self.assertEqual(uris(), {f"neighbor-{a}.example.com" for a in ("ssh", "setup", "grafana")})
+        self.assertEqual(len(self.cf.dns), 4)                             # the hostname still works
+        out, _ = self.run_cmd("list")
+        self.assertIn("HA: own login only", out)
+        self.run_cmd("new", name="neighbor", out=None)                   # set up again: stays open
+        self.run_cmd("rename", old="neighbor", new="next")
+        self.assertEqual(uris(), {f"next-{a}.example.com" for a in ("ssh", "setup", "grafana")})
+        self.run_cmd("ha", name="next", state="protected", force=False)
+        self.assertEqual(len(uris()), 4)
+        self.assertNotIn("HA: own login only", self.run_cmd("list")[0])
+
     def test_refuses_readable_token_and_bad_names(self):
         os.chmod(helper.TOKEN_FILE, 0o644)
         with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):

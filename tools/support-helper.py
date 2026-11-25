@@ -23,6 +23,10 @@ Per box:
   support-helper.py code NAME [--out FILE]   the support code again
   support-helper.py rename OLD NEW         rename a box: its tunnel, hostnames and Access app; the box keeps
                                              its support code
+  support-helper.py ha   NAME open|protected   Home Assistant's hostname (NAME-ha) without the Cloudflare login, so
+                                             only its own login page stands in front of it (and its phone app
+                                             can connect); or back behind Cloudflare Access. New boxes start
+                                             protected.
   support-helper.py ssh  NAME [ssh args]     log in as solar through the tunnel (needs cloudflared)
   support-helper.py get  NAME PATH [--app setup|grafana|ha]   fetch a page through Access with the service token
   support-helper.py list                     boxes, their tunnel status and links
@@ -176,10 +180,18 @@ def cmd_new(a):
     cmd_code(a)
 
 
-def _route(cfg, tok, name, tid, app=None):
+def _ha_open(app):
+    """True when an Access app leaves Home Assistant's hostname out: it has only its own login."""
+    return bool(app) and not any(d.get("uri", "").split(".")[0].endswith("-ha") for d in app.get("destinations") or [])
+
+
+def _route(cfg, tok, name, tid, app=None, ha_open=None):
     """Point NAME's hostnames at the tunnel (its ingress and DNS) and put them behind the Access app (app: the
-    existing one to update, else found by NAME or made)."""
+    existing one to update, else found by NAME or made). ha_open: leave Home Assistant's hostname out of the
+    Access app (its own login only); None keeps what the app has now (a new box: protected)."""
     acct = cfg["account_id"]
+    app = app or find_app(tok, acct, name)
+    ha_open = _ha_open(app) if ha_open is None else ha_open
     hosts = {app: host(cfg, name, app) for app in APPS}
     ingress = [{"hostname": h, "service": APPS[app], "originRequest": {}} for app, h in hosts.items()]
     api(tok, "PUT", f"/accounts/{acct}/cfd_tunnel/{tid}/configurations",
@@ -187,15 +199,49 @@ def _route(cfg, tok, name, tid, app=None):
     for h in hosts.values():
         tunnel.ensure_dns(tok, cfg["zone_id"], h, tid)
     body = {"name": PREFIX + name, "type": "self_hosted", "domain": hosts["setup"],
-            "destinations": [{"type": "public", "uri": h} for h in hosts.values()],
+            "destinations": [{"type": "public", "uri": h} for k, h in hosts.items() if not (ha_open and k == "ha")],
             "session_duration": "24h", "app_launcher_visible": False,
             "policies": [{"id": pid, "precedence": i + 1} for i, pid in enumerate(cfg["policies"])]}
-    app = app or find_app(tok, acct, name)
     if app:
         api(tok, "PUT", f"/accounts/{acct}/access/apps/{app['id']}", body)
     else:
         api(tok, "POST", f"/accounts/{acct}/access/apps", body)
-    print(f"box {name}: tunnel {tid}, {', '.join(hosts.values())}, behind Cloudflare Access", file=sys.stderr)
+    print(f"box {name}: tunnel {tid}, {', '.join(hosts.values())}, behind Cloudflare Access"
+          + (f" except {hosts['ha']} (Home Assistant's own login)" if ha_open else ""), file=sys.stderr)
+
+
+def ha_owner(cfg, name):
+    """Whether the box's Home Assistant has its owner account, asked through the tunnel (/api/onboarding, which
+    needs no login): True, False, or None when it can't be told (the box isn't connected)."""
+    cid, secret = service()
+    req = urllib.request.Request(f"https://{host(cfg, name, 'ha')}/api/onboarding",
+                                 headers={"CF-Access-Client-Id": cid, "CF-Access-Client-Secret": secret,
+                                          "User-Agent": "solar-support-helper/1"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            steps = json.loads(r.read())
+        return any(x.get("step") == "user" and x.get("done") for x in steps)
+    except urllib.error.HTTPError as e:
+        return True if e.code == 404 else None          # 404: onboarding is finished and its pages are gone
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def cmd_ha(a):
+    """Home Assistant's hostname in or out of the Access app. Opening it is refused while Home Assistant has no
+    owner account: without the Cloudflare login, the first visitor could create it."""
+    cfg, tok, name = config(), token(), check_name(a.name)
+    t = find_tunnel(tok, cfg["account_id"], name)
+    if not t:
+        die(f"no box {name}")
+    if a.state == "open" and not a.force:
+        owner = ha_owner(cfg, name)
+        if owner is False:
+            die(f"{name}'s Home Assistant has no owner account yet: anyone could claim it. Create the account first.")
+        if owner is None:
+            die(f"couldn't reach {name}'s Home Assistant to check it has an owner account (is the box connected?). "
+                "Try again, or --force if you know it has one.")
+    _route(cfg, tok, name, t["id"], ha_open=a.state == "open")
 
 
 def cmd_rename(a):
@@ -267,12 +313,14 @@ def cmd_list(a):
     cfg, tok = config(), token()
     found = api(tok, "GET", f"/accounts/{cfg['account_id']}/cfd_tunnel", query={"is_deleted": "false"}) or []
     boxes = sorted((t for t in found if t["name"].startswith(PREFIX)), key=lambda t: t["name"])
+    apps = {x.get("name"): x for x in api(tok, "GET", f"/accounts/{cfg['account_id']}/access/apps") or []}
     if not boxes:
         print("no boxes yet")
     for t in boxes:
         name = t["name"][len(PREFIX):]
         state = {"healthy": "connected", "inactive": "never connected", "down": "not connected"}.get(t.get("status"), t.get("status"))
-        print(f"{name:20s} {state:16s} https://{host(cfg, name, 'setup')}  ssh: support-helper.py ssh {name}")
+        ha = "  HA: own login only" if _ha_open(apps.get(t["name"])) else ""
+        print(f"{name:20s} {state:16s} https://{host(cfg, name, 'setup')}  ssh: support-helper.py ssh {name}{ha}")
 
 
 def cmd_remove(a):
@@ -317,6 +365,10 @@ def main():
     p.add_argument("name")
     p.add_argument("path")
     p.add_argument("--app", choices=["setup", "grafana", "ha"], default="setup")
+    p = sub.add_parser("ha")
+    p.add_argument("name")
+    p.add_argument("state", choices=["open", "protected"])
+    p.add_argument("--force", action="store_true", help="open without checking Home Assistant has an owner account")
     sub.add_parser("list")
     p = sub.add_parser("rename")
     p.add_argument("old")
