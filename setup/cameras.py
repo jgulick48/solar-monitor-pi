@@ -138,6 +138,35 @@ def camera_problems(stack):
     return out
 
 
+def sync_names(stack):
+    """Every 5 minutes: cameras renamed in UniFi Protect take the new name on the screen and in the announcements,
+    whose phrases are made ahead of time again when the voice is on. Returns messages to log."""
+    import protect
+    try:
+        renamed = protect.sync_names(stack)
+    except (OSError, ValueError, protect.ProtectError) as e:
+        return [f"camera name check failed: {e}"]
+    if not renamed:
+        return []
+    prewarm_voice(stack, renamed.values())
+    return [f"camera renamed in Protect: {old} -> {new}" for old, new in renamed.items()]
+
+
+def prewarm_voice(stack, names):
+    """With the voice on, make the phrases for these cameras now, so the first announcement isn't late (they are
+    made on demand otherwise)."""
+    import tts
+    from modules import voice
+    try:
+        if not voice.is_on(stack):
+            return
+        d = _cameras(stack)
+        tts.prewarm(stack, [c for c in d["cameras"] if c.get("name") in set(names)],
+                    {**d, "voice": voice.settings(stack)["voice"]})
+    except (OSError, ValueError, KeyError):
+        pass
+
+
 def refresh(stack, check=True):
     """Protect cameras at the quality the setting asks for, with the links Protect currently hands out (it changes
     them; a stale link left a camera black on site), then each camera's codec (state/camera-check.json).
