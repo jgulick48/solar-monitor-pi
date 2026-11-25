@@ -21,6 +21,8 @@ Per box:
                                              NAME-grafana / NAME-ha on your domain, DNS, an Access app with
                                              your policies; prints the support code (or writes it to FILE)
   support-helper.py code NAME [--out FILE]   the support code again
+  support-helper.py rename OLD NEW         rename a box: its tunnel, hostnames and Access app; the box keeps
+                                             its support code
   support-helper.py ssh  NAME [ssh args]     log in as solar through the tunnel (needs cloudflared)
   support-helper.py get  NAME PATH [--app setup|grafana|ha]   fetch a page through Access with the service token
   support-helper.py list                     boxes, their tunnel status and links
@@ -169,8 +171,15 @@ def cmd_init(a):
 
 def cmd_new(a):
     cfg, tok, name = config(), token(), check_name(a.name)
+    tid = tunnel.ensure_tunnel(tok, cfg["account_id"], PREFIX + name)
+    _route(cfg, tok, name, tid)
+    cmd_code(a)
+
+
+def _route(cfg, tok, name, tid, app=None):
+    """Point NAME's hostnames at the tunnel (its ingress and DNS) and put them behind the Access app (app: the
+    existing one to update, else found by NAME or made)."""
     acct = cfg["account_id"]
-    tid = tunnel.ensure_tunnel(tok, acct, PREFIX + name)
     hosts = {app: host(cfg, name, app) for app in APPS}
     ingress = [{"hostname": h, "service": APPS[app], "originRequest": {}} for app, h in hosts.items()]
     api(tok, "PUT", f"/accounts/{acct}/cfd_tunnel/{tid}/configurations",
@@ -181,13 +190,33 @@ def cmd_new(a):
             "destinations": [{"type": "public", "uri": h} for h in hosts.values()],
             "session_duration": "24h", "app_launcher_visible": False,
             "policies": [{"id": pid, "precedence": i + 1} for i, pid in enumerate(cfg["policies"])]}
-    app = find_app(tok, acct, name)
+    app = app or find_app(tok, acct, name)
     if app:
         api(tok, "PUT", f"/accounts/{acct}/access/apps/{app['id']}", body)
     else:
         api(tok, "POST", f"/accounts/{acct}/access/apps", body)
     print(f"box {name}: tunnel {tid}, {', '.join(hosts.values())}, behind Cloudflare Access", file=sys.stderr)
-    cmd_code(a)
+
+
+def cmd_rename(a):
+    """Rename a box: the same tunnel (its token, so the box's support code keeps working), renamed, with the new
+    hostnames in its routes, DNS and Access app; the old hostnames' DNS records go."""
+    cfg, tok = config(), token()
+    old, new = check_name(a.old), check_name(a.new)
+    acct = cfg["account_id"]
+    t = find_tunnel(tok, acct, old)
+    if not t:
+        die(f"no box {old}")
+    if find_tunnel(tok, acct, new):
+        die(f"there's already a box {new}")
+    app = find_app(tok, acct, old)
+    api(tok, "PATCH", f"/accounts/{acct}/cfd_tunnel/{t['id']}", {"name": PREFIX + new})
+    _route(cfg, tok, new, t["id"], app)
+    for app_name in APPS:                  # the old names: only records pointing at this box's tunnel
+        for r in api(tok, "GET", f"/zones/{cfg['zone_id']}/dns_records", query={"name": host(cfg, old, app_name)}) or []:
+            if r["type"] == "CNAME" and r["content"] == tunnel.target(t["id"]):
+                api(tok, "DELETE", f"/zones/{cfg['zone_id']}/dns_records/{r['id']}")
+    print(f"box {old} is now {new}; the box needs nothing (same tunnel and support code)", file=sys.stderr)
 
 
 def cmd_code(a):
@@ -289,6 +318,9 @@ def main():
     p.add_argument("path")
     p.add_argument("--app", choices=["setup", "grafana", "ha"], default="setup")
     sub.add_parser("list")
+    p = sub.add_parser("rename")
+    p.add_argument("old")
+    p.add_argument("new")
     p = sub.add_parser("remove")
     p.add_argument("name")
     p.add_argument("--yes", action="store_true")

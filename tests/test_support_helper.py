@@ -71,6 +71,8 @@ class FakeCF:
             if method == "DELETE":
                 del self.tunnels[tid]
                 return {}
+            if method == "PATCH":
+                self.tunnels[tid].update(body)
             return self.tunnels.get(tid)
         store = {"policies": self.policies, "apps": self.apps, "service_tokens": self.svc}[parts[3]]
         if len(parts) == 4 and method == "GET":
@@ -151,6 +153,31 @@ class Helper(unittest.TestCase):
         self.run_cmd("remove", name="neighbor", yes=True)
         self.assertEqual((self.cf.tunnels, self.cf.apps), ({}, {}))
         self.assertEqual(list(self.cf.dns), ["foreign"])
+
+    def test_rename(self):
+        """A box renamed: the same tunnel (so its support code keeps working), its new hostnames in the routes, DNS
+        and Access app, the old hostnames' records gone, another box's untouched."""
+        self.init()
+        out, _ = self.run_cmd("new", name="debleed", out=None)
+        tid = support.tunnel_id(support.read_code(out.strip())[0])
+        self.run_cmd("new", name="other", out=None)
+        self.run_cmd("rename", old="debleed", new="debeeld")
+        self.assertEqual(self.cf.tunnels[tid]["name"], "solar-support-debeeld")
+        out, _ = self.run_cmd("code", name="debeeld", out=None)
+        self.assertEqual(support.tunnel_id(support.read_code(out.strip())[0]), tid)      # the same tunnel and token
+        hosts = {i["hostname"] for i in self.cf.configs[tid]["config"]["ingress"] if "hostname" in i}
+        self.assertEqual(hosts, {f"debeeld-{a}.example.com" for a in helper.APPS})
+        names = sorted(r["name"] for r in self.cf.dns.values())
+        self.assertEqual(names, sorted([f"debeeld-{a}.example.com" for a in helper.APPS] +
+                                       [f"other-{a}.example.com" for a in helper.APPS]))
+        apps = sorted(a["name"] for a in self.cf.apps.values())
+        self.assertEqual(apps, ["solar-support-debeeld", "solar-support-other"])
+        app = [a for a in self.cf.apps.values() if a["name"] == "solar-support-debeeld"][0]
+        self.assertEqual({d["uri"] for d in app["destinations"]}, hosts)
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            self.run_cmd("rename", old="debeeld", new="other")                            # taken
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            self.run_cmd("rename", old="debleed", new="x")                                # gone
 
     def test_refuses_readable_token_and_bad_names(self):
         os.chmod(helper.TOKEN_FILE, 0o644)
