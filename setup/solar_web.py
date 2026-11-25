@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import advisor  # noqa: E402
 import boxhealth  # noqa: E402
 import checkup  # noqa: E402
+import configfile  # noqa: E402
 import battery  # noqa: E402
 import display  # noqa: E402
 import protect  # noqa: E402
@@ -698,7 +699,7 @@ def setup_page(site, error="", done=None, error_field="", form=None, module_msgs
     body = f"""<h1>Site setup</h1>{toast}{msg}
 <p><small>Everything from <i>Optional features</i> to <i>Updates</i> is saved together with the <b>Save site settings</b>
 button at the bottom of the window. The test and restart buttons among them act straight away, with the saved settings.
-{own_note}</small></p>
+{own_note} To move these settings to another box, or bring another box's here: <a href="/config">Settings file</a>.</small></p>
 <form method="post" action="/setup" id="site-form">
 {modules.switches(STACK)}
 <fieldset><legend>Location</legend>
@@ -940,6 +941,119 @@ generator hours and fuel are what it takes to make that up ({e(a['site']['invert
     return page("Advisor", body)
 
 
+# --------------------------------------------------------------------------
+# Settings as one file: export, and import with a preview (configfile.py)
+# --------------------------------------------------------------------------
+CONFIG_FORM_MAX = 3 * configfile.MAX_BYTES + 4096      # the file, URL-encoded
+
+
+def config_page(msg="", kind="ok"):
+    note = notice(kind, msg) if msg else ""
+    body = f"""<h1>Settings file</h1>{note}
+<div class="card"><b>Export</b>: this box's settings as one file, to move them to another box or keep them somewhere safe.
+<form method="get" action="/config/export" style="margin-top:8px"><button>Download the settings file</button></form>
+<small>It holds the site details, the wall display, weather, updates, the UniFi Protect address and camera choice, and
+the settings of the generator, notifications, cameras, voice, weather, propane, water, boiler, freeze protection and
+probe board modules. Secrets (API keys, tokens, camera stream links, the ntfy topic) are left out. It does not hold
+history: that is what backups are for. Remote access, remote support, SSH keys, the backup stick and the radios belong
+to one box and stay here.</small>
+<p><small>To include the secrets, encrypted with a passphrase, export on the box itself (over SSH or its console):<br>
+<code>sudo python3 /opt/solar-monitor/src/setup/configfile.py export --secrets &gt; solar-config.json</code></small></p></div>
+<div class="card"><b>Import</b>: choose a settings file. You see what would change before anything is saved.
+<form method="post" action="/config/preview" style="margin-top:8px">
+<p><input type="file" id="cfgfile" accept=".json,application/json"></p>
+<textarea name="config" id="cfgtext" rows="6" style="width:100%;font-family:monospace" placeholder="...or paste the file's text here" required></textarea>
+<div class="row"><label>Passphrase <input type="password" name="passphrase" autocomplete="off" placeholder="only if the file has secrets"></label></div>
+<button>Show what would change</button></form></div>
+<script>document.getElementById('cfgfile').addEventListener('change',e=>{{const f=e.target.files[0];if(!f)return;
+f.text().then(t=>{{document.getElementById('cfgtext').value=t}})}})</script>"""
+    return page("Settings file", body)
+
+
+def config_preview(form):
+    """The preview of an import, or the settings page again with what is wrong with the file."""
+    e = html.escape
+    try:
+        doc = configfile.parse(form.get("config", ""))
+        plan = configfile.plan(STACK, doc, form.get("passphrase", ""), DEFAULT_SITE)
+    except configfile.ConfigError as err:
+        return config_page(f"Nothing imported: {err}.", "err")
+    notes = "".join(f"<li>{e(n)}</li>" for n in plan["notes"])
+    rows = "".join(f"<tr><td>{e(n)}</td><td>{e(p)}</td><td>{e(configfile.show(old, sec))}</td><td><b>{e(configfile.show(new, sec))}</b></td></tr>"
+                   for n, p, old, new, sec in plan["changes"])
+    head = (f"From <b>{e(doc.get('name') or 'a box')}</b>, exported {e(str(doc.get('exported', ''))[:16].replace('T', ' '))}"
+            f" by version {e(doc.get('version') or 'unknown')} (this box: {e(version())}).")
+    if not plan["changes"]:
+        return page("Settings file", f"<h1>Settings file</h1><p>{head}</p>{f'<ul>{notes}</ul>' if notes else ''}"
+                    "<div class='card'><b>Nothing would change</b>: this box already has these settings.</div>"
+                    "<p><a href='/config'>Back</a></p>")
+    body = f"""<h1>Import: what would change</h1><p>{head}</p>{f'<ul>{notes}</ul>' if notes else ''}
+<p>{len(plan['changes'])} settings would change; {plan['same']} are already the same. Nothing is saved yet.</p>
+<table><tr><th>Where</th><th>Setting</th><th>Now</th><th>After the import</th></tr>{rows}</table>
+<form method="post" action="/config/import" style="margin-top:12px">
+<textarea name="config" hidden>{e(form.get('config', ''))}</textarea>
+<input type="hidden" name="passphrase" value="{e(form.get('passphrase', ''))}">
+<button>Import these settings</button> <a href="/config">Cancel</a>
+<p><small>The settings as they are now are kept in <code>state/config-before-import.json</code> on the box. Home Assistant
+and other services restart where their settings changed (a minute or two).</small></p></form>"""
+    return page("Settings file", body)
+
+
+def config_import(form):
+    try:
+        doc = configfile.parse(form.get("config", ""))
+        plan = configfile.plan(STACK, doc, form.get("passphrase", ""), DEFAULT_SITE)
+    except configfile.ConfigError as err:
+        return config_page(f"Nothing imported: {err}.", "err")
+    if not plan["files"]:
+        return config_page("Nothing to import: this box already has these settings.")
+    msgs = apply_config(plan)
+    bad = [m for m in msgs if is_error(m)]
+    return config_page(f"Imported {len(plan['changes'])} settings. " + "; ".join(msgs) + ".", "err" if bad else "ok")
+
+
+def apply_config(plan):
+    """Write an import's files the way the setup page would, and restart what they affect. Returns messages."""
+    msgs = []
+    ss.write_if_changed(path("state", "config-before-import.json"),
+                        json.dumps({"saved": time.strftime("%Y-%m-%d %H:%M:%S"), "files": configfile.current(STACK)}, indent=1) + "\n", 0o600)
+    files = plan["files"]
+    if "site.json" in files:
+        ss.write_if_changed(path("state", "site.json"), json.dumps(files["site.json"], indent=2) + "\n", 0o644)
+    if "weather.json" in files:
+        save_weather(files["weather.json"])
+    if "update.json" in files:
+        ss.write_if_changed(path("state", "update.json"), json.dumps(files["update.json"], indent=2) + "\n", 0o644)
+    if "protect.json" in files:
+        protect.save(STACK, {**protect.settings(STACK), **files["protect.json"]})
+    # over the loaded settings: a box that never saved its display has no file, and the defaults fill it in
+    cams_changed = "display.json" in files and display.save(STACK, {**display.load(STACK), **files["display.json"]})
+    for name, new in files.items():
+        if not name.startswith("modules/"):
+            continue
+        mid = name[len("modules/"):-len(".json")]
+        try:
+            if isinstance(new.get("settings"), dict):
+                modules.save(STACK, mid, new["settings"])
+            if "enabled" in new:
+                modules.set_enabled(STACK, mid, bool(new["enabled"]))
+        except Exception as e:  # noqa: BLE001 - one module's trouble doesn't stop the rest of the import
+            msgs.append(f"failed: the {mid} module's settings ({type(e).__name__}: {e})")
+    try:
+        ss.write_env(STACK, ss.ensure_secrets(STACK))
+        if cams_changed:
+            import cameras
+            msgs.append(cameras.restart_go2rtc(STACK))
+        import hastates
+        hastates.apply(STACK)
+        msgs += apply_site(load_site())
+        if modules.load(STACK, "cameras")["enabled"]:
+            protect.listen(STACK)
+    except Exception as e:  # noqa: BLE001
+        msgs.append(f"failed: applying the settings ({type(e).__name__}: {e})")
+    return msgs
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "solar-web"
 
@@ -960,9 +1074,9 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return False
 
-    def form(self):
+    def form(self, limit=65536):
         n = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(min(n, 65536)).decode()
+        raw = self.rfile.read(min(n, limit)).decode()
         return {k: v[0] for k, v in urllib.parse.parse_qs(raw, keep_blank_values=True).items()}
 
     def action(self):
@@ -1026,6 +1140,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(display.data(STACK, load_site())), "application/json")
         elif self.path == "/api/ha":
             self.send(200, json.dumps(display.ha_status(STACK, load_site())), "application/json")
+        elif self.path == "/config":
+            self.send(200, config_page())
+        elif self.path == "/config/export":
+            doc = configfile.export(STACK, version())
+            fname = "solar-config-" + (re.sub(r"[^A-Za-z0-9]+", "-", doc["name"]).strip("-").lower() or "box") + time.strftime("-%Y%m%d") + ".json"
+            self.send(200, json.dumps(doc, indent=1) + "\n", "application/json",
+                      extra={"Content-Disposition": f'attachment; filename="{fname}"'})
         elif self.path == "/check":
             site = load_site()
             self.send(200, page("Check-up", checkup.render(checkup.core(STACK, site) + modules.checks(STACK), host_of(self))))
@@ -1042,6 +1163,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.module_route("POST", self.path):
             return
+        if self.path == "/config/preview":
+            return self.send(200, config_preview(self.form(CONFIG_FORM_MAX)))
+        if self.path == "/config/import":
+            return self.send(200, config_import(self.form(CONFIG_FORM_MAX)))
         if self.path == "/setup":
             f = self.form()
             try:
