@@ -69,6 +69,12 @@ oled_glass_h = 1.8;        // MEASURE: from the module board's face to the glass
 oled_depth = 6.0;          // MEASURE: from the glass front to the back of the module and its wires
 oled_pos = [0, 0];         // offset of the module from its default place (toward the USB-C end, centred across)
 
+/* [Wake button in the top, in front of the OLED: a panel-mount momentary button on the carrier's BTN header] */
+wake = true;
+wake_d = 12.2;             // hole for a 12 mm panel-mount button (16.2 for a 16 mm one)
+wake_depth = 18.0;         // MEASURE: the button's body and lugs below the top (preview only; about 21 mm is free there)
+wake_dy = 0;               // offset from its default place (centred under the OLED window, toward the front)
+
 /* [Box] */
 wall = 2.4;                // 3 perimeters at 0.4 mm nozzle x 2
 floor_t = 2.0;
@@ -112,6 +118,8 @@ btn_xb = esp_x0 + btn_x;
 btn_zb = esp_z + btn_z;
 jack_top = esp_z + pcb_t + rj45_h + 0.4;
 oled_c = [out_l - wall - 4 - oled_pcb[0] / 2 + oled_pos[0], out_w / 2 + oled_pos[1]];
+// between the front wall and the OLED module's board, 2 mm clear of the module
+wake_c = [oled_c[0], (wall + oled_c[1] - oled_pcb[1] / 2) / 2 + wake_dy];
 ears = [for (x = [ear_x, out_l - ear_x], s = [-1, 1]) [x, s]];   // s = -1: front wall, +1: back wall
 
 module rbox(l, w, h, r) {
@@ -185,6 +193,12 @@ module shell() {
                 translate([c[0] - oled_view[0] / 2 - top_t / 2 - 0.5, c[1] - oled_view[1] / 2 - top_t / 2 - 0.5, out_h + 0.01])
                     cube([oled_view[0] + top_t + 1, oled_view[1] + top_t + 1, 0.01]);
             }
+        }
+        // wake button, labelled on the top
+        if (wake) {
+            translate([wake_c[0], wake_c[1], out_h - top_t - 1]) cylinder(d = wake_d, h = top_t + 2);
+            translate([wake_c[0] - wake_d / 2 - 2, wake_c[1], out_h - 0.6])
+                linear_extrude(1) text("WAKE", size = 3.5, halign = "right", valign = "center");
         }
         // labels
         engrave("RESET", btn_xb, 0, split + 3.5, "front", 2.8);    // on the cover, above the hole in the base
@@ -263,6 +277,9 @@ module boards_ghost() {
             translate([poe_x, poe_y, sock_h + pcb_t]) cube([poe_l, poe_w, poe_top]);                      // PoE module
             for (y = [-1, board_w - 0.5]) translate([btn_x - 2, y, sock_h + btn_z - 1.5]) cube([4, 1.5, 3]); // buttons
         }
+        if (wake) translate([wake_c[0], wake_c[1], out_h - top_t - wake_depth]) cylinder(d = wake_d - 0.4, h = wake_depth);
+        if (oled) translate([oled_c[0] - oled_pcb[0] / 2, oled_c[1] - oled_pcb[1] / 2, out_h - top_t - oled_depth])
+            cube([oled_pcb[0], oled_pcb[1], oled_depth]);                                               // OLED module
     }
 }
 

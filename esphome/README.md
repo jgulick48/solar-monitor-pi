@@ -16,7 +16,7 @@ reads the readings from Home Assistant. The wiki's *Boiler, propane and notifica
 | PoE switch port or injector | 802.3af |
 | 3 to 8 × DS18B20 waterproof probes | Stainless sleeve with **silicone** cable (rated to about 125 °C); 6 mm sleeves fit most wells |
 | 10 × 3-pin 5.08 mm pluggable terminal blocks | 8 probe ports, HEAT and CT (e.g. uxcell's sets) |
-| Optional: 0.96" SSD1306 I²C OLED module and a push button | The display in the lid, and the button that wakes it |
+| Optional: 0.96" SSD1306 I²C OLED module and a 12 mm panel-mount momentary button | The display in the top, and the WAKE button beside it |
 | Optional: 2 × SCT-013 current clamps (1 V output) | Boiler and floor pump current; the bias parts are on the carrier |
 | Thermal paste, pipe clamps, pipe insulation | For the pipe-mounted probes |
 

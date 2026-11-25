@@ -14,9 +14,9 @@ It's in **two parts, split at the top of the port windows**, so the carrier drop
 
 ![Base and cover, front](images/both-front.png)
 
-| Back: P5–P8, BOOT | USB-C end: HEAT, USB, CT1 · B · CT2 | Base, front | Base from above | Base, RJ45 end | Base, USB-C end | Cover: inside | Cover: outside |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| ![](images/both-back.png) | ![](images/both-usb.png) | ![](images/base-front.png) | ![](images/base-top.png) | ![](images/base-rj45-face.png) | ![](images/base-usb.png) | ![](images/cover-inside.png) | ![](images/cover-outside.png) |
+| Top: OLED, WAKE button | Back: P5–P8, BOOT | USB-C end: HEAT, USB, CT1 · B · CT2 | Base, front | Base from above | Base, RJ45 end | Base, USB-C end | Cover: inside | Cover: outside |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ![](images/both-top.png) | ![](images/both-back.png) | ![](images/both-usb.png) | ![](images/base-front.png) | ![](images/base-top.png) | ![](images/base-rj45-face.png) | ![](images/base-usb.png) | ![](images/cover-inside.png) | ![](images/cover-outside.png) |
 
 In the box images the boards show see-through: the carrier, its port blocks, the sockets, the ESP board, its jacks,
 buttons and the PoE module. They're in OpenSCAD's preview only, never in the STL, to check that nothing is in the way.
@@ -41,6 +41,10 @@ buttons and the PoE module. They're in OpenSCAD's preview only, never in the STL
 - **OLED:** a 0.96" SSD1306 module screws to four posts under the top, its glass behind a chamfered window, toward the
   USB-C end. A short 4-wire lead goes to the carrier's OLED header (GND, VCC, SCL, SDA). Set `oled = false` to leave it
   out (the box is then 6 mm lower).
+- **Wake button:** a 12.2 mm hole in the top, in front of the OLED window, labelled WAKE, for a 12 mm panel-mount
+  momentary button held by its nut (`wake_d = 16.2` for a 16 mm one). Below it there's about 21 mm free above the
+  HEAT block and port P4 for its body and lugs. Two wires go to the carrier's BTN header (GPIO47 and GND); pressing it
+  turns the OLED on for 5 minutes.
 
 The ESP board's sizes come from Waveshare's outline drawing (`ESP32-P4-ETH.zip` on their wiki): 78 × 21 mm, RJ45
 16 × 13.3 mm and 0.8 mm past the edge, USB-C 9 × 3.2 mm, BOOT and RESET 18 mm from the RJ45 end. The photo
@@ -68,7 +72,7 @@ The ESP board's sizes come from Waveshare's outline drawing (`ESP32-P4-ETH.zip` 
 - 0.2 mm layers, 3 perimeters, 20% infill, no supports.
 - Base: open side up. Cover: top face down (`cover.stl` is already turned over).
 - Hardware: 4 × M3 × 6 self-tapping screws for the carrier, 4 × M3 × 12 self-tapping screws to join base and cover,
-  4 × M2 × 4 self-tapping screws for the OLED, and 2 × 4 mm screws through the tabs.
+  4 × M2 × 4 self-tapping screws for the OLED, a 12 mm panel-mount momentary push button (normally open), and 2 × 4 mm screws through the tabs.
 - A cheap fit check first: print only the RJ45 end of the base (cut the STL in the slicer about 25 mm from that end).
 
 ## Rendering
