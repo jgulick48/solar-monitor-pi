@@ -120,7 +120,11 @@ def form_section(stack):
     fuels = "".join(f"<option value='{v}'{' selected' if site.get('generator_fuel') == v else ''}>{v.title()}</option>" for v in FUELS)
     return f"""<fieldset id="generator"><legend>Generator</legend><label>How is the generator started? <select name="generator">{modes}</select></label>
 <div class="row"><label>Generator size in kW (optional) <input name='generator_kw' type='text' value='{html.escape(str(site.get('generator_kw', '')))}' inputmode='decimal'></label>
-<label>Fuel <select name="generator_fuel">{fuels}</select></label></div></fieldset>"""
+<label>Fuel <select name="generator_fuel">{fuels}</select></label></div>
+<label>Chargeverter (or other DC charger) set to, in amps (optional)
+<input name='charger_amps' type='text' value='{html.escape(str(site.get('charger_amps', '')))}' inputmode='decimal' placeholder='e.g. 40'></label>
+<small>The current it's set to charge the battery at. With it, the advice to start the generator also says how long to
+run it: the kWh needed divided by the charger's power (amps &times; the battery's voltage).</small></fieldset>"""
 
 
 def _kw(form):
@@ -136,15 +140,29 @@ def _kw(form):
     return str(x)
 
 
+def _amps(form):
+    v = form.get("charger_amps", "").strip().upper().rstrip("A").strip()
+    if not v:
+        return ""
+    try:
+        x = float(v)
+    except ValueError:
+        raise FieldError("charger_amps", f"Charger current: '{form.get('charger_amps')}' is not a number of amps")
+    if not 1 <= x <= 300:
+        raise FieldError("charger_amps", "Charger current must be between 1 and 300 A")
+    return f"{x:g}"
+
+
 def form_check(stack, form):
     _kw(form)
+    _amps(form)
 
 
 def form_save(stack, form):
     import modules
     mode = form.get("generator") if form.get("generator") in dict(MODES) else "manual"
     modules.save(stack, "generator", {"mode": mode})
-    _set_site(stack, generator=mode, generator_kw=_kw(form),
+    _set_site(stack, generator=mode, generator_kw=_kw(form), charger_amps=_amps(form),
               generator_fuel=form.get("generator_fuel") if form.get("generator_fuel") in FUELS else "gasoline")
     return []
 

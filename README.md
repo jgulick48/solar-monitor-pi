@@ -253,6 +253,13 @@ generator"). Its section says how it is started (by hand or auto-start from the 
 start-the-generator advice on the wall display is for a generator started by hand. Turning it off is what "No generator"
 was: no generator tile or advice, no log or reminders.
 
+With a **Chargeverter** (or another DC charger), enter the current it's set to (for example 40 A). The advice then also
+says how long to run the generator: "About 4.2 kWh more is needed. Run it about 2 h with the charger at 40 A (2.1 kW)."
+That's the kWh needed divided by the charger's power, its amps times the battery's voltage, rounded up to 15 minutes.
+The voltage is the battery's resting voltage, or 51.2 V when the inverters don't report it, so the estimate errs on the
+long side. With the generator's size entered too, it warns when the charger is set to draw more than the generator
+can give. Home Assistant gets the run time as the `advice_run_hours` attribute of *Site generator advice*.
+
 The box finds every generator run in the inverter history, a minute at a time, two ways:
 
 - **On the inverters' GEN input** (usually auto-started by the dry contact): generator input power above 200 W.

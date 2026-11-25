@@ -246,7 +246,7 @@ rest:
         # none (no hand-started generator), info (daytime), ok or warn
         value_template: "{{ value_json.advice }}"
         icon: mdi:engine
-        json_attributes: [advice_text, advice_need_kwh, advice_empty_at, sunset, generator_mode]
+        json_attributes: [advice_text, advice_need_kwh, advice_run_hours, advice_empty_at, sunset, generator_mode]
       - name: Site daily summary
         unique_id: site_daily_summary
         # the day it covers; the message is in the attributes
