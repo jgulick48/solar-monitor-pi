@@ -44,6 +44,7 @@ REPEAT_S = 4 * 3600
 DEDUPE_S = 1800
 LOG_MAX = 100
 TOPIC_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+IMAGE_RE = re.compile(r"^/local/snap/[A-Za-z0-9_-]{16,64}\.jpg$")
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 DEFAULTS = {"ha_app": True, "phones": "all", "ntfy": False, "ntfy_box": False, "ntfy_server": "https://ntfy.sh",
             "ntfy_topic": "", "ntfy_token": "", "wall": True, "quiet_from": "22:00", "quiet_to": "07:00"}
@@ -182,6 +183,8 @@ def clean(alert):
     out = {"tag": tag, "title": " ".join(str(alert.get("title") or "").split())[:120],
            "message": str(alert.get("message") or "").strip()[:2000]}
     out["priority"] = priority_of({**alert, "tag": tag})
+    if IMAGE_RE.match(str(alert.get("image") or "")):       # a camera's picture (cameras.py), served by Home Assistant
+        out["image"] = alert["image"]
     return out
 
 
@@ -246,7 +249,7 @@ def due(stack, s, now=None, voice_on=False, deliver=None):
         _save_state(stack, st)
     msgs = []
     for a, why in out:
-        a = {k: a[k] for k in ("tag", "title", "message", "priority")}
+        a = {k: a[k] for k in ("tag", "title", "message", "priority", "image") if k in a}
         res = deliver(stack, s, a, channels_for(stack, s, a["priority"], voice_on))
         _log(stack, {"at": now, **a, "result": {**(res or {"-": "no channel is set up"}), "why": why}})
         msgs.append(f"{a['title'] or a['tag']}: {why}")
@@ -278,6 +281,19 @@ def alert(stack, tag, title, message, priority="warning"):
         return str(getattr(e, "reason", e))
 
 
+def public_image(stack, a):
+    """The alert's picture as a link the ntfy app can fetch from anywhere: Home Assistant's public address (remote
+    access) + its /local path. "" without a picture or without a public address."""
+    if not a.get("image"):
+        return ""
+    try:
+        import modules
+        base = str(modules.ha_core(stack).get("external_url") or "")
+    except Exception:  # noqa: BLE001 - the alert goes without its picture
+        return ""
+    return base.rstrip("/") + a["image"] if base.startswith("https://") else ""
+
+
 def box_token(stack):
     """The token Home Assistant sends with each alert to /notify/send."""
     return ss.secret(stack, "notify_token", lambda: secrets.token_urlsafe(24))
@@ -298,6 +314,8 @@ def ha_data(a):
         d.update({"ttl": 0, "priority": "high"})
     if a["priority"] == "critical":
         d["push"] = {"interruption-level": "time-sensitive"}
+    if a.get("image"):                       # the app fetches it from Home Assistant (at home or remotely)
+        d["image"] = a["image"]
     return d
 
 
@@ -320,6 +338,9 @@ def send(stack, s, a, channels):
                 server, topic, token = target
                 body = {"topic": topic, "title": a["title"] or "Solar monitor", "message": a["message"],
                         "priority": NTFY_PRIORITY[a["priority"]], "tags": [a["tag"]]}
+                pic = public_image(stack, a)
+                if pic:                      # the ntfy app shows it as a preview, fetched from Home Assistant
+                    body.update(attach=pic, filename="camera.jpg")
                 hdr = {"Authorization": f"Bearer {token}"} if token else {}
                 _post(server.rstrip("/"), body, hdr)
                 res[ch] = "sent"

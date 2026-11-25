@@ -12,6 +12,7 @@ import time
 import urllib.parse
 
 import cameras as engine  # setup/cameras.py
+import notify
 import protect
 import solar_setup as ss
 import tts
@@ -78,6 +79,10 @@ def form_section(stack):
 <label><input type="checkbox" name="doorbell_always" value="1"{' checked' if dsp.get('doorbell_always', True) else ''}> The doorbell always rings (not held back by these limits)</label>
 <small>Limits the sounds and announcements only; the camera still comes to the front of the screen.</small>
 {_wording(stack, dsp)}
+<p style="margin-top:16px"><b>Phone notifications with the camera's picture</b> <small style="display:inline">through the notifications module (its phones and quiet hours), when a UniFi Protect camera on the screen's list sees:</small></p>
+<div class="row">{''.join(f"<label><input type='checkbox' name='notify_{k}' value='1'{' checked' if (dsp.get('notify') or {}).get(k) else ''}> {t}</label>" for k, t, _ in engine.NOTIFY_KINDS)}
+<label>The same camera and kind at most every <select name="notify_cooldown">{''.join(f"<option value='{v}'{' selected' if dsp.get('notify_cooldown', 300) == v else ''}>{t}</option>" for v, t in engine.NOTIFY_COOLDOWNS)}</select></label></div>
+<small>The picture shows in the Home Assistant app, and in ntfy while remote access is on (ntfy fetches it from Home Assistant's public address). During quiet hours they wait until morning.</small>
 <p><small>Two cameras at a time are shown next to the power figures, taking turns every 15 seconds. To add one by its stream link instead, in UniFi Protect: open the camera &rarr; Settings &rarr; Advanced &rarr;
 RTSPS, turn on <b>Medium</b> quality and copy its link (<code>rtsps://...:7441/...</code>). The camera pictures are only shown on the
 box's own screen, not to other computers on the network.</small></p>{cams}
@@ -110,6 +115,8 @@ def form_save(stack, form):
          "sound_cooldown": num("sound_cooldown", dict(engine.COOLDOWNS), 60),
          "sound_gap": num("sound_gap", dict(engine.GAPS), 5),
          "doorbell_always": form.get("doorbell_always") == "1",
+         "notify": {k: form.get(f"notify_{k}") == "1" for k, _, _ in engine.NOTIFY_KINDS},
+         "notify_cooldown": num("notify_cooldown", dict(engine.NOTIFY_COOLDOWNS), 300),
          # the wording for voice announcements: only on the page while voice is on; kept otherwise
          "speak_template": (form.get("speak_template") or cur.get("speak_template") or tts.DEFAULT_TEMPLATE).strip()[:120],
          "speak_doorbell": (form.get("speak_doorbell") or cur.get("speak_doorbell") or tts.DEFAULT_DOORBELL).strip()[:120]}
@@ -215,6 +222,24 @@ def _protect(stack, action, f):
     return "; ".join(msgs) + "."
 
 
+def watch_events(stack):
+    """Phone notifications for doorbell rings and people (once per process): each Protect event goes to
+    cameras.notify_event in its own thread, and from there to the notifications module while that is on."""
+    if getattr(watch_events, "on", False):
+        return
+    watch_events.on = True
+
+    def submit(alert):
+        import modules
+        from modules import notifications
+        if modules.load(stack, "notifications")["enabled"]:
+            notify.submit(stack, notifications.settings(stack), alert, voice_on=False)
+
+    def on_event(device, label, at):
+        threading.Thread(target=lambda: engine.notify_event(stack, device, label, at, submit), daemon=True).start()
+    protect.EVENTS.listeners.append(on_event)
+
+
 def _protect_route(action):
     return lambda stack, form: Response(setup_msg=_protect(stack, action, form))
 
@@ -239,6 +264,7 @@ def on_enable(stack):
     import display
     display.save(stack, display.load(stack))           # go2rtc's config
     _compose(stack, "up", "-d", "go2rtc")
+    watch_events(stack)
     protect.listen(stack)
 
 

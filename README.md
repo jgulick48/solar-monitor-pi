@@ -150,6 +150,14 @@ the front of the screen with an amber frame and a label, and a **doorbell ring**
 the event ends. Plain motion does the same only if *Also bring cameras to the front for plain motion* is ticked. The
 key is kept in `state/protect.json` (mode 600); the console's self-signed certificate isn't checked.
 
+**Phone notifications with the picture** (off until chosen): setup page, *Cameras*: tick *Doorbell* and/or *Person*.
+When a UniFi Protect camera on the screen's list rings or sees a person, the box fetches the camera's picture from
+the console and sends it through the notifications module: to its phones, with its quiet hours (a person waits
+until morning; so does the doorbell, as a warning). The same camera and kind is sent at most every 5 minutes (a
+choice from 1 minute to 1 hour). The picture shows in the Home Assistant app, at home and remotely. ntfy shows it as a
+preview while remote access is on: the push carries a link to the picture on Home Assistant's public address. Pictures are kept for 2 days in `homeassistant/www/snap` under names that can't be guessed: Home
+Assistant serves that folder without a login, which is what lets the app show them.
+
 **By stream link** (any RTSP/RTSPS H.264 camera, no events): setup page, *Cameras*: name each camera and
 paste its stream link. A camera added this way and later picked from UniFi Protect is dropped from the manual list
 (same stream token or name), and the screen never shows the same camera in both places. In UniFi Protect: open the camera

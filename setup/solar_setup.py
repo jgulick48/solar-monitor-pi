@@ -650,6 +650,10 @@ def sync_homeassistant(stack):
         if os.path.exists(src):
             with open(src) as f:
                 changed |= write_if_changed(os.path.join(stack, "homeassistant", rel), f.read(), 0o644)
+    www = os.path.join(stack, "homeassistant", "www")
+    if not os.path.isdir(www):   # camera pictures for notifications (/local/snap): Home Assistant only serves
+        os.makedirs(os.path.join(www, "snap"), exist_ok=True)    # /local if the folder was there when it started
+        changed = True
     import hadashboard   # the Home dashboard: Home Assistant re-reads it when it's opened, so it doesn't count here
     hadashboard.write(stack)
     return changed

@@ -51,6 +51,8 @@ DEFAULTS = {"enabled": True, "off_from": "", "off_to": "", "cameras": [],
             # how often sounds may play: the same alert (camera + kind) is repeated at most every sound_cooldown s,
             # and two sounds are at least sound_gap s apart; doorbell rings always (the highlight isn't limited)
             "sound_cooldown": 60, "sound_gap": 5, "doorbell_always": True,
+            # phone notifications with the camera's picture (cameras.py): off until chosen
+            "notify": {"doorbell": False, "person": False}, "notify_cooldown": 300,
             "speak_template": "{object} at the {camera}", "speak_doorbell": "Someone's at the {camera}",
             # the main panel: "solar" or a module with a display panel (its tiles on top); the others rotate in the
             # chart's place every panel_s seconds

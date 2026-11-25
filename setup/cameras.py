@@ -4,12 +4,14 @@ and the hourly upkeep (Protect's changing stream links, each camera's codec). Th
 (setup/modules/cameras) is its setup page and switch.
 
 The camera settings stay in state/display.json (the screen reads them): "cameras" [{name, url, protect_id?, ...}],
-"sounds", "sound_cooldown", "sound_gap", "doorbell_always" and the voice wording "speak_template"/"speak_doorbell".
+"sounds", "sound_cooldown", "sound_gap", "doorbell_always", the phone notifications "notify" / "notify_cooldown" and
+the voice wording "speak_template"/"speak_doorbell".
 go2rtc (compose service "go2rtc", profile "cameras") turns the cameras' RTSP(S) streams into MSE for the kiosk; it
 listens on 127.0.0.1 only.
 """
 import json
 import os
+import secrets
 import subprocess
 import threading
 import time
@@ -23,6 +25,12 @@ COOLDOWNS = [(0, "every time"), (30, "30 seconds"), (60, "1 minute"), (120, "2 m
 GAPS = [(0, "no limit"), (5, "5 seconds"), (10, "10 seconds"), (30, "30 seconds"), (60, "1 minute")]
 SOUND_KINDS = [("doorbell", "Doorbell", True), ("person", "Person", True), ("vehicle", "Vehicle", False),
                ("animal", "Animal", False), ("package", "Package", False)]
+# Phone notifications with the camera's picture (off until chosen): the kinds, and their priority in the
+# notifications module (a person waits for the end of quiet hours; the doorbell too, unless quiet hours are off)
+NOTIFY_KINDS = [("doorbell", "Doorbell", "warning"), ("person", "Person", "info")]
+NOTIFY_COOLDOWNS = [(60, "1 minute"), (300, "5 minutes"), (600, "10 minutes"), (1800, "30 minutes"), (3600, "1 hour")]
+SNAP_KEEP_S = 48 * 3600   # pictures are kept this long (a notification held over quiet hours still shows its own)
+SNAP_MAX = 200
 MAX_CAMERAS = 16   # all of them rotate through the two places on screen
 
 
@@ -193,3 +201,79 @@ def refresh(stack, check=True):
         except OSError as e:
             msgs.append(f"camera check failed: {e}")
     return msgs
+
+
+# --------------------------------------------------------------------------
+# Phone notifications with the camera's picture
+# --------------------------------------------------------------------------
+def snap_dir(stack):
+    """Home Assistant serves homeassistant/www as /local (without a login: the file names can't be guessed)."""
+    return os.path.join(stack, "homeassistant", "www", "snap")
+
+
+def save_snapshot(stack, jpeg, now=None):
+    """Keep a picture for a notification; returns its path for the Home Assistant app ("/local/snap/<random>.jpg").
+    Old pictures are removed."""
+    now = now or time.time()
+    d = snap_dir(stack)
+    os.makedirs(d, exist_ok=True)
+    files = sorted((os.path.getmtime(os.path.join(d, f)), f) for f in os.listdir(d) if f.endswith(".jpg"))
+    for i, (t, f) in enumerate(files):
+        if now - t > SNAP_KEEP_S or i < len(files) - SNAP_MAX + 1:
+            try:
+                os.remove(os.path.join(d, f))
+            except OSError:
+                pass
+    name = secrets.token_urlsafe(24) + ".jpg"
+    with open(os.path.join(d, name), "wb") as f:
+        f.write(jpeg)
+    os.chmod(os.path.join(d, name), 0o644)
+    return f"/local/snap/{name}"
+
+
+_last_notified = {}     # (camera id, kind) -> time
+_notify_lock = threading.Lock()
+
+
+def event_alert(stack, device, label, at, now=None):
+    """The alert for a Protect event, or None: the kind isn't chosen, the camera isn't on the display's list, or the
+    same camera and kind was notified within the cooldown. {"tag", "title", "message", "priority", "protect_id"}."""
+    now = now or time.time()
+    d = _cameras(stack)
+    kind = label.lower()
+    prio = {k: p for k, _, p in NOTIFY_KINDS}.get(kind)
+    if not prio or not (d.get("notify") or {}).get(kind):
+        return None
+    for i, c in enumerate(d["cameras"], 1):
+        if c.get("protect_id") == device:
+            break
+    else:
+        return None
+    with _notify_lock:
+        if now - _last_notified.get((device, kind), 0) < int(d.get("notify_cooldown", 300)):
+            return None
+        _last_notified[(device, kind)] = now
+    name = c.get("name") or f"Camera {i}"
+    import datetime as dt
+    import display
+    when = display.hm(dt.datetime.fromtimestamp(at), ss.load_json(os.path.join(stack, "state", "site.json"), {}))
+    return {"tag": f"camera_{i}", "priority": prio, "protect_id": device,
+            "title": f"Doorbell: {name}" if kind == "doorbell" else f"Person at the {name}",
+            "message": f"{'Someone rang the doorbell' if kind == 'doorbell' else 'A person was seen'} at {when}."}
+
+
+def notify_event(stack, device, label, at, submit, fetch=None):
+    """A Protect event (protect.EVENTS listener): if it is to be notified, fetch the camera's picture and hand the
+    alert to submit(alert). Without a picture (the console didn't give one) the text still goes."""
+    import protect
+    a = event_alert(stack, device, label, at)
+    if not a:
+        return None
+    p = protect.settings(stack)
+    try:
+        jpeg = (fetch or protect.snapshot)(p["host"], p["api_key"], a.pop("protect_id"))
+        a["image"] = save_snapshot(stack, jpeg)
+    except (protect.ProtectError, OSError):
+        a.pop("protect_id", None)
+    submit(a)
+    return a
