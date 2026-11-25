@@ -220,6 +220,13 @@ rest:
         state_class: measurement
         icon: mdi:solar-power
         json_attributes: [spare_until, spare_text, spare_notify]
+      - name: Site outlook
+        unique_id: site_outlook
+        # the next 5 days, forecast solar against the expected use: ok, dull (the generator will be needed) or
+        # storm (a weather warning is out). outlook_days has each day's solar and use, for a card of your own.
+        value_template: "{{ value_json.outlook | default('none') }}"
+        icon: mdi:weather-cloudy-clock
+        json_attributes: [outlook_text, outlook_dull_days, outlook_generator_kwh, outlook_generator_hours, outlook_checklist, outlook_days]
       - name: Site expected use tomorrow
         unique_id: site_expected_use_tomorrow
         # from the week's pattern of use where it predicts better than the 3-day average ("method" says which)
@@ -820,6 +827,41 @@ automation:
           priority: info
           title: Solar power to spare
           message: "{{ state_attr('sensor.site_spare_power', 'spare_text') }}"
+
+  # The next 5 days: a dull spell the generator will have to cover, or a storm warning. Said when it first shows
+  # (after holding for 30 minutes), and at most once in 20 hours.
+  - id: solar_outlook
+    alias: "Solar: outlook"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: sensor.site_outlook
+        to: [dull, storm]
+        for: "00:30:00"
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ this.attributes.last_triggered is none
+             or (now() - this.attributes.last_triggered).total_seconds() > 72000 }}
+    actions:
+      - action: script.solar_notify
+        data:
+          tag: outlook
+          priority: info
+          title: "{{ 'Storm warning' if is_state('sensor.site_outlook', 'storm') else 'Dull days ahead' }}"
+          message: "{{ state_attr('sensor.site_outlook', 'outlook_text') }}"
+  - id: solar_outlook_clear
+    alias: "Solar: outlook cleared"
+    triggers:
+      - trigger: state
+        entity_id: sensor.site_outlook
+        to: ok
+        for: "01:00:00"
+    actions:
+      - action: script.solar_notify
+        data:
+          tag: outlook
+          message: clear
 
   # While it runs, the box works out when the battery has enough to last until the sun is back: say so, once.
   - id: solar_generator_can_stop

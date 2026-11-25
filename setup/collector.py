@@ -16,7 +16,7 @@
     reports the mean of the preceding hour). This sends the site's location to
     Open-Meteo (open-meteo.com, free API, no key).
   * From the same requests, the solar forecast: expected output per hour for
-    today and the next two days in state/forecast.json, scaled by the
+    today and the next five days in state/forecast.json, scaled by the
     advisor's calibration against Open-Meteo (actual output / irradiance model)
     when it has one. Open-Meteo is always the forecast, also with a weather
     station: a station only has the present.
@@ -111,7 +111,7 @@ def open_meteo_fetch(stack, past_days):
             "hourly": "global_tilted_irradiance,temperature_2m",
             "tilt": a["tilt"],
             "azimuth": (int(a["azimuth"]) - 180 + 540) % 360 - 180,  # Open-Meteo: 0 = south, -90 = east, 90 = west
-            "past_days": past_days, "forecast_days": 3, "timezone": "UTC", "timeformat": "unixtime",
+            "past_days": past_days, "forecast_days": 6, "timezone": "UTC", "timeformat": "unixtime",
         }
         with urllib.request.urlopen(f"{OPEN_METEO}?{urllib.parse.urlencode(q)}", timeout=60) as r:
             d = json.loads(r.read())

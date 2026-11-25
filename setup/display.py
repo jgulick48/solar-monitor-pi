@@ -451,6 +451,103 @@ def spare_power(site, now_vals, now, tz, fc=None, load=None):
             "text": f"About {kw:g} kW of solar to spare{when} until {hm(until, site)}: a good time to run big loads."}
 
 
+OUTLOOK_DAYS = 5        # full days ahead that the outlook looks at (the solar forecast reaches that far)
+OUTLOOK_MIN_KWH = 1.0   # a shortfall smaller than this over the whole period isn't worth a line
+STORMS = ("winter storm", "blizzard", "ice storm", "snow squall", "high wind", "extreme wind", "hurricane",
+          "tropical storm", "severe thunderstorm", "tornado", "extreme cold", "cold weather", "wind chill")
+
+
+def _day_names(days, today):
+    """["Thursday to Saturday"] for a run of days, else "Thu, Sat and Mon"; tomorrow is "tomorrow"."""
+    name = lambda d, f: "tomorrow" if d == today + dt.timedelta(days=1) else d.strftime(f)  # noqa: E731
+    if len(days) > 2 and (days[-1] - days[0]).days == len(days) - 1:
+        return f"{name(days[0], '%A')} to {days[-1].strftime('%A')}"
+    names = [name(d, "%A" if len(days) <= 2 else "%a") for d in days]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def outlook(site, now_vals, now, tz, fc=None, load=None, alerts=None, propane=None):
+    """The next 5 days: forecast solar against the expected use, with the battery simulated hour by hour from its
+    level now. A day is dull when its solar is less than its use. Speaks when at least 2 of the days are dull and
+    the battery would go below the alert level (the generator has to make up the difference), or when a storm
+    warning is out.
+    {"level": "dull" | "storm", "text", "days": [{"date", "solar_kwh", "use_kwh", "dull"}], "dull_days": n,
+     "short_kwh": what the generator has to add over the period, "generator_hours" (with a charger current set),
+     "empty_at": local datetime the battery first reaches the alert level, "checklist": [..] with a storm warning}
+    or {"level": "ok", "days": [...]} with nothing to say; None without a forecast, battery size or usual use.
+    alerts: the weather alerts ([{"event", ...}], wx-alerts.json); propane: the tank's level in %."""
+    try:
+        kwh = int(site["battery_count"]) * float(site["battery_kwh_each"])
+        floor = float(site.get("low_soc_alert") or 25)
+    except (KeyError, TypeError, ValueError):
+        return None
+    soc, load_w = now_vals.get("soc"), now_vals.get("load_avg_3d") or now_vals.get("load_avg_24h")
+    load = load or (_flat(load_w) if load_w and load_w > 0 else None)
+    if not fc or soc is None or kwh <= 0 or load is None:
+        return None
+    gen = site.get("generator") or "none"
+    headroom = (100 - floor) / 100 * kwh
+    e, short, empty_at, nts = max(0.0, (soc - floor) / 100 * kwh), 0.0, None, now.timestamp()
+    per_day = {}                                     # local date -> [solar kWh, use kWh, hours]
+    last = now.date() + dt.timedelta(days=OUTLOOK_DAYS)
+    for t, kw in fc["hours"]:
+        start = dt.datetime.fromtimestamp(t - 3600, tz)
+        if t <= nts or start.date() > last:
+            continue
+        part = min(1.0, (t - nts) / 3600)            # the hour under way counts for what's left of it
+        use = load(start) * part
+        net = kw * part - use
+        e = min(e + net * (CHARGE_EFFICIENCY if net > 0 else 1.0), headroom)
+        if e < 0:                                    # below the alert level: the generator makes it up
+            empty_at = empty_at or start
+            short, e = short - e, 0.0
+        day = per_day.setdefault(start.date(), [0.0, 0.0, 0])
+        day[0], day[1], day[2] = day[0] + kw * part, day[1] + use, day[2] + 1
+    days = [{"date": d.isoformat(), "solar_kwh": round(v[0], 1), "use_kwh": round(v[1], 1), "dull": v[0] < v[1]}
+            for d, v in sorted(per_day.items()) if d > now.date() and v[2] >= 20]       # whole days only
+    if len(days) < 2:
+        return None
+    dull = [dt.date.fromisoformat(d["date"]) for d in days if d["dull"]]
+    storms = sorted({a.get("event", "") for a in alerts or [] if any(s in a.get("event", "").lower() for s in STORMS)})
+    out = {"level": "ok", "text": "", "days": days, "dull_days": len(dull), "short_kwh": round(short, 1),
+           "generator_hours": None, "empty_at": empty_at, "checklist": []}
+    parts = []
+    if len(dull) >= 2 and short >= OUTLOOK_MIN_KWH:
+        out["level"] = "dull"
+        n = len(dull) if len(dull) < len(days) else len(days)
+        head = (f"{n} dull days ahead ({_day_names(dull, now.date())})" if n == len(days) or
+                (dull[-1] - dull[0]).days == n - 1 else
+                f"{n} of the next {len(days)} days look dull ({_day_names(dull, now.date())})")
+        if gen == "none":
+            day = "today" if empty_at.date() == now.date() else "tomorrow" if empty_at.date() == now.date() + dt.timedelta(days=1) else empty_at.strftime("%A")
+            parts.append(f"{head}: at the usual use the battery reaches {floor:.0f}% {day} about "
+                         f"{hm(_quarter(empty_at), site)}. Go easy on big loads.")
+        else:
+            run = charger_run(site, short, now_vals.get("vbat"))
+            if run:
+                out["generator_hours"] = run["hours"]
+                need = f"expect about {duration(run['hours'])} of generator ({short:.0f} kWh)"
+            else:
+                need = f"expect the generator to add about {short:.0f} kWh"
+            fuel = f"; propane is at {propane:.0f}%" if propane is not None and site.get("generator_fuel") == "propane" else ""
+            parts.append(f"{head}: {need}{fuel}.")
+    if storms:
+        out["level"] = "storm"
+        todo = []
+        if gen != "none":
+            todo.append("check the generator's fuel and oil" if not (propane is not None and site.get("generator_fuel") == "propane")
+                        else f"check the generator's oil (propane is at {propane:.0f}%)")
+            if soc < 90 and gen == "manual":
+                todo.append(f"charge the battery (now {soc:.0f}%)")
+        elif soc < 90:
+            todo.append(f"save the battery (now {soc:.0f}%)")
+        todo.append("charge phones and lights")
+        out["checklist"] = todo
+        parts.append(f"{' and '.join(storms)}: before it arrives, {', '.join(todo)}.")
+    out["text"] = " ".join(parts)
+    return out
+
+
 GEN_RUNNING_W = 200     # generator power above this: it is running (as the generator log counts it)
 
 
@@ -533,6 +630,7 @@ def data(stack, site):
         f"max_over_time((max(lxp_soc))[{max(60, int((now - midnight).total_seconds()))}s])", now.timestamp()))
     high = battery_high(site, vals, now, tz, fc, so_far, load_fn)
     spare = spare_power(site, vals, now, tz, fc, load_fn)
+    look = _cached("outlook", 300, lambda: outlook(site, vals, now, tz, fc, load_fn, *_outlook_inputs(stack, site)))
     expected_tomorrow = runtime_h = None
     if load_fn:
         tomorrow = (now + dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -565,10 +663,28 @@ def data(stack, site):
         # solar beyond what the house can use or store (spare_power): shown as a note, and a Home Assistant sensor
         "spare": spare and {"kw": spare["kw"], "until": hm(spare["until"], site), "text": spare["text"],
                             "level": "ok", "now": spare["from"] is None},
+        # the next 5 days (outlook): dull spells and storm warnings, as a note and a Home Assistant sensor
+        "outlook": look and {"level": look["level"], "text": look["text"], "days": look["days"],
+                             "dull_days": look["dull_days"], "short_kwh": look["short_kwh"],
+                             "generator_hours": look["generator_hours"], "checklist": look["checklist"]},
         "weather": None, "wx_days": 7, "wx_page": 8,    # weather: the weather module (when it's on)
         "main": d.get("main", "solar"), "panel_s": d.get("panel_s", 15), "panels": _module_panels(stack, site),
         **_module_display(stack, site, now),
     }
+
+
+def _outlook_inputs(stack, site):
+    """(weather alerts, propane %) for the outlook: either may be missing (module off, no reading)."""
+    al = ss.load_json(os.path.join(stack, "state", "wx-alerts.json"), {})
+    alerts = al.get("alerts") or [] if time.time() - al.get("fetched", 0) < 3 * 3600 else []
+    propane = None
+    try:
+        import modules  # here: keeps the module light for the kiosk
+        if modules.load(stack, "propane")["enabled"]:
+            propane = modules.get("propane").ha_fields(stack, site).get("propane_level_percent")
+    except Exception:  # noqa: BLE001 - the outlook just leaves the tank out
+        pass
+    return alerts, propane
 
 
 def vm_at(q, ts):
@@ -748,6 +864,13 @@ def ha_status(stack, site):
         "spare_power": int((d.get("spare") or {}).get("kw", 0) * 1000) if (d.get("spare") or {}).get("now") else 0,
         "spare_until": (d.get("spare") or {}).get("until") or "", "spare_text": (d.get("spare") or {}).get("text") or "",
         "spare_notify": bool(site.get("spare_notify")),
+        # the next 5 days: "ok", "dull" (the generator will be needed) or "storm" (a warning is out)
+        "outlook": (d.get("outlook") or {}).get("level") or "none", "outlook_text": (d.get("outlook") or {}).get("text") or "",
+        "outlook_dull_days": (d.get("outlook") or {}).get("dull_days"),
+        "outlook_generator_kwh": (d.get("outlook") or {}).get("short_kwh"),
+        "outlook_generator_hours": (d.get("outlook") or {}).get("generator_hours"),
+        "outlook_checklist": (d.get("outlook") or {}).get("checklist") or [],
+        "outlook_days": (d.get("outlook") or {}).get("days") or [],
         "forecast_today": (d["forecast"] or {}).get("today"), "forecast_remaining": (d["forecast"] or {}).get("remaining"),
         "forecast_tomorrow": (d["forecast"] or {}).get("tomorrow"),
         "battery_high_estimate": (d.get("battery_high") or {}).get("pct"),

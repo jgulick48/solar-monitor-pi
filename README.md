@@ -89,7 +89,7 @@ With a screen on the HDMI port the Pi shows a dashboard, laid out for 1920x1080:
 ### Solar forecast
 
 `solar-collector` keeps Open-Meteo's irradiance forecast for each array (the same hourly request it already makes)
-and turns it into expected output per hour for today and the next two days (`state/forecast.json`), scaled by the
+and turns it into expected output per hour for today and the next five days (`state/forecast.json`), scaled by the
 advisor's calibration of this site's panels once it has one (0.8 of the model until then) and capped at the
 inverters' solar input. It shows on the display's solar tile, as `sensor.site_solar_forecast_today` / `_tomorrow` in
 Home Assistant, and drives the generator advice, which steps the battery through tonight and tomorrow in 15-minute
@@ -266,6 +266,16 @@ more, the wall display says "About 2 kW of solar to spare until 3:00 PM: a good 
 is what can be counted on for the next hour). Home Assistant has *Site spare power* (W, 0 when there is none), which
 an automation of your own can use to start a water heater or a charger; the box switches nothing. A phone
 notification, at most once a day, is a checkbox under *Batteries* on the setup page, off by default.
+
+**The next 5 days.** The solar forecast reaches 5 days ahead. The box sets each day's forecast against its expected
+use and follows the battery through them, hour by hour, from its level now. A day is dull when the panels will make
+less than the house uses. With at least 2 dull days and a battery that would reach the alert level, the wall display
+and Home Assistant (*Site outlook*: ok, dull or storm) say what it will take: "3 dull days ahead (Thursday to
+Saturday): expect about 9 h 30 min of generator (49 kWh); propane is at 34%". The hours need the charger's amps;
+the tank is named for a propane generator with the propane module on. Without a generator it says when the battery
+gets low. A storm warning from the weather module (National Weather Service, US) adds a short checklist. A
+notification is sent when the outlook first turns, at most once in 20 hours. The sensor's `outlook_days` attribute
+has each day's solar and use.
 
 **Expected use.** The advice, "lasts about" and the day's battery high need to know how much the house will use, and
 when. The box learns it per hour of the week from the last 8 weeks (the median, so one-off days don't count), scaled
