@@ -158,6 +158,39 @@ def dongle_drops():
     return out
 
 
+def dongles():
+    """{datalog: {"connected": bool, "age": seconds since its last data or None, "drops": drop-outs in 24 h}} from
+    the bridge's metrics, for the status page; None when VictoriaMetrics doesn't answer."""
+    import display
+    out = {}
+    try:
+        for key, q in (("connected", "lxp_bridge_connected"), ("age", "lxp_bridge_last_frame_age_s")):
+            for s in display._vm("/api/v1/query", {"query": q}):
+                out.setdefault(s["metric"].get("deploymentID") or "dongle", {})[key] = float(s["value"][1])
+    except (OSError, ValueError, KeyError):
+        return None
+    drops = dongle_drops() or {}
+    return {dl: {"connected": bool(d.get("connected")), "age": d.get("age"), "drops": drops.get(dl, 0)} for dl, d in out.items()}
+
+
+def dongle_text(d):
+    """One dongle's state in words, and whether it needs attention: ("data 4 s ago", False)."""
+    import display
+    if d is None:
+        return "", False
+    if not d["connected"]:
+        return "not connected", True
+    age = d["age"]
+    if age is None:
+        return "connected, no data yet", False
+    if age > display.QUIET_S:
+        return f"connected but silent for {age / 60:.0f} min", True
+    txt = f"data {age:.0f} s ago"
+    if d["drops"]:
+        txt += f", {d['drops']} drop-out{'s' if d['drops'] != 1 else ''} in 24 h"
+    return txt, False
+
+
 def status(stack, probe=None):
     """Everything above plus findings [(level, text)] and an overall level ok / note / warn.
     probe: overrides for tests ({'temp':..., 'throttled':..., 'disk':..., 'smart':..., 'containers':..., 'drops':...})."""

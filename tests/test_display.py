@@ -101,6 +101,41 @@ class Display(unittest.TestCase):
         self.assertEqual(display.INSTANT["online"], "sum(lxp_bridge_connected)")      # stays live: a gone dongle shows
         self.assertNotIn("last_over_time", display.INSTANT["age"])
 
+    def test_quiet_dongle_alert(self):
+        """A dongle that stays connected but stops sending (seen on site for 10 minutes) raises its own alert, which
+        "offline" (the connection count) and "no data" (all of them, 5 minutes) miss or name wrongly."""
+        self.assertIn("lxp_bridge_last_frame_age_s > 180", display.INSTANT["quiet"])
+        self.assertIn("lxp_bridge_connected == 1", display.INSTANT["quiet"])
+        self.assertNotIn("last_over_time", display.INSTANT["quiet"])                  # live, like "online"
+        vm = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FakeVM)
+        threading.Thread(target=vm.serve_forever, daemon=True).start()
+        old_vm, old_values = display.VM, dict(FakeVM.values)
+        display.VM = f"http://127.0.0.1:{vm.server_port}"
+        stack = tempfile.mkdtemp()
+        os.makedirs(os.path.join(stack, "state"))
+        with open(os.path.join(stack, "state", "inverters.json"), "w") as f:
+            json.dump({"a": {}, "b": {}}, f)
+        try:
+            def alerts(**vals):
+                FakeVM.values = {**old_values, **{display.INSTANT[k] if k in display.INSTANT else k: v for k, v in vals.items()}}
+                display._cache.clear()
+                return {a["id"]: a["text"] for a in display.data(stack, SITE)["alerts"]}
+            self.assertEqual(alerts(), {})
+            one = alerts(quiet=1)                               # one of two silent: the other keeps the data fresh
+            self.assertEqual(list(one), ["quiet"])
+            self.assertIn("An inverter dongle is connected but sending nothing", one["quiet"])
+            self.assertTrue(display.ha_status(stack, SITE)["dongle_quiet"])
+            both = alerts(quiet=2, **{"time() - max(timestamp(lxp_soc))": 400})
+            self.assertEqual(list(both), ["quiet"])             # not also the vaguer "no data"
+            self.assertIn("2 inverter dongles are", both["quiet"])
+            self.assertEqual(list(alerts(**{"time() - max(timestamp(lxp_soc))": 400})), ["stale"])
+            self.assertEqual(list(alerts(**{"sum(lxp_bridge_connected)": 1})), ["offline"])
+            self.assertFalse(display.ha_status(stack, SITE)["dongle_quiet"])
+        finally:
+            display.VM, FakeVM.values = old_vm, old_values
+            display._cache.clear()
+            vm.shutdown()
+
     def test_hhmm_and_off_hours(self):
         self.assertEqual(display.parse_hhmm("6:05"), "06:05")
         self.assertEqual(display.parse_hhmm(""), "")

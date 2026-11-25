@@ -146,6 +146,7 @@ def sun_times(lat, lon, day, tz):
 # --------------------------------------------------------------------------
 # Data for the page
 # --------------------------------------------------------------------------
+QUIET_S = 180          # a connected dongle with no data for this long is "quiet"
 INSTANT = {
     "soc": "max(lxp_soc)",
     "pv": "sum(lxp_p_pv)",
@@ -161,6 +162,9 @@ INSTANT = {
     "discharged_today": "sum(lxp_e_dischg_day)",
     "gen_today": ss.GEN_ENERGY_DAY,
     "online": "sum(lxp_bridge_connected)",
+    # dongles that are connected but have sent nothing for 3 minutes (seen on site: 10 minutes of silence with
+    # the connection up, which the "offline" count misses)
+    "quiet": f"count((lxp_bridge_last_frame_age_s > {QUIET_S}) and on (deploymentID) (lxp_bridge_connected == 1))",
     "fault": "max(lxp_fault_code)",
     "bms_fault": "max(lxp_fault_code_bms)",
     "warning": "max(lxp_warning_code)",
@@ -171,7 +175,7 @@ INSTANT = {
 RANGE = {"pv": "sum(lxp_p_pv)", "load": "sum(lxp_p_load) or sum(lxp_p_eps)", "soc": "max(lxp_soc)"}
 # a dongle dropping off for a moment doesn't make the totals dip (solar_setup.hold); the connection count and the
 # data age stay live, so a dongle that's gone still shows as gone
-INSTANT = {k: (q if k in ("online", "age") else ss.hold(q)) for k, q in INSTANT.items()}
+INSTANT = {k: (q if k in ("online", "age", "quiet") else ss.hold(q)) for k, q in INSTANT.items()}
 RANGE = {k: ss.hold(q) for k, q in RANGE.items()}
 _cache = {}
 _cache_lock = threading.Lock()
@@ -388,9 +392,15 @@ def data(stack, site):
     d = load(stack)
     alerts = []
     expected = len(ss.load_json(os.path.join(stack, "state", "inverters.json"), {}))
-    if vals.get("age") is None or vals["age"] > 300:
+    quiet = int(vals.get("quiet") or 0)
+    if quiet:
+        # more exact than "no data": the network is fine, the dongle itself has stopped answering
+        alerts.append({"id": "quiet", "level": "warn", "text": (
+            ("An inverter dongle is" if quiet == 1 else f"{quiet} inverter dongles are") + " connected but sending "
+            "nothing: if it stays that way, unplug the dongle and plug it back in.")})
+    elif vals.get("age") is None or vals["age"] > 300:
         alerts.append({"id": "stale", "level": "warn", "text": "No inverter data for over 5 minutes: check the dongles' network."})
-    elif expected and (vals.get("online") or 0) < expected:
+    if expected and (vals.get("online") or 0) < expected and (vals.get("age") is not None and vals["age"] <= 300 or quiet):
         alerts.append({"id": "offline", "level": "warn", "text": f"{int(vals.get('online') or 0)} of {expected} inverter dongles connected."})
     if vals.get("fault"):
         alerts.append({"id": "fault", "level": "warn", "text": f"Inverter fault code {int(vals['fault'])}."})
@@ -592,7 +602,7 @@ def ha_status(stack, site):
         "dongles_connected": _r(v.get("online")), "dongles_expected": d["expected"],
         "fault_code": _r(v.get("fault")) or 0, "warning_code": _r(v.get("warning")) or 0,
         "data_age": _r(v.get("age")),
-        "data_stale": "stale" in ids, "dongle_offline": "offline" in ids, "inverter_fault": "fault" in ids,
+        "data_stale": "stale" in ids, "dongle_quiet": "quiet" in ids, "dongle_offline": "offline" in ids, "inverter_fault": "fault" in ids,
         "battery_low": "low_battery" in ids,
         "alerts": [a["text"] for a in d["alerts"]],
         "generator_mode": site.get("generator") or "none",

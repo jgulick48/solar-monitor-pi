@@ -500,15 +500,21 @@ def status_page(handler):
     sec = ss.load_json(path("state", "secrets.json"), {})
     upd = update_settings()
     ust = ss.load_json(path("state", "update-status.json"), {})
+    live = boxhealth.cached("dongles", 20, boxhealth.dongles) or {}
+
+    def live_cell(dl):
+        txt, bad = boxhealth.dongle_text(live.get(dl))
+        return f"<b class='err'>{html.escape(txt)}</b>" if bad else html.escape(txt)
     rows = "".join(
         f"<tr><td>{html.escape(dl)}</td><td>{html.escape(i.get('serial') or 'not seen yet')}</td>"
         f"<td>{html.escape(i.get('host', ''))}</td><td>{html.escape(i.get('last_seen', ''))}</td>"
+        f"<td>{live_cell(dl)}</td>"
         f"<td>{'yes' if i.get('present') else '<b>not found in last scan</b>'}"
         + ("" if i.get("present") else
            f"<form method='post' action='/inverter/forget' style='display:inline;margin-left:8px'><input type='hidden' name='datalog' value='{html.escape(dl)}'>"
            f"<button title='Remove this dongle from the monitor and Home Assistant (if it comes back, the next scan finds it again)'>Forget</button></form>")
         + "</td></tr>" for dl, i in sorted(inv.items()))
-    rows = rows or "<tr><td colspan=5>No dongles found yet. They're scanned for every hour, or press <i>Scan now</i>.</td></tr>"
+    rows = rows or "<tr><td colspan=6>No dongles found yet. They're scanned for every hour, or press <i>Scan now</i>.</td></tr>"
     banner = "" if site["_configured"] else (
         "<div class='card warn'><b>Finish setup:</b> enter the site's location, batteries and panels on the "
         "<a href='/setup'>setup page</a> so the forecast, dashboards and alerts are right.</div>")
@@ -563,7 +569,7 @@ def status_page(handler):
 <form method="post" action="/weather/scan" style="margin-top:8px"><button>Scan for weather stations</button>
 <small>Looks for Ecowitt gateways and WeatherFlow Tempest hubs (about a minute).</small></form>{scan_rows}</div>
 <h2>Inverter dongles</h2>
-<table><tr><th>Datalog</th><th>Inverter serial</th><th>IP address</th><th>Last seen</th><th>Present</th></tr>{rows}</table>
+<table><tr><th>Datalog</th><th>Inverter serial</th><th>IP address</th><th>Last seen</th><th>Data</th><th>Present</th></tr>{rows}</table>
 <form method="post" action="/rescan"><p><button>Scan now</button> <small>Last scan: {html.escape(scan.get('last_scan', 'never'))}.
 Scanning takes up to two minutes. Give each dongle a fixed IP (DHCP reservation) in the router if you can.</small></p></form>
 <p><small>The monitor only reads from the inverters; it never changes their settings.</small></p>"""
