@@ -6,16 +6,16 @@ plugged into it (`../boiler-probes.yaml`). Outside: 105.4 × 65.4 × 45.2 mm, pl
 
 It's in **two parts, split at the top of the port windows**, so the carrier drops into the base with its plugs:
 
-- **`base.stl`:** floor, standoffs and the lower walls. The port windows, the RJ45 slot, the CT and HEAT windows and
+- **`base.stl`:** floor, standoffs and the lower walls. The port windows, the RJ45 slot, the HEAT window and
   the lower half of the USB tunnel are slots open at the top.
 - **`cover.stl`:** the upper walls and the top in one piece, with the OLED window, vents and labels. Its lower edge
   closes the slots; the RJ45 passes through a U open at its bottom edge.
 - Four **ears** outside the front and back walls, at the split, hold them together with M3 screws from the top.
-- **`cover-text.stl`:** the cover's lettering on its own, for a second colour (see *Printing*).
+- **`base-text.stl`, `cover-text.stl`:** each part's lettering on its own, for a second colour (see *Printing*).
 
 ![Base and cover, front](images/both-front.png)
 
-| Top: OLED, WAKE button | Back: P5–P8, BOOT | USB-C end: HEAT, USB, CT1 · B · CT2 | Base, front | Base from above | Base, RJ45 end | Base, USB-C end | Cover: inside | Cover: outside |
+| Top: OLED, WAKE button | Back: P5–P8, BOOT | USB-C end: HEAT, USB, CT1, CT2 | Base, front | Base from above | Base, RJ45 end | Base, USB-C end | Cover: inside | Cover: outside |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ![](images/both-top.png) | ![](images/both-back.png) | ![](images/both-usb.png) | ![](images/base-front.png) | ![](images/base-top.png) | ![](images/base-rj45-face.png) | ![](images/base-usb.png) | ![](images/cover-inside.png) | ![](images/cover-outside.png) |
 
@@ -30,8 +30,10 @@ buttons and the PoE module. They're in OpenSCAD's preview only, never in the STL
   the cover's end wall fits around the jack.
 - **Probe ports:** the pluggable blocks' faces are at the carrier's edges, in long windows in the front (P1–P4) and
   back (P5–P8) walls, so probes plug and unplug from outside. The windows are open-topped slots in the base, closed
-  by the cover. The **CT** and **HEAT** blocks are behind windows in the
-  USB-C end wall. Each port's name is engraved above it, and the CT block's pins are labelled CT1 · B (BIAS) · CT2.
+  by the cover. The **HEAT** block is behind a window in the USB-C end
+  wall, and the pump clamps' plugs go into the carrier's 3.5 mm jacks through two teardrop holes below the USB
+  opening, labelled **CT1** and **CT2** (the teardrops' points print without support). Each port's name is engraved
+  above or below it.
 - **USB-C:** a 14 × 8 mm tunnel in the end wall, for flashing. The jack is 26 mm in, so it takes a plug with a slim,
   long body; day to day the board updates over the network.
 - **RESET and BOOT:** countersunk holes in the front and back walls in line with the buttons, for a paperclip
@@ -60,6 +62,7 @@ The ESP board's sizes come from Waveshare's outline drawing (`ESP32-P4-ETH.zip` 
 | Parameter | Now | What to measure |
 | --- | --- | --- |
 | `term_h` | 13 mm | Height of a pluggable block with its plug in, above the carrier (sets the port windows) |
+| `ct_axis_h` | 3 mm | The 3.5 mm jacks' bore centre above the carrier (sets the CT holes) |
 | `poe_x`, `poe_l`, `poe_w`, `poe_y` | 19, 52, 27, 0 mm | The PoE module's footprint on the ESP board |
 | `poe_top` | 14 mm | ESP board top to the PoE module's top |
 | `btn_z` | −1.5 mm | RESET and BOOT's centre height from the ESP board's bottom |
@@ -74,8 +77,9 @@ The ESP board's sizes come from Waveshare's outline drawing (`ESP32-P4-ETH.zip` 
 - Base: open side up. Cover: top face down (`cover.stl` is already turned over, by a rotation, so its lettering reads
   the right way).
 - **Coloured lettering** (multi-colour printers): the labels are 0.6 mm recesses in the cover, and `cover-text.stl` is
-  the lettering that fills them exactly, flush with the surface, in the same position as `cover.stl`. In the slicer,
-  load `cover.stl`, then add `cover-text.stl` to it as a part of the same object (PrusaSlicer/OrcaSlicer: right-click
+  the lettering that fills them exactly, flush with the surface, in the same position as `cover.stl` (the same for
+  `base.stl` and `base-text.stl`, which has CT1 and CT2). In the slicer, load `cover.stl`, then add `cover-text.stl`
+  to it as a part of the same object (PrusaSlicer/OrcaSlicer: right-click
   → *Add part* → *Load*; Bambu Studio: *Add part*), and give the text part its own filament. Printed in one colour,
   the cover alone shows the lettering as recesses.
 - Hardware: 4 × M3 × 6 self-tapping screws for the carrier, 4 × M3 × 12 self-tapping screws to join base and cover,
@@ -84,7 +88,7 @@ The ESP board's sizes come from Waveshare's outline drawing (`ESP32-P4-ETH.zip` 
 
 ## Rendering
 
-In OpenSCAD: open the `.scad`, set `PART` to `"base"`, `"cover"` or `"cover-text"` at the top, render (F6) and export STL. Without
+In OpenSCAD: open the `.scad`, set `PART` to `"base"`, `"base-text"`, `"cover"` or `"cover-text"` at the top, render (F6) and export STL. Without
 OpenSCAD installed, the official image works:
 
 ```

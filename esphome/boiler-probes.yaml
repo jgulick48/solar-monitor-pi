@@ -165,8 +165,8 @@ sensor:
       if (isnan(id(floor_supply).state) || isnan(id(floor_return).state)) return NAN;
       return id(floor_supply).state - id(floor_return).state;
 
-  # Pump current clamps (SCT-013, 1 V at full scale, built-in burden) on the CT block: CT1 on GPIO16, CT2 on GPIO17,
-  # each clamp's other wire on BIAS (half of 3.3 V, so the AC swings around it). With no clamp plugged in they
+  # Pump current clamps (SCT-013, 1 V at full scale, built-in burden) in the 3.5 mm jacks: CT1 on GPIO16, CT2 on
+  # GPIO17 (the plug's sleeve), its tip on the bias (half of 3.3 V, so the AC swings around it). With no clamp in they
   # read about 0 A.
   - platform: adc
     pin: GPIO16

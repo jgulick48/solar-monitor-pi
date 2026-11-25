@@ -15,9 +15,10 @@ reads the readings from Home Assistant. The wiki's *Boiler, propane and notifica
 | Enclosure (3D printed) | `enclosure/`: base and cover for the carrier and the board, with the ports in its walls and an OLED window (some sizes still to be measured) |
 | PoE switch port or injector | 802.3af |
 | 3 to 8 × DS18B20 waterproof probes | Stainless sleeve with **silicone** cable (rated to about 125 °C); 6 mm sleeves fit most wells |
-| 10 × 3-pin 5.08 mm pluggable terminal blocks | 8 probe ports, HEAT and CT (e.g. uxcell's sets) |
+| 9 × 3-pin 5.08 mm pluggable terminal blocks | 8 probe ports and HEAT (e.g. uxcell's sets) |
+| 2 × 3.5 mm stereo jacks, CUI SJ1-3523N (through-hole, right-angle) | The pump clamps plug straight in |
 | Optional: 0.96" SSD1306 I²C OLED module and a 12 mm panel-mount momentary button | The display in the top, and the WAKE button beside it |
-| Optional: 2 × SCT-013 current clamps (1 V output) | Boiler and floor pump current; the bias parts are on the carrier |
+| Optional: 2 × SCT-013 current clamps (1 V output) | Boiler and floor pump current, with their 3.5 mm plugs as they come; the bias parts are on the carrier |
 | Thermal paste, pipe clamps, pipe insulation | For the pipe-mounted probes |
 
 ## Probes
@@ -59,11 +60,10 @@ outside the enclosure.
 | | **D** | Yellow (DATA) |
 | | **V** | Red (3.3 V) |
 | HEAT | outer two pins | The 24 VAC call for heat (either way round); the middle pin stays empty |
-| CT | **CT1** | One wire of the boiler pump's clamp |
-| | **B** (BIAS) | The other wire of **both** clamps |
-| | **CT2** | One wire of the floor pump's clamp |
+| CT1, CT2 | 3.5 mm jacks | The boiler pump's and the floor pump's SCT-013 clamps, plugged straight in |
 
-The pins are labelled on the carrier (G D V on top, CT1 BIAS CT2 and 24VAC underneath) and on the enclosure.
+The pins are labelled on the carrier (G D V on top, 24VAC underneath) and on the enclosure.
+The probe ports and HEAT plug in from outside the enclosure; so do the clamps, through the holes marked CT1 and CT2.
 
 - **Probe cables:** three wires, not "parasite power". To extend a probe, Cat5 works for tens of metres: one pair for
   3.3 V and GND, one wire of another pair for DATA. For a run over about 30 m, swap that port's 4.7 kΩ for about
@@ -73,8 +73,9 @@ The pins are labelled on the carrier (G D V on top, CT1 BIAS CT2 and 24VAC under
   while *not* calling), and the SR501's end switch to the boiler carries the boiler's own voltage, not the SR501's.
   The carrier's optocoupler keeps the 24 VAC isolated from the board. If in doubt, leave it unconnected: the pump
   clamps show the same thing (the pumps run on every call) without touching the controls.
-- **Pump current:** SCT-013 clamps with a 1 V output (built-in burden). Cut off the 3.5 mm plug. The carrier holds
-  the bias at half of 3.3 V, so the clamp's AC swings around it on GPIO16 (CT1) and GPIO17 (CT2). Calibrate each
+- **Pump current:** SCT-013 clamps with a 1 V output (built-in burden), plugged into the CT1 and CT2 jacks. Their
+  plugs use only the tip and sleeve (the ring isn't connected): the jack takes the sleeve to the ADC pin, GPIO16
+  (CT1) or GPIO17 (CT2), and the tip to the carrier's bias at half of 3.3 V, so the clamp's AC swings around it. Calibrate each
   against a clamp meter: the `calibrate_linear` lines under `sensor:` in `boiler-probes.yaml`.
 - **OLED and button:** a 4-wire female-female lead from the carrier's OLED header (G V SCL SDA, the module's pin
   order) to the module in the lid, and the lid button on the BTN header (GPIO47 and GND).

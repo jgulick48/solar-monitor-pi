@@ -15,7 +15,7 @@
 // Box coordinates: x from the outside of the RJ45 end wall, y from the outside of the front (RESET side) wall, z up
 // from the bottom. The carrier's front (P1-P4, RESET) is toward y = 0, as on its silkscreen.
 
-PART = "base";             // "base", "cover", "cover-text" (the lettering, for a second colour), or "both" (preview only)
+PART = "base";             // "base", "base-text", "cover", "cover-text" (the -text parts: lettering for a second colour), "both"
 
 /* [Carrier PCB, from ../carrier/build_board.py] */
 car_l = 100.0;
@@ -26,12 +26,16 @@ car_under = 5.0;           // standoff height: room for the through-hole pins un
 // The ESP board's RJ45 edge sits at carrier x = -1.9, its front edge at carrier y = 19.5 (centred, 21 wide)
 esp_x = -1.9;
 esp_y = 19.5;
-// Probe ports: 4 along the front edge, 4 along the back, centred at these carrier x; CT and HEAT on the right edge
+// Probe ports: 4 along the front edge, 4 along the back, centred at these carrier x; HEAT and the CT jacks on the right edge
 port_x = [32, 48, 64, 80];
 term_w = 15.6;             // a 3-pin 5.08 mm pluggable header's width
 term_h = 13.0;             // MEASURE: the mated plug's height above the carrier
 term_out = 0.6;            // the header's face, past the carrier's edge
-ct_y = [45.5, 55.7];       // CT block's first and last pins, carrier y (front edge = 0): CT1 (45.5), BIAS, CT2 (55.7)
+// The pump clamps' 3.5 mm jacks (CUI SJ1-3523N, plug face flush with the carrier's right edge), carrier y from the
+// front edge: CT1 and CT2
+ct_jack_y = [41.0, 28.0];
+ct_axis_h = 3.0;           // MEASURE: the jack's bore centre above the carrier
+ct_hole_d = 8.5;           // the plug's moulded body reaches 2.7 mm into the wall
 heat_y = [4.8, 15.0];      // HEAT block's pins, carrier y
 
 /* [ESP32-P4-ETH, from Waveshare's drawing] */
@@ -171,10 +175,14 @@ module shell() {
         px = [car_x0 + port_x[0] - term_w / 2 - 0.5, car_x0 + port_x[3] + term_w / 2 + 0.5];
         for (y = [-1, out_w - wall - 1])
             translate([px[0], y, term_z[0]]) cube([px[1] - px[0], wall + 2, split - term_z[0] + 0.01]);
-        // right end: CT and HEAT windows, and a tunnel for a USB-C plug (for flashing; the jack is 26 mm in)
-        for (r = [ct_y, heat_y])
-            translate([out_l - wall - 1, car_y0 + (r[0] + r[1]) / 2 - term_w / 2 - 0.5, term_z[0]])
-                cube([wall + 2, term_w + 1, split - term_z[0] + 0.01]);
+        // right end: the HEAT window, the CT jacks' holes and a tunnel for a USB-C plug (for flashing; it's 26 mm in)
+        translate([out_l - wall - 1, car_y0 + (heat_y[0] + heat_y[1]) / 2 - term_w / 2 - 0.5, term_z[0]])
+            cube([wall + 2, term_w + 1, split - term_z[0] + 0.01]);
+        for (y = ct_jack_y)                                     // teardrops (point up): they print without support
+            translate([out_l - wall - 1, car_y0 + y, car_z + car_t + ct_axis_h]) rotate([0, 90, 0]) {
+                cylinder(d = ct_hole_d, h = wall + 2);
+                rotate([0, 0, 180]) linear_extrude(wall + 2) polygon([[0, -ct_hole_d / 2 / sqrt(2)], [ct_hole_d / 2 * sqrt(2), 0], [0, ct_hole_d / 2 / sqrt(2)]]);
+            }
         translate([out_l - wall - 1, esp_y0 + board_w / 2 - 7, esp_z + pcb_t + usbc_h / 2 - 4]) cube([wall + 2, 14, 8]);
         button_hole("front");
         button_hole("back");
@@ -199,8 +207,8 @@ module shell() {
     }
 }
 
-// Every label, as the solid that's cut 0.6 mm into the outside. cover_text() is the same lettering as a separate
-// part that fills those cuts exactly, flush, to print in another colour.
+// Every label, as the solid that's cut 0.6 mm into the outside. base_text() and cover_text() are the same
+// lettering as separate parts that fill those cuts exactly, flush, to print in another colour.
 module labels() {
     if (wake) translate([wake_c[0] - wake_d / 2 - 2, wake_c[1], out_h - 0.6])
         linear_extrude(1) text("WAKE", size = 3.5, halign = "right", valign = "center");
@@ -210,9 +218,8 @@ module labels() {
         engrave(str("P", i + 1), car_x0 + port_x[i], 0, split + 3.5, "front", 3.5);
         engrave(str("P", i + 5), car_x0 + port_x[i], 0, split + 3.5, "back", 3.5);
     }
-    engrave("CT", 0, car_y0 + (ct_y[0] + ct_y[1]) / 2, split + 9, "right", 3.5);
-    for (i = [0 : 2])                                           // each CT pin, above it
-        engrave(["CT1", "B", "CT2"][i], 0, car_y0 + ct_y[0] + i * (ct_y[1] - ct_y[0]) / 2, split + 3.5, "right", 2.2);
+    for (i = [0 : 1])                                           // under each CT jack's hole, on the base
+        engrave(["CT1", "CT2"][i], 0, car_y0 + ct_jack_y[i], car_z + car_t + ct_axis_h - ct_hole_d / 2 - 3, "right", 3);
     engrave("HEAT", 0, car_y0 + (heat_y[0] + heat_y[1]) / 2, split + 3.5, "right", 3.5);
     engrave("USB", 0, esp_y0 + board_w / 2, split + 9, "right", 3);
     engrave("BOILER PROBES", out_l / 2 + 6, 0, out_h - 7, "front", 4);
@@ -262,6 +269,10 @@ module cover() {
     for (e = ears) ear(e[0], e[1], true);
 }
 
+module base_text() {
+    intersection() { labels(); rbox(out_l, out_w, out_h, corner_r); translate([-big / 2, -big / 2, -1]) cube([big, big, split + 1]); }
+}
+
 module cover_text() {
     intersection() { labels(); rbox(out_l, out_w, out_h, corner_r); translate([-big / 2, -big / 2, split]) cube([big, big, big]); }
 }
@@ -275,9 +286,9 @@ module boards_ghost() {
         translate([car_x0, car_y0, car_z]) cube([car_l, car_w, car_t]);                                  // carrier
         for (i = [0 : 3], y = [-term_out, car_w - 10.5 + term_out])                                      // probe ports
             translate([car_x0 + port_x[i] - term_w / 2, car_y0 + y, car_z + car_t]) cube([term_w, 10.5, term_h]);
-        for (r = [ct_y, heat_y])                                                                         // CT, HEAT
-            translate([car_x0 + car_l - 10.5 + term_out, car_y0 + (r[0] + r[1]) / 2 - term_w / 2, car_z + car_t])
-                cube([10.5, term_w, term_h]);
+        translate([car_x0 + car_l - 10.5 + term_out, car_y0 + (heat_y[0] + heat_y[1]) / 2 - term_w / 2, car_z + car_t])
+            cube([10.5, term_w, term_h]);                                                                // HEAT
+        for (y = ct_jack_y) translate([car_x0 + car_l - 14, car_y0 + y - 6, car_z + car_t]) cube([14, 12, 5]); // CT jacks
         translate([esp_x0, esp_y0, car_z + car_t]) {
             for (y = [0.3, board_w - 2.8]) translate([23, y, 0]) cube([51, 2.5, sock_h]);                // sockets
             translate([0, 0, sock_h]) cube([board_l, board_w, pcb_t]);                                    // ESP board
@@ -293,9 +304,10 @@ module boards_ghost() {
 }
 
 if (PART == "base") { base(); boards_ghost(); }
+else if (PART == "base-text") base_text();
 else if (PART == "cover") print_flip() cover();
 else if (PART == "cover-text") print_flip() cover_text();
-else { color("#3a9da0") base(); boards_ghost(); translate([0, 0, 25]) { color("#3a9da0") cover(); color("black") render() cover_text(); } }
+else { color("#3a9da0") base(); color("black") render() base_text(); boards_ghost(); translate([0, 0, 25]) { color("#3a9da0") cover(); color("black") render() cover_text(); } }
 
 echo(str("outside: ", out_l, " x ", out_w, " x ", out_h, " mm (plus ", tab_l, " mm tabs each end and ", ear_p,
          " mm ears front and back); split at ", split, " mm"));

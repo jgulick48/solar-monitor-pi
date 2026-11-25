@@ -10,11 +10,20 @@ JAVA="docker run --rm -u $(id -u):$(id -g) -e HOME=/w -v $PWD:/w -w /w eclipse-t
 for v in ${*:-tht smd}; do
   o=fab/$v; rm -rf "$o"; mkdir -p "$o"
   $KICAD python3 build_board.py place "$v" "$o/carrier-$v-placed.kicad_pcb"
-  $JAVA java -jar freerouting.jar -de "$o/carrier-$v-placed.dsn" -do "$o/carrier-$v.ses" -mp 40 --gui.enabled=false \
-    > "$o/freerouting.log" 2>&1 || { tail -20 "$o/freerouting.log"; exit 1; }
-  $KICAD python3 build_board.py finish "$o/carrier-$v-placed.kicad_pcb" "$o/carrier-$v.ses" "$o/carrier-$v.kicad_pcb"
   b=$o/carrier-$v.kicad_pcb
-  $KICAD kicad-cli pcb drc --severity-all -o "$o/drc.rpt" "$b" >/dev/null || true
+  # Freerouting's result differs from run to run, and now and then a route doesn't survive the import into KiCad:
+  # route again (up to 4 tries) until KiCad's DRC finds nothing unconnected.
+  try=1
+  while :; do
+    $JAVA java -jar freerouting.jar -de "$o/carrier-$v-placed.dsn" -do "$o/carrier-$v.ses" -mp 40 --gui.enabled=false \
+      > "$o/freerouting.log" 2>&1 || { tail -20 "$o/freerouting.log"; exit 1; }
+    $KICAD python3 build_board.py finish "$o/carrier-$v-placed.kicad_pcb" "$o/carrier-$v.ses" "$b"
+    $KICAD kicad-cli pcb drc --severity-all -o "$o/drc.rpt" "$b" >/dev/null || true
+    grep -q "Found 0 unconnected pads" "$o/drc.rpt" && break
+    [ "$try" -ge 4 ] && { echo "$v: still unconnected after $try routing tries; see $o/drc.rpt"; exit 1; }
+    try=$((try + 1))
+  done
+  echo "$v: routed (try $try)"
   mkdir -p "$o/gerbers"
   $KICAD kicad-cli pcb export gerbers -l F.Cu,B.Cu,F.SilkS,B.SilkS,F.Mask,B.Mask,Edge.Cuts,F.Paste,B.Paste \
     --subtract-soldermask -o "$o/gerbers/" "$b" >/dev/null

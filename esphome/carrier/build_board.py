@@ -179,43 +179,49 @@ class Board:
             else:
                 self.terminal(f"J{3 + i}", name, cx + 5.08, 10.0, "back", {"1": "GND", "2": n, "3": "3V3"})
                 ry = 15.5
-            if tht:
-                self.resistor(f"R{1 + i}", "4.7k", cx - 5.08, ry, n, "3V3")
+            if tht:     # the back row sits 1.6 mm further left, clear of the CT1 jack
+                self.resistor(f"R{1 + i}", "4.7k", cx - (5.08 if side == "front" else 6.7), ry, n, "3V3")
             else:
                 self.resistor(f"R{1 + i}", "4.7k", cx - 1.0, ry, n, "3V3", lcsc="C17673")
             ty = 57.2 if side == "front" else 2.6
             self.text(f"{name}  {gpio}", cx, ty, 1.2)
             self.pin_labels(f"J{3 + i}", ("G", "D", "V"), 0, -2.7 if side == "front" else 2.7)
-        # heat call (24 VAC, isolated): J11 pins 1 and 3, PC814 (AC input)
+        # heat call (24 VAC, isolated): J11 pins 1 and 3, PC814 (AC input). The circuit sits between the ESP sockets,
+        # under the ESP board (11 mm above: room for low parts).
         self.terminal("J11", "HEAT", 90.5, 55.16, "right", {"1": "HC_A", "3": "HC_B"})
         self.pin_labels("J11", ("24VAC", "", "24VAC"), -4.6, 0, pcbnew.B_SilkS, 0.8)
         self.text("HEAT", 96.0, 41.0, 0.9)
+        # pump current clamps: two 3.5 mm jacks (CUI SJ1-3523N), plug face flush with the right edge. The SCT-013's
+        # plug uses tip and sleeve only: sleeve to the ADC input, tip to BIAS (OpenEnergyMonitor's convention), ring
+        # not connected.
+        for ref, label, y, gpio in (("J12", "CT1", 19.0, "CT1_GPIO16"), ("J16", "CT2", 32.0, "CT2_GPIO17")):
+            jk = self.add("Connector_Audio", "Jack_3.5mm_CUI_SJ1-3523N_Horizontal", ref, label, W - 6.3, y, 90,
+                          {"S": gpio, "T": "BIAS"})
+            jk.Reference().SetVisible(False)
+            for g in list(jk.GraphicalItems()):      # the library footprint draws a board-edge cutout: not wanted here
+                if g.GetLayer() == pcbnew.Edge_Cuts:
+                    jk.Remove(g)
+            self.text(label, 81.5, y, 1.0, bold=True)
         if tht:
-            self.resistor("R9", "10k", 78.0, 28.5, "HC_A", "HC_LED", rot=0)
-            self.add("Package_DIP", "DIP-4_W7.62mm", "U1", "PC814", 79.0, 32.5, 0,
+            self.resistor("R10", "10k", 44.5, 25.0, "HEAT_GPIO46", "3V3")
+            self.capacitor("C1", "1uF", 44.5, 28.5, "HEAT_GPIO46", "GND")
+            self.capacitor("C2", "10uF", 52.5, 28.5, "BIAS", "GND")
+            self.resistor("R11", "10k", 44.5, 32.0, "3V3", "BIAS")
+            self.resistor("R12", "10k", 44.5, 35.5, "BIAS", "GND")
+            self.add("Package_DIP", "DIP-4_W7.62mm", "U1", "PC814", 61.0, 27.0, 0,
                      {"1": "HC_LED", "2": "HC_B", "3": "GND", "4": "HEAT_GPIO46"})
-            self.resistor("R10", "10k", 78.0, 38.3, "HEAT_GPIO46", "3V3")
-            self.capacitor("C1", "1uF", 78.0, 41.3, "HEAT_GPIO46", "GND")
+            self.resistor("R9", "10k", 58.5, 34.5, "HC_A", "HC_LED")
+            self.capacitor("C3", "100nF", 72.0, 27.0, "3V3", "GND", rot=-90)
         else:
-            self.resistor("R9", "10k", 84.0, 29.0, "HC_A", "HC_LED", lcsc="C17414")
-            self.add("Package_SO", "SO-4_4.4x3.6mm_P2.54mm", "U1", "EL814S1(A)(TU)-V", 80.0, 32.0, 0,
+            self.resistor("R10", "10k", 45.0, 25.5, "HEAT_GPIO46", "3V3", lcsc="C17414")
+            self.capacitor("C1", "1uF", 49.0, 25.5, "HEAT_GPIO46", "GND", lcsc="C28323")
+            self.capacitor("C2", "10uF", 53.0, 25.5, "BIAS", "GND", lcsc="C15850")
+            self.resistor("R11", "10k", 45.0, 31.0, "3V3", "BIAS", lcsc="C17414")
+            self.resistor("R12", "10k", 49.0, 31.0, "BIAS", "GND", lcsc="C17414")
+            self.add("Package_SO", "SO-4_4.4x3.6mm_P2.54mm", "U1", "EL814S1(A)(TU)-V", 60.0, 28.0, 0,
                      {"1": "HC_LED", "2": "HC_B", "3": "GND", "4": "HEAT_GPIO46"}, lcsc="C500388")
-            self.resistor("R10", "10k", 80.0, 38.0, "HEAT_GPIO46", "3V3", lcsc="C17414")
-            self.capacitor("C1", "1uF", 84.0, 38.0, "HEAT_GPIO46", "GND", lcsc="C28323")
-        # pump current clamps: J12 = CT1, BIAS, CT2
-        self.terminal("J12", "CT", 90.5, 14.5, "right", {"1": "CT1_GPIO16", "2": "BIAS", "3": "CT2_GPIO17"})
-        self.pin_labels("J12", ("CT1", "BIAS", "CT2"), -4.2, 0, pcbnew.B_SilkS, 0.8)
-        self.text("CT", 96.0, 19.5, 0.9)
-        if tht:
-            self.resistor("R11", "10k", 78.0, 19.0, "3V3", "BIAS")
-            self.resistor("R12", "10k", 78.0, 22.5, "BIAS", "GND")
-            self.capacitor("C2", "10uF", 79.0, 25.5, "BIAS", "GND")
-            self.capacitor("C3", "100nF", 66.0, 30.0, "3V3", "GND", rot=90)
-        else:
-            self.resistor("R11", "10k", 80.0, 20.0, "3V3", "BIAS", lcsc="C17414")
-            self.resistor("R12", "10k", 84.0, 20.0, "BIAS", "GND", lcsc="C17414")
-            self.capacitor("C2", "10uF", 80.0, 24.0, "BIAS", "GND", lcsc="C15850")
-            self.capacitor("C3", "100nF", 66.0, 30.0, "3V3", "GND", lcsc="C49678")
+            self.resistor("R9", "10k", 58.0, 34.5, "HC_A", "HC_LED", lcsc="C17414")
+            self.capacitor("C3", "100nF", 72.0, 30.0, "3V3", "GND", lcsc="C49678")
         # OLED (SSD1306 module order GND VCC SCL SDA), lid button, spare GPIOs: beside the ESP board, clear of the
         # RESET/BOOT paperclip paths at x = 16.1
         self.add("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical", "J13", "OLED", 3.0, 16.0, rot=90,
@@ -238,9 +244,10 @@ class Board:
             k = (RESET_ROW if row == "J1" else BOOT_ROW).index(gpio)
             self.repin(row, k, f"{name}_{gpio}")
         # mounting holes (M3) in the corners left free
-        for i, (x, y) in enumerate(((4.0, 4.0), (4.0, 56.0), (96.0, 24.5), (96.0, 35.5))):
+        for i, (x, y) in enumerate(((4.0, 4.0), (4.0, 56.0), (96.0, 6.0), (30.0, 30.0))):
             self.add("MountingHole", "MountingHole_3.2mm_M3", f"H{i + 1}", "M3", x, y).Reference().SetVisible(False)
-        self.text("Boiler probe carrier  ESP32-P4-ETH  " + ("THT" if tht else "SMD") + "  v1", 40.0, 30.0, 1.3, bold=True)
+        self.text("Boiler probe carrier  ESP32-P4-ETH  " + ("THT" if tht else "SMD") + "  v2", 50.0, 30.0, 1.3,
+                  layer=pcbnew.B_SilkS, bold=True)
         self.text("RESET >", 16.1, 41.8, 0.8)
         self.text("< BOOT", 16.1, 18.2, 0.8)
 
@@ -253,16 +260,6 @@ def finish(path_in, ses, path_out):
     b = pcbnew.LoadBoard(path_in)
     if not pcbnew.ImportSpecctraSES(b, ses):
         raise SystemExit("SES import failed")
-    # drop vias the router left touching track on one layer or none (not GND: the pours reach those)
-    tracks = [t for t in b.GetTracks() if t.Type() == pcbnew.PCB_TRACE_T]
-    for v in [t for t in b.GetTracks() if t.Type() == pcbnew.PCB_VIA_T]:
-        if v.GetNetname() == "GND":
-            continue
-        pos, r = v.GetPosition(), v.GetWidth(pcbnew.F_Cu) // 2
-        layers = {t.GetLayer() for t in tracks if t.GetNetCode() == v.GetNetCode() and t.HitTest(pos, r)}
-        on_pad = any(p.HitTest(pos) for f in b.GetFootprints() for p in f.Pads())
-        if len(layers) < 2 and not on_pad:
-            b.Remove(v)
     gnd = b.FindNet("GND")
     for layer in (pcbnew.F_Cu, pcbnew.B_Cu):
         z = pcbnew.ZONE(b)
