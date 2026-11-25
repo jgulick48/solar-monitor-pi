@@ -15,7 +15,8 @@ import yaml  # noqa: E402
 
 
 def entity(eid, dev, disabled=None, platform="unifiprotect"):
-    return {"entity_id": eid, "platform": platform, "device_id": dev, "disabled_by": disabled, "hidden_by": None}
+    return {"entity_id": eid, "platform": platform, "device_id": dev, "disabled_by": disabled, "hidden_by": None,
+            "name": None, "original_name": "High resolution channel", "has_entity_name": True}
 
 
 class HomeDashboard(unittest.TestCase):
@@ -33,8 +34,11 @@ class HomeDashboard(unittest.TestCase):
         st = os.path.join(self.stack, "homeassistant", ".storage")
         with open(os.path.join(st, "core.entity_registry"), "w") as f:
             json.dump({"data": {"entities": ents}}, f)
+        # as Home Assistant 2026.11 keeps them: the console a device, its cameras child devices (seen on the Pi 5,
+        # where reading only "devices" named every camera "High resolution channel")
         with open(os.path.join(st, "core.device_registry"), "w") as f:
-            json.dump({"data": {"devices": devs}}, f)
+            json.dump({"data": {"devices": [{"id": "nvr", "name": "Console"}], "child_devices": devs,
+                                "deleted_devices": []}}, f)
 
     def sections(self):
         self.assertTrue(hadashboard.write(self.stack))

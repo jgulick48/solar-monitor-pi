@@ -37,7 +37,9 @@ def camera_entities(stack):
     the wall display's picked cameras first, in their order, then the rest by name."""
     ha = os.path.join(stack, "homeassistant", ".storage")
     ents = (ss.load_json(os.path.join(ha, "core.entity_registry"), {}).get("data") or {}).get("entities", [])
-    devs = {d.get("id"): d for d in (ss.load_json(os.path.join(ha, "core.device_registry"), {}).get("data") or {}).get("devices", [])}
+    reg = ss.load_json(os.path.join(ha, "core.device_registry"), {}).get("data") or {}
+    # cameras behind a console (UniFi Protect's) are under child_devices in Home Assistant 2026.11's registry
+    devs = {d.get("id"): d for k in ("devices", "child_devices") for d in reg.get(k) or []}
     per_dev = {}
     for e in ents:
         eid = e.get("entity_id", "")
