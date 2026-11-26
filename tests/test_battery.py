@@ -156,3 +156,11 @@ class Battery(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForGrafana(unittest.TestCase):
+    def test_vm_lines(self):
+        now = 1_800_000_000
+        self.assertEqual(battery.vm_lines({"capacity_kwh": 28.4, "last_full": now - 3 * 86400}, now),
+                         ["site_battery_capacity_kwh 28.4", "site_battery_days_since_full 3.00"])
+        self.assertEqual(battery.vm_lines({"capacity_kwh": None, "last_full": None}, now), [])

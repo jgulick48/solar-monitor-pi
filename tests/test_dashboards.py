@@ -56,13 +56,23 @@ class Dashboards(unittest.TestCase):
     def test_metrics_exist(self):
         """Every metric a module dashboard queries is written by the box (a renamed metric breaks a panel silently)."""
         for path in BOARDS:
-            if os.path.basename(path) not in ("boiler.json", "water.json", "history.json"):
+            if os.path.basename(path) not in ("boiler.json", "water.json", "history.json", "battery-generator.json"):
                 continue
             for title, e in exprs(load(path)):
                 names = {m for m in re.findall(r"\b([a-z][a-z0-9_]*)\b(?=\s*(?:\{|\[|$|\)|\s|\*|/|and))", re.sub(r'"[^"]*"', "", e))}
                 for m in names - FUNCS - {"tu", "entity_id", "role", "kind", "source", "rule", "pair"}:
-                    if m.startswith(("boiler_", "water_", "ha_", "site_day_", "propane_day_")):
+                    if m.startswith(("boiler_", "water_", "ha_", "site_day_", "propane_day_", "site_battery_", "site_generator_")):
                         self.assertTrue(m in SOURCE, f"{os.path.basename(path)} / {title}: {m} is not written anywhere")
+
+    def test_battery_and_generator_board_uses_the_pages_queries(self):
+        """The dashboard is generated from the queries the Battery page and the generator log use; a changed query
+        with a stale JSON would show something else than the pages."""
+        import battery
+        import solar_setup as ss
+        all_ = [e for _, e in exprs(load(os.path.join(ROOT, "stack", "grafana", "dashboards", "battery-generator.json")))]
+        for q in (battery.Q["max_cell"], battery.Q["soh"], battery.SPREAD_TOP, ss.GEN_POWER, ss.EXT_CHARGE,
+                  "site_battery_capacity_kwh", "site_generator_hours_since_service"):
+            self.assertIn(q, all_)
 
     def test_day_bars_use_day_samples(self):
         """Per-day bars read the noon-stamped day samples, one per day-wide window."""

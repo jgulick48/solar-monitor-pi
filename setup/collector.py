@@ -251,6 +251,11 @@ def main():
                     log(line)
             except Exception as e:  # noqa: BLE001 - keep collecting
                 log("history: storing days failed:", e)
+            try:                                    # the Battery page's own figures, for Grafana
+                import battery
+                vm_import(battery.vm_lines(battery.status(args.stack, ss.load_json(os.path.join(args.stack, "state", "site.json"), {}))))
+            except Exception as e:  # noqa: BLE001 - keep collecting
+                log("battery figures not stored:", e)
             try:
                 for line in report.step(args.stack):    # last month's report, once its days are stored (report.py)
                     log(line)

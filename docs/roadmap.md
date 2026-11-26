@@ -96,6 +96,6 @@ health, backups, compared with the same month last year once there is a year of 
 
 ## Smaller items
 
-- Grafana: a dashboard for the battery health and generator log figures.
-- Advisor: use the generator log's runs instead of recomputing generator time from raw history.
+- Grafana: a dashboard for the battery health and generator log figures. (Built: *Battery and generator*.)
+- Advisor: use the generator log's runs instead of recomputing generator time from raw history. (Built.)
 - Setup page: a "test notification" button to check that phones are signed in. (Built: on the start page.)

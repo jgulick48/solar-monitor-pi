@@ -222,6 +222,26 @@ def measured(steps, low_soc):
     return out
 
 
+def with_generator_log(months, stack, start, end):
+    """The months' generator figures from the generator log (genlog.py) instead of the 15-minute history: the log
+    reads a minute at a time, bridges short dips and drops spikes, and is what the Generator page, the monthly
+    report and Home Assistant show, so the advisor's table agrees with them. Returns (months, "log"), or the
+    months unchanged and "history" when the log can't speak for the whole period (the generator module is off,
+    or it is still working through the history)."""
+    import genlog
+    if not os.path.exists(genlog.path(stack)):
+        return months, "history"
+    st = genlog.load(stack)
+    if not genlog.covers(st, start, end):
+        return months, "history"
+    by = genlog.by_month(st["runs"], start, end)
+    out = []
+    for m in months:
+        g = by.get(m["month"], {"kwh": 0.0, "starts": 0, "hours": 0.0})
+        out.append({**m, "generator_kwh": round(g["kwh"]), "generator_starts": g["starts"], "generator_hours": round(g["hours"], 1)})
+    return out, "log"
+
+
 def simulate(steps, batt_kwh, pv_scale, pv_cap_kw, floor_soc, eff=0.92):
     """Replay without a generator: how much energy the batteries come up short of
     the generator start level (floor_soc), on how many days, in how many separate
@@ -291,7 +311,7 @@ def analyse(stack, days=400):
                       "calibration": round(k, 3) if k else None, "calibration_samples": n_cal, "covers_winter": winter,
                       "calibration_openmeteo": round(k_om, 3) if k_om else None,
                       "confidence": "low" if n_days < 60 or not have_pot else ("medium" if not winter or n_days < 300 else "good")}
-    result["months"] = measured(steps, low_soc)
+    result["months"], result["data"]["generator_from"] = with_generator_log(measured(steps, low_soc), stack, steps[0]["t"], steps[-1]["t"])
 
     # Capacity headroom
     loads = sorted(s["load"] for s in steps)

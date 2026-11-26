@@ -1,0 +1,1323 @@
+{
+ "uid": "battery-generator",
+ "title": "Battery and generator",
+ "tags": [
+  "solar",
+  "battery-generator"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "refresh": "1m",
+ "time": {
+  "from": "now-30d",
+  "to": "now"
+ },
+ "description": "Battery health over time (the Battery page's figures) and the generator log.",
+ "annotations": {
+  "list": []
+ },
+ "templating": {
+  "list": []
+ },
+ "panels": [
+  {
+   "type": "stat",
+   "title": "Battery",
+   "description": "",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "max(lxp_soc)",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "mappings": [],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 25
+       },
+       {
+        "color": "green",
+        "value": 50
+       }
+      ]
+     },
+     "decimals": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "id": 1,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Cell spread now",
+   "description": "mV between the highest and the lowest cell. It only says much near full: see the panel below.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "(max((lxp_max_cell_volt and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0))) - min((lxp_min_cell_volt and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)))) * 1000",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "mappings": [],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     },
+     "decimals": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "id": 2,
+   "gridPos": {
+    "x": 4,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "State of health",
+   "description": "As the BMS reports it. Empty when it doesn't (the 6000XP sends 0).",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "min((lxp_soh and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)) > 0)",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "mappings": [],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 80
+       }
+      ]
+     },
+     "decimals": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "id": 3,
+   "gridPos": {
+    "x": 8,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Cycles",
+   "description": "",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "max((lxp_cycle_cnt_bms and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)))",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "mappings": [],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     },
+     "decimals": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "id": 4,
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Capacity estimate",
+   "description": "kWh per 100% of charge, from the long discharges of the last 60 days (the Battery page's figure).",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "site_battery_capacity_kwh",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "kwatth",
+     "mappings": [],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     },
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "id": 5,
+   "gridPos": {
+    "x": 16,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Days since a full charge",
+   "description": "",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "site_battery_days_since_full",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "mappings": [],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 14
+       },
+       {
+        "color": "red",
+        "value": 30
+       }
+      ]
+     },
+     "decimals": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "id": 6,
+   "gridPos": {
+    "x": 20,
+    "y": 0,
+    "w": 4,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "id": 7,
+   "type": "row",
+   "title": "Battery",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 4,
+    "w": 24,
+    "h": 1
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "Cell spread near full",
+   "description": "Highest minus lowest cell while the battery is at 98% or more: under 50 mV is good, over 100 mV a cell or battery is drifting.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "((max((lxp_max_cell_volt and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0))) - min((lxp_min_cell_volt and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)))) * 1000) and on() (max(lxp_soc) >= 98)",
+     "legendFormat": "mV",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "drawStyle": "line",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": "",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "min": 0,
+     "decimals": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 8,
+   "gridPos": {
+    "x": 0,
+    "y": 5,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Highest and lowest cell",
+   "description": "",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "max((lxp_max_cell_volt and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)))",
+     "legendFormat": "highest",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "min((lxp_min_cell_volt and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)))",
+     "legendFormat": "lowest",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "volt",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "drawStyle": "line",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": "",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "decimals": 3
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 9,
+   "gridPos": {
+    "x": 12,
+    "y": 5,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Cell temperatures",
+   "description": "Charging stops at 0 °C; over 45 °C is too hot.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "max((lxp_max_cell_temp and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)))",
+     "legendFormat": "warmest",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "min((lxp_min_cell_temp and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)))",
+     "legendFormat": "coldest",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "celsius",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "drawStyle": "line",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": "",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 10,
+   "gridPos": {
+    "x": 0,
+    "y": 13,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "State of charge",
+   "description": "",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "max(lxp_soc)",
+     "legendFormat": "%",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "drawStyle": "line",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": "",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 11,
+   "gridPos": {
+    "x": 12,
+    "y": 13,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Capacity estimate",
+   "description": "One figure an hour: the median of the last estimates. A slow fall over the years is the batteries ageing.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "site_battery_capacity_kwh",
+     "legendFormat": "kWh per 100%",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "kwatth",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "drawStyle": "line",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": "",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      },
+      "axisSoftMin": 0
+     },
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 12,
+   "gridPos": {
+    "x": 0,
+    "y": 21,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "State of health and cycles",
+   "description": "",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "min((lxp_soh and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)) > 0)",
+     "legendFormat": "state of health (%)",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "max((lxp_cycle_cnt_bms and on (deploymentID) (max by (deploymentID) (lxp_max_cell_volt) > 0)))",
+     "legendFormat": "cycles",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "drawStyle": "line",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": "",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "cycles"
+      },
+      "properties": [
+       {
+        "id": "custom.drawStyle",
+        "value": "line"
+       },
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       },
+       {
+        "id": "custom.showPoints",
+        "value": "always"
+       },
+       {
+        "id": "custom.lineWidth",
+        "value": 2
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
+       },
+       {
+        "id": "custom.axisLabel",
+        "value": "cycles"
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 13,
+   "gridPos": {
+    "x": 12,
+    "y": 21,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "id": 14,
+   "type": "row",
+   "title": "Generator",
+   "collapsed": false,
+   "gridPos": {
+    "x": 0,
+    "y": 29,
+    "w": 24,
+    "h": 1
+   },
+   "panels": []
+  },
+  {
+   "type": "stat",
+   "title": "Hours since service",
+   "description": "The generator log's count (Generator page), for the kind closest to its service.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "max(site_generator_hours_since_service)",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "h",
+     "mappings": [],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     },
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "id": 15,
+   "gridPos": {
+    "x": 0,
+    "y": 30,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Hours to the next service",
+   "description": "",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "min(site_generator_service_left_hours)",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "h",
+     "mappings": [],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.01
+       },
+       {
+        "color": "green",
+        "value": 20
+       }
+      ]
+     },
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "id": 16,
+   "gridPos": {
+    "x": 6,
+    "y": 30,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Hours, last 30 days",
+   "description": "",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum_over_time(site_day_generator_hours[30d])",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "h",
+     "mappings": [],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     },
+     "decimals": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "id": 17,
+   "gridPos": {
+    "x": 12,
+    "y": 30,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "Hours in the log",
+   "description": "Every run the log has found, up to 400 days before the box first looked.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "sum(site_generator_hours_total)",
+     "legendFormat": "",
+     "refId": "A",
+     "instant": true,
+     "range": false
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "h",
+     "mappings": [],
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     },
+     "decimals": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "none",
+    "textMode": "value",
+    "justifyMode": "center"
+   },
+   "id": 18,
+   "gridPos": {
+    "x": 18,
+    "y": 30,
+    "w": 6,
+    "h": 4
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Generator power",
+   "description": "What the generator log reads: the inverters' generator input, and charging the inverters didn't do themselves (a Chargeverter or other DC charger).",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "((sum((lxp_p_gen < 25000) * (lxp_v_gen > bool 50)) or vector(0)) + (sum(lxp_p_to_user * (lxp_v_ac_r > bool 50)) or vector(0)))",
+     "legendFormat": "on the inverters",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "((avg_over_time(((max(lxp_batt_current_bms) > 0 or min(lxp_batt_current_bms) < 0 or max(lxp_batt_current_bms)) * max(lxp_v_bat))[5m:30s]) - avg_over_time(((sum(lxp_p_charge) - sum(lxp_p_discharge)))[5m:30s])) > 0.2 * abs(avg_over_time(((sum(lxp_p_charge) - sum(lxp_p_discharge)))[5m:30s]))) unless on () (max_over_time((max(lxp_v_gen) > 100 or max(lxp_v_ac_r) > 100)[15m:1m]) > 0)",
+     "legendFormat": "through a DC charger",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "watt",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "drawStyle": "line",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": "",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 19,
+   "gridPos": {
+    "x": 0,
+    "y": 34,
+    "w": 24,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Generator hours per day",
+   "description": "",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_generator_hours[1d])",
+     "legendFormat": "hours",
+     "refId": "A",
+     "interval": "1d"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "h",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 80,
+      "drawStyle": "bars",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": "",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 20,
+   "gridPos": {
+    "x": 0,
+    "y": 42,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Generator energy per day",
+   "description": "",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_generator_kwh[1d])",
+     "legendFormat": "kWh",
+     "refId": "A",
+     "interval": "1d"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "kwatth",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 80,
+      "drawStyle": "bars",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": "",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 21,
+   "gridPos": {
+    "x": 12,
+    "y": 42,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Hours since service",
+   "description": "Climbs while the generator runs and drops to 0 when a service is recorded on the Generator page.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "site_generator_hours_since_service",
+     "legendFormat": "{{kind}}",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "h",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 8,
+      "drawStyle": "line",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": "",
+      "stacking": {
+       "mode": "none",
+       "group": "A"
+      }
+     },
+     "min": 0
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "id": 22,
+   "gridPos": {
+    "x": 0,
+    "y": 50,
+    "w": 24,
+    "h": 7
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
+  }
+ ],
+ "editable": false,
+ "graphTooltip": 1
+}

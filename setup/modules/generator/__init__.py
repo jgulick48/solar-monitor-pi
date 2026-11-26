@@ -218,6 +218,13 @@ def on_disable(stack):
 
 def update_log(stack):
     n = genlog.update(stack)
+    try:                                            # its counts, for Grafana's Battery and generator dashboard
+        import vmdays
+        lines = genlog.vm_lines(genlog.status(stack, _site(stack)))
+        if lines:
+            vmdays.post(lines)
+    except (OSError, ValueError):
+        pass                                        # VictoriaMetrics is restarting: the next pass writes them
     return [f"generator log: {n} new run(s)"] if n else []
 
 

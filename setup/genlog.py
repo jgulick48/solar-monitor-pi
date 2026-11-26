@@ -252,6 +252,36 @@ def status(stack, site, now=None):
     return out
 
 
+def vm_lines(s):
+    """The log's counts as samples for Grafana, per kind (status())."""
+    out = []
+    for k in s["kinds"]:
+        lab = f'{{kind="{k["kind"]}"}}'
+        out += [f"site_generator_hours_total{lab} {k['total_hours']:g}", f"site_generator_hours_since_service{lab} {k['since_service']:g}",
+                f"site_generator_service_left_hours{lab} {k['left']:g}"]
+    return out
+
+
+def covers(st, start, end):
+    """True when the log can speak for [start, end]: it is caught up to within a day of `end`, and its oldest
+    runs weren't dropped (KEEP_RUNS) after `start`."""
+    if not st.get("processed_until") or st["processed_until"] < end - 86400:
+        return False
+    return len(st["runs"]) < KEEP_RUNS or st["runs"][0]["start"] <= start
+
+
+def by_month(runs, start, end):
+    """{"2026-11": {"kwh", "starts", "hours"}} of the runs that started in [start, end], by local month."""
+    out = {}
+    for r in runs:
+        if start <= r["start"] <= end:
+            m = out.setdefault(time.strftime("%Y-%m", time.localtime(r["start"])), {"kwh": 0.0, "starts": 0, "hours": 0.0})
+            m["kwh"] += r["kwh"]
+            m["starts"] += 1
+            m["hours"] += r["hours"]
+    return out
+
+
 def _sum(vals, digits):
     return None if any(v is None for v in vals) else round(sum(vals), digits)
 
