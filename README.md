@@ -19,7 +19,7 @@ read, never changed.
 | Backups | Nightly backup to a USB stick, and restore | `http://<pi>/backup` |
 | Battery health | Cell spread near full, temperatures, SOH, cycles, capacity check, BMS faults | `http://<pi>/battery` |
 | Panels and inverters | A PV string or an inverter making far less than usual; the site far below the sunlight | `http://<pi>/panels` |
-
+| Monthly report | Last month's solar, use, generator, battery and backups, against a year earlier | `http://<pi>/report` |
 | Generator log | Every generator run, hours since the last service, service reminder | `http://<pi>/generator` |
 | Wall display | Dashboard and up to two cameras on a screen plugged into the Pi's HDMI port | `http://<pi>/display` |
 | go2rtc | Turns the cameras' RTSP(S) streams into video the display's browser can play | localhost only |
@@ -233,7 +233,7 @@ readings on instead.
 ## History: this year against last
 
 `http://solar-monitor.local/history` (*History* in the header) shows each of the last 12 months against the same
-month a year earlier, with the change in percent: solar, use, generator hours, and propane and water while those
+month a year earlier, with the change in percent: solar, use, the highest load, the lowest battery level, generator hours, and propane and water while those
 modules are on. The weather is beside them, since a colder or windier month explains more propane or generator
 time: the average outdoor temperature ("5 °F colder"), heating degree days, the average wind and the strongest gust. The month under way is compared with the same days last year, not the whole month. Only days with
 data are counted, and a month that misses days says how many it has. Until the box has a year of data the earlier
@@ -246,6 +246,20 @@ The figures come from per-day totals the collector stores once each day is over 
 is the station's when the day has enough of its readings, else Open-Meteo's. On its first runs it goes back to the oldest inverter
 data the box has, 90 days an hour. Grafana has the dashboard *History: this year against last*: 30-day totals and
 daily bars against the same days a year earlier. The data is kept for 5 years.
+
+### Monthly report
+
+On the 1st of each month, after 8:00, the box sends one notification about the month that just ended:
+*Solar report for October 2026*. It has the solar made, the power used, the highest load, the lowest battery level,
+generator hours with fuel and cost, and propane and water while those modules are on. Solar, use, propane and water
+are compared with the same month a year earlier once the box has one. It ends with battery health and the last
+backup as they stand that day. It is an "info" notification, so it follows the same routing and quiet hours as the
+daily summary.
+
+`http://solar-monitor.local/report` (*Report* in the header) shows the same report as a table, and the 11 months
+before it. The month figures are the History page's, so the two always agree. A box installed or updated after the
+7th makes last month's report for the page but doesn't send it late. The setup page's *Daily summary and monthly
+report* section turns the notification off; the page stays.
 
 **Hourly weather, for heat-loss work.** Beside the outdoor temperature and the sunlight, the box now records the
 wind: a weather station's as it reads it (`site_wind_speed_ms`, `site_wind_gust_ms`; average them over an hour), and

@@ -18,6 +18,8 @@
     Open-Meteo (open-meteo.com, free API, no key).
   * Every 5 minutes, the panel and inverter checks (solarcheck.py): a string or an inverter making far less than
     usual, the whole site far below what the sunlight should give.
+  * Every hour, the finished days for the History page (history.py), and on the first days of a month last
+    month's report (report.py).
   * From the same requests, the solar forecast: expected output per hour for
     today and the next five days in state/forecast.json, scaled by the
     advisor's calibration against Open-Meteo (actual output / irradiance model)
@@ -38,6 +40,7 @@ import modules  # noqa: E402
 import hastates  # noqa: E402
 import history  # noqa: E402
 import loadprofile  # noqa: E402
+import report  # noqa: E402
 import solarcheck  # noqa: E402
 import weather  # noqa: E402
 import wx  # noqa: E402
@@ -248,6 +251,11 @@ def main():
                     log(line)
             except Exception as e:  # noqa: BLE001 - keep collecting
                 log("history: storing days failed:", e)
+            try:
+                for line in report.step(args.stack):    # last month's report, once its days are stored (report.py)
+                    log(line)
+            except Exception as e:  # noqa: BLE001 - keep collecting
+                log("monthly report failed:", e)
         if time.time() - last_check >= 300:         # strings, inverters and the site against what is usual (solarcheck.py)
             last_check = time.time()
             try:

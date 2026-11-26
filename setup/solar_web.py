@@ -37,6 +37,7 @@ import protect  # noqa: E402
 import screenpower as sp  # noqa: E402
 import genlog  # noqa: E402
 import history  # noqa: E402
+import report  # noqa: E402
 import modules  # noqa: E402
 import overload  # noqa: E402
 import solar_setup as ss  # noqa: E402
@@ -74,6 +75,7 @@ DEFAULT_SITE = {
     "inverter_model": "6000xp",
     "summary_enabled": True,
     "summary_time": "00:00",
+    "report_enabled": True,
     "clock": "",
     "costs": {"battery_each": "", "panel_per_w": "", "inverter_each": "", "generator": "", "fuel_per_gal": ""},
 }
@@ -251,6 +253,7 @@ def validate(form):
         "arrays": [],
         "summary_enabled": bool(form.get("summary_enabled")),
         "summary_time": display.parse_hhmm(form.get("summary_time", "")) or "00:00",
+        "report_enabled": bool(form.get("report_enabled")),
         "clock": form.get("clock") if form.get("clock") in ("12", "24") else "",
     }
     if site["time_zone"] not in zoneinfo.available_timezones():
@@ -467,9 +470,9 @@ background:color-mix(in srgb,var(--fg) 3%,var(--bg))} section.own h2{margin:12px
 
 NAV = [("/", "Home", "Solar monitor"), ("/check", "Check-up", "Check-up"), ("/setup", "Setup", "Site setup"),
        ("/battery", "Battery", "Battery health"), ("/panels", "Panels", "Panels and inverters"),
-       ("/history", "History", "History"),
+       ("/history", "History", "History"), ("/report", "Report", "Monthly report"),
        ("/advisor", "Advisor", "Advisor"), ("/display", "Screen", None)]
-NAV_MODULES_AT = 6          # the enabled modules' pages (backups, generator) go before the Advisor
+NAV_MODULES_AT = 7          # the enabled modules' pages (backups, generator) go before the Advisor
 APPS = [("8123", "Home Assistant"), ("3000", "Grafana")]
 
 
@@ -735,11 +738,14 @@ button at the bottom of the window. The test and restart buttons among them act 
 <label><input type="checkbox" name="spare_notify" value="1" style="width:auto"{' checked' if site.get('spare_notify') else ''}>
  Notify when there is solar to spare (the battery is full and the panels could make at least 1 kW more than the house uses, for an hour or more; at most once a day)</label>
 <small>The wall display and Home Assistant (<i>Site spare power</i>) show it either way.</small></fieldset>
-<fieldset><legend>Daily summary</legend>
+<fieldset><legend>Daily summary and monthly report</legend>
 <label><input type="checkbox" name="summary_enabled" value="1" style="width:auto"{' checked' if site.get('summary_enabled', True) else ''}> Send a daily summary to the Home Assistant app</label>
 <label>At {inp('summary_time', site.get('summary_time') or '00:00', 'time', "style='max-width:140px'")}</label>
 <small>Solar made, power used, the lowest battery level and generator time for the day, plus the solar forecast; on
-Sundays also the week and the advisor's latest finding. Sent before 06:00 it covers the day before.</small></fieldset>
+Sundays also the week and the advisor's latest finding. Sent before 06:00 it covers the day before.</small>
+<label><input type="checkbox" name="report_enabled" value="1" style="width:auto"{' checked' if site.get('report_enabled', True) else ''}> Send a monthly report</label>
+<small>Once a month, on the 1st after 8:00: last month's solar, use, generator time and fuel, the lowest battery level,
+battery health and backups, beside the same month a year earlier. The <a href="/report">Report</a> page has it either way.</small></fieldset>
 {arrays}
 <fieldset><legend>Inverters</legend><label>Model <select name="inverter_model">{inv_opts}</select></label>
 <small>{n_inv} inverter dongle(s) found on the network. Used by the advisor for output, solar input and charging limits.</small></fieldset>
@@ -1159,6 +1165,13 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError) as e:
                 body = f"<h1>History</h1><div class='card warn'>The history couldn't be read just now ({html.escape(str(e))}). Try again in a minute.</div>"
             self.send(200, page("History", body))
+        elif self.path.split("?")[0] == "/report":
+            want = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("m", [""])[0]
+            try:
+                body = report.render(STACK, load_site(), want if report.MONTH_RE.match(want) else None, cache=boxhealth.cached)
+            except (OSError, ValueError) as e:
+                body = f"<h1>Monthly report</h1><div class='card warn'>The report couldn't be read just now ({html.escape(str(e))}). Try again in a minute.</div>"
+            self.send(200, page("Monthly report", body))
         elif self.path == "/config":
             self.send(200, config_page())
         elif self.path == "/config/export":
