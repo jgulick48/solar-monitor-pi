@@ -38,6 +38,7 @@ import screenpower as sp  # noqa: E402
 import genlog  # noqa: E402
 import history  # noqa: E402
 import modules  # noqa: E402
+import overload  # noqa: E402
 import solar_setup as ss  # noqa: E402
 import solarcheck  # noqa: E402
 import tts  # noqa: E402
@@ -581,6 +582,7 @@ def status_page(handler):
 {box_card()}
 {battery_card(site)}
 {solarcheck.card(solarcheck.status(STACK))}
+{overload.card(overload.status(site))}
 {modules.cards(STACK, "access")}
 <div class="card"><b>Screen</b>: {display_line} <a href="/display">preview</a> &nbsp;<a href="/setup#screen">change</a>{display_problem(dsp)}</div>
 <div class="card" id="weather"><b>Sunlight data</b>: {weather_line}

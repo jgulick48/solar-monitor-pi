@@ -378,6 +378,20 @@ rest:
         value_template: "{{ value_json.solar_check }}"
         icon: mdi:solar-panel
         json_attributes: [solar_check_text]
+      # Overload warning (overload.py): the tightest of each inverter's output and each leg, against its rating
+      - name: Site inverter load
+        unique_id: site_inverter_load
+        value_template: "{{ value_json.inverter_load_pct }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:gauge
+        json_attributes: [overload, overload_text, inverter_load_peak_pct]
+      - name: Site peak load today
+        unique_id: site_peak_load_today
+        value_template: "{{ value_json.peak_load_today }}"
+        unit_of_measurement: kW
+        device_class: power
+        icon: mdi:chart-bell-curve
       - name: Site box temperature
         unique_id: site_box_cpu_temp
         value_template: "{{ value_json.box_cpu_temp }}"
@@ -460,6 +474,11 @@ rest:
         value_template: "{{ value_json.solar_check == 'warn' }}"
         device_class: problem
         icon: mdi:solar-panel
+      - name: Site inverters near limit
+        unique_id: site_inverters_near_limit
+        value_template: "{{ value_json.overload == 'warn' }}"
+        device_class: problem
+        icon: mdi:gauge-full
       - name: Site box power problem
         unique_id: site_box_power_problem
         value_template: "{{ value_json.box_power_problem }}"
@@ -840,6 +859,29 @@ automation:
           message: >-
             {% if trigger.id != 'off' %}{{ state_attr('sensor.site_solar_check', 'solar_check_text') }}
             Details on the solar monitor's Panels page.{% else %}clear{% endif %}
+
+  # Overload warning: the load is close to what the inverters can supply. Said at once; cleared after 10 quiet minutes.
+  - id: solar_overload
+    alias: "Solar: the load is close to the inverters' limit"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.site_inverters_near_limit
+        to: "on"
+        id: "on"
+      - trigger: state
+        entity_id: binary_sensor.site_inverters_near_limit
+        from: "on"
+        to: "off"
+        for: "00:10:00"
+        id: "off"
+    actions:
+      - action: script.solar_notify
+        data:
+          tag: overload
+          title: Close to the inverters' limit
+          message: >-
+            {% if trigger.id != 'off' %}{{ state_attr('sensor.site_inverter_load', 'overload_text') }}{% else %}clear{% endif %}
 
   # Hand-started generator: from mid-afternoon on, will the battery last until the sun is back?
   - id: solar_generator_needed

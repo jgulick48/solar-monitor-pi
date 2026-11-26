@@ -360,6 +360,22 @@ gets *Site solar check* (ok, note, warn), a *Site solar needs attention* problem
 usual notifications; it is also a line on the check-up page and a card on the start page. A dongle that is offline or
 silent has its own alerts already.
 
+## Overload warning
+
+Each inverter has its own limit, and each of its two 120 V legs has half of it (a 6000XP: 6 kW, 3 kW a leg). So two
+inverters with 12 kW between them can trip at 3 kW on one leg while the total looks comfortable. The box watches every
+inverter's whole output and each leg, in VA where the inverter reports it (the limit is in VA, and a motor draws
+more VA than W), and takes the tightest one as a percentage of its limit:
+
+- **90% or more** (the highest 1-minute average in the last 3 minutes): an alert at once, naming the inverter and
+  leg: turn something off before starting another big load. It clears after 10 quiet minutes.
+- **80% or more at some point today**: noted on the start page, no alert.
+
+Home Assistant gets *Site inverter load* (%), *Site peak load today* (kW) and *Site inverters near limit*. The day's
+highest load is also kept in the history (the History page and the Grafana History dashboard), filled in for
+earlier days too. The limit is the model's continuous rating from the setup page; readings come about every 10
+seconds, so a shorter surge isn't seen.
+
 ## Generator log and service reminder
 
 The generator is an optional feature (setup page: *Optional features* → *Generator*; on unless the site had chosen "No
