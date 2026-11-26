@@ -97,6 +97,13 @@ class ProbeBoard(unittest.TestCase):
         src = open(os.path.join(wd, "boiler-probes.yaml")).read()
         for i in range(1, 9):
             self.assertIn(f"name: ${{p{i}_name}}", src)
+        # the chip's revision decides the build: revision 3 and later by default, older ones on request
+        self.assertIn('old_chip: "false"', open(os.path.join(wd, "box.yaml")).read())
+        probeboard.write_build_files(self.stack, names, old_chip=True)
+        self.assertIn('old_chip: "true"', open(os.path.join(wd, "box.yaml")).read())
+        self.assertIn("engineering_sample: ${old_chip}", src)
+        self.assertNotIn("esp32-p4-evboard", src)                  # that board name forces the build for old chips
+
 
     def test_usb(self):
         self.assertEqual(probeboard.usb_boards(), [])

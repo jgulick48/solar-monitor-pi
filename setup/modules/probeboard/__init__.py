@@ -42,11 +42,15 @@ def setup_section(stack, msg=""):
                     f"{html.escape(chr(10).join(j.get('log', [])[-40:]))}</pre></details></div>")
     dis = " disabled" if busy else ""
     return f"""<h2 id="probeboard">Boiler probe board</h2>{note}{state}
-<form method="post" action="/probeboard/names"><fieldset><legend>Port names</legend>
+<form method="post" action="/probeboard/names"><fieldset><legend>Port names and chip</legend>
 <p><small>Each probe port's name in Home Assistant and on the board's display. The boiler module's setup picks which
 sensor is which, so these are only names. They take effect when the board is next installed or updated.</small></p>
 <div class="row">{rows}</div>
-<p><button>Save port names</button></p></fieldset></form>
+<label><input type="checkbox" name="old_chip" value="1"{' checked' if d.get('old_chip') else ''}> The board has an ESP32-P4
+chip older than revision 3</label>
+<small>Leave this off for boards bought now. Older chips need a different build: with the wrong one the board never
+starts. The install log names the chip ("ESP32-P4 (revision v3.2)") when it connects.</small>
+<p><button>Save</button></p></fieldset></form>
 <form method="post" action="/probeboard/install"><fieldset><legend>Firmware</legend>
 <p><small>The box builds the board's firmware itself (ESPHome; the first build downloads about 2 GB and takes a while)
 with its own encryption key, and adds the board to Home Assistant after the first install.</small></p>
@@ -67,6 +71,7 @@ if(d.status!=='running'){{clearInterval(t); if(location.pathname==='/setup'){{lo
 def save_names(stack, form):
     d = engine.settings(stack)
     d["names"] = [engine.clean_name(form.get(f"p{i}", ""), engine.NAMES[i - 1]) for i in range(1, 9)]
+    d["old_chip"] = bool(form.get("old_chip"))
     engine.save(stack, d)
     return Response(setup_msg="port names saved" + ("; update the board to use them" if d["installed"] else "") + ".")
 
