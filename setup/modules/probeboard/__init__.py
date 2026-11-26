@@ -56,10 +56,12 @@ with its own encryption key, and adds the board to Home Assistant after the firs
 <button formaction="/probeboard/ha" formmethod="post"{dis}{'' if d['installed'] else ' disabled'}>Add to Home Assistant</button></p>
 {progress}</fieldset></form>
 <script>(()=>{{const j=document.getElementById('pb-job'); if(!j||!j.dataset.running) return;
+// when the job ends, show the result with a fresh GET: this page may be the answer to the "Install" POST, and
+// reloading that would send the POST again and start the install over, for ever (seen on the first real board)
 const t=setInterval(async()=>{{try{{const r=await fetch('/probeboard/job'); const d=await r.json();
 document.getElementById('pb-step').textContent=d.message||d.step||''; const l=document.getElementById('pb-log');
 l.textContent=(d.log||[]).slice(-40).join('\\n'); l.scrollTop=l.scrollHeight;
-if(d.status!=='running'){{clearInterval(t); location.hash='probeboard'; location.reload();}}}}catch(e){{}}}},3000);}})();</script>"""
+if(d.status!=='running'){{clearInterval(t); if(location.pathname==='/setup'){{location.hash='probeboard'; location.reload();}}else{{location.replace('/setup#probeboard');}}}}}}catch(e){{}}}},3000);}})();</script>"""
 
 
 def save_names(stack, form):
