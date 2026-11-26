@@ -187,6 +187,10 @@ class ProbeBoard(unittest.TestCase):
         html = mod.setup_section(self.stack)
         self.assertNotRegex(html, r'value="usb"[^>]*disabled')
         self.assertIn("The port names changed since", html)
+        # when a job ends the page is fetched again with a GET: reloading the answer to the "Install" POST would
+        # send the POST again and start the install over (it flashed the first real board in a loop)
+        self.assertIn("location.replace('/setup#probeboard')", html)
+        self.assertNotIn("location.hash='probeboard'; location.reload();}}catch", html)
 
 
 if __name__ == "__main__":
