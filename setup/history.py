@@ -28,6 +28,7 @@ import vmdays
 VM = os.environ.get("SOLAR_VM", "http://127.0.0.1:8428")
 BACKFILL_PER_RUN = 90
 KEY = "site"
+PEAK_KEY, PEAK_UNTIL = "site-peak", "site-peak-until"   # filling in the highest load for days stored before it existed
 WEATHER_MARKER = "openmeteo-wind-backfilled"     # written by the collector once Open-Meteo's wind history is in
 HDD_BASE_F = 65.0
 STATION_MIN_SAMPLES = 200                        # a station's day counts with this many readings (it sends one a minute)
@@ -36,6 +37,7 @@ STATION_MIN_SAMPLES = 200                        # a station's day counts with t
 METRICS = (
     ("solar", "Solar", "site_day_solar_kwh", "kWh", 0, None, "sum", "pct"),
     ("used", "Used", "site_day_used_kwh", "kWh", 0, None, "sum", "pct"),
+    ("peak", "Highest load", "site_day_peak_load_kw", "kW", 1, None, "max", "pct"),
     ("generator", "Generator", "site_day_generator_hours", "h", 1, None, "sum", "pct"),
     ("propane", "Propane", "propane_day_used_gal", "gal", 0, "propane", "sum", "pct"),
     ("water", "Water", "water_day_used_gal", "gal", 0, "water", "sum", "pct"),
@@ -68,7 +70,48 @@ def site_lines(st):
     """One finished day's samples from display.day_stats(); a figure the day has no data for is left out."""
     names = (("solar", "site_day_solar_kwh"), ("used", "site_day_used_kwh"), ("gen_kwh", "site_day_generator_kwh"),
              ("gen_hours", "site_day_generator_hours"), ("low_soc", "site_day_low_soc"))
-    return [f"{name} {st[k]:.3f}" for k, name in names if st.get(k) is not None]
+    return [f"{name} {st[k]:.3f}" for k, name in names if st.get(k) is not None] + peak_lines(st)
+
+
+def peak_lines(st):
+    return [] if st.get("peak_load") is None else [f"site_day_peak_load_kw {st['peak_load'] / 1000:.3f}"]
+
+
+def push_peak_days(stack, tzname, now=None, limit=BACKFILL_PER_RUN, peak=None, first=None, send=None):
+    """The day's highest load for the days stored before it was recorded (boxes from before v0.2.58): from the
+    oldest data up to the day before the first one stored with it. Returns how many days were looked at."""
+    from zoneinfo import ZoneInfo
+    import display
+    tz = ZoneInfo(tzname)
+    now = now or time.time()
+    sent = ss.load_json(vmdays._path(stack), {})
+    if sent.get(PEAK_KEY) == "done":
+        return 0
+    if not sent.get(KEY):                               # nothing stored yet: every day will get its peak as it is stored
+        vmdays.mark(stack, PEAK_KEY, "done")
+        return 0
+    if sent.get(PEAK_KEY):
+        day = dt.date.fromisoformat(sent[PEAK_KEY]) + dt.timedelta(days=1)
+    else:
+        t0 = (first or first_data)(now)
+        if t0 is None:
+            return 0
+        day = dt.datetime.fromtimestamp(t0, tz).date()
+        sent[PEAK_UNTIL] = sent[KEY]                    # the days up to here were stored without it
+        ss.write_if_changed(vmdays._path(stack), json.dumps(sent, indent=1, sort_keys=True) + "\n", 0o644)
+    until = dt.date.fromisoformat(sent[PEAK_UNTIL])
+    peak = peak or (lambda a, b: display.vm_at(f"max_over_time(({display.INSTANT_RAW_LOAD})[{int(b - a)}s:1m])", b))
+    lines, n, last = [], 0, None
+    while day <= until and n < limit:
+        start = dt.datetime.combine(day, dt.time(0), tz).timestamp()
+        end = dt.datetime.combine(day + dt.timedelta(days=1), dt.time(0), tz).timestamp() - 1
+        noon = int(dt.datetime.combine(day, dt.time(12), tz).timestamp() * 1000)
+        lines += [f"{line} {noon}" for line in peak_lines({"peak_load": peak(start, end)})]
+        last, n, day = day, n + 1, day + dt.timedelta(days=1)
+    if lines:
+        (send or vmdays.post)(lines)
+    vmdays.mark(stack, PEAK_KEY, "done" if day > until else last.isoformat())
+    return n
 
 
 def weather_day_stats(start, end, query=None):
@@ -147,7 +190,9 @@ def collect(stack):
     out = []
     if site.get("latitude") and not os.path.exists(os.path.join(stack, "state", WEATHER_MARKER)):
         return out          # Open-Meteo's temperature and wind history isn't in yet: the days would be stored without it
-    n = push_site_days(stack, site.get("time_zone") or ss.host_timezone())
+    tzname = site.get("time_zone") or ss.host_timezone()
+    push_peak_days(stack, tzname)                       # before the new days: it notes how far the old ones go
+    n = push_site_days(stack, tzname)
     if n:
         out.append(f"history: {n} day{'s' if n != 1 else ''} stored")
     try:

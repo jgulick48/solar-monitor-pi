@@ -178,6 +178,7 @@ INSTANT = {
     "load_avg_24h": "avg_over_time((sum(lxp_p_load) or sum(lxp_p_eps))[24h:5m])",
     "load_avg_3d": "avg_over_time((sum(lxp_p_load) or sum(lxp_p_eps))[3d:10m])",
 }
+INSTANT_RAW_LOAD = "sum(lxp_p_load) or sum(lxp_p_eps)"
 RANGE = {"pv": "sum(lxp_p_pv)", "load": "sum(lxp_p_load) or sum(lxp_p_eps)", "soc": "max(lxp_soc)"}
 # a dongle dropping off for a moment doesn't make the totals dip (solar_setup.hold); the connection count and the
 # data age stay live, so a dongle that's gone still shows as gone
@@ -711,6 +712,7 @@ def day_stats(start, end):
                         (lambda f: None if f is None else f * secs / 3600 / 1000)(
                             vm_at(f"avg_over_time((clamp_min({EXT}, 0) * ({EXT} > bool 500)){w})", end))),
         "low_soc": vm_at(f"min_over_time((max(lxp_soc)){w})", end),
+        "peak_load": vm_at(f"max_over_time(({INSTANT_RAW_LOAD}){w})", end),      # W, the highest minute sample
         "gen_hours": (lambda f: None if f is None else f * secs / 3600)(
             vm_at(f"avg_over_time(clamp_max(({ss.GEN_POWER} > bool 200) + ({EXT} > bool 500), 1){w})", end)
             if vm_at(f"count_over_time((max(lxp_batt_current_bms)){w})", end)
@@ -884,6 +886,7 @@ def ha_status(stack, site):
         **genlog.ha_fields(stack, site),
         **_box_fields(stack),
         **_solar_check_fields(stack),
+        **_overload_fields(site),
     }
 
 
@@ -910,6 +913,11 @@ def _module_fields(stack, site):
 def _box_fields(stack):
     import boxhealth  # here, like battery: keeps the module light for the kiosk
     return boxhealth.ha_fields(stack)
+
+
+def _overload_fields(site):
+    import overload
+    return overload.ha_fields(site)
 
 
 def _solar_check_fields(stack):

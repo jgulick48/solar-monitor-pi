@@ -1075,6 +1075,95 @@
     "type": "prometheus",
     "uid": "victoriametrics"
    }
+  },
+  {
+   "type": "timeseries",
+   "title": "Highest load of the day",
+   "description": "The highest house load each day (one-minute samples); the line is the same day a year earlier. Compare with what the inverters can supply.",
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_peak_load_kw[1d])",
+     "legendFormat": "this year",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "victoriametrics"
+     },
+     "expr": "last_over_time(site_day_peak_load_kw[1d] offset 365d)",
+     "legendFormat": "a year earlier",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "kwatt",
+     "min": 0,
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 70,
+      "drawStyle": "bars",
+      "spanNulls": false,
+      "showPoints": "never",
+      "axisLabel": ""
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "a year earlier"
+      },
+      "properties": [
+       {
+        "id": "custom.drawStyle",
+        "value": "line"
+       },
+       {
+        "id": "custom.fillOpacity",
+        "value": 0
+       },
+       {
+        "id": "custom.lineWidth",
+        "value": 2
+       },
+       {
+        "id": "color",
+        "value": {
+         "mode": "fixed",
+         "fixedColor": "text"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "interval": "1d",
+   "id": 13,
+   "gridPos": {
+    "x": 0,
+    "y": 48,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "victoriametrics"
+   }
   }
  ],
  "editable": false,

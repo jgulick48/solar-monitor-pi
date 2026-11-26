@@ -171,6 +171,12 @@ views:
             entity: sensor.site_solar_check
             name: Panels and inverters
           - type: tile
+            entity: sensor.site_inverter_load
+            name: Inverter load (of the limit)
+          - type: tile
+            entity: sensor.site_peak_load_today
+            name: Highest load today
+          - type: tile
             entity: sensor.site_box_health
             name: Monitor box
           - type: tile

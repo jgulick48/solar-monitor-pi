@@ -2,7 +2,7 @@
 
 What is planned and what is left. The four planned phases below are built (through v0.2.57, with "follow another
 site" to come in the next release). Of the feature ideas further down, the panel and inverter checks, the
-underperformance alert and the box's own health are built; the overload warning, generator fuel and cost and the
+underperformance alert, the box's own health and the overload warning are built; generator fuel and cost and the
 monthly report are open.
 
 ## Before relying on it
@@ -82,7 +82,7 @@ Actual solar well below the forecast (or the weather station's irradiance) for a
 full, so the inverters aren't cutting it back: snow, dirt, a failed string. The ranch's "solar panels snow alert" is a
 working example (actual < 40% of potential for 2 hours, potential > 3 kW, battery below 95%).
 
-### 4. Overload warning
+### 4. Overload warning (built: `setup/overload.py`)
 Alert when the house load comes close to what the inverters can supply (2 × 6000XP: about 12 kW combined, less per
 leg), before a big load trips them. Show peak load per day on the dashboard.
 
