@@ -49,7 +49,6 @@ esp32:
   # built for the wrong kind doesn't start (the boot loader loads, then nothing, and the watchdog resets it for
   # ever). Boards sold now have revision 3 chips; esptool names the revision when it connects.
   engineering_sample: ${old_chip}
-  cpu_frequency: 360MHz        # ESPHome calls 400 MHz on the P4 experimental ("may not boot"); reading probes needs neither
   flash_size: 16MB
   framework:
     type: esp-idf
