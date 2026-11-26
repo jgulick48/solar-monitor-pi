@@ -1,9 +1,8 @@
 # Roadmap
 
-What is planned and what is left. The four planned phases below are built (through v0.2.57, with "follow another
-site" to come in the next release). Of the feature ideas further down, the panel and inverter checks, the
-underperformance alert, the box's own health, the overload warning and generator fuel and cost are built; the
-monthly report is open.
+What is planned and what is left. The four planned phases below are built (through v0.2.58, which added "follow
+another site"). The feature ideas further down are built too: the panel and inverter checks, the underperformance
+alert, the box's own health, the overload warning, generator fuel and cost, and the monthly report.
 
 ## Before relying on it
 
@@ -91,7 +90,7 @@ leg), before a big load trips them. Show peak load per day on the dashboard.
   gallons per kWh by size and load, or a measured figure the owner enters).
 - Monthly fuel and cost (fuel price is already on the setup page for the advisor).
 
-### 6. Monthly report
+### 6. Monthly report (built)
 One notification (and a page) per month: solar made, power used, generator hours and fuel, lowest battery, battery
 health, backups, compared with the same month last year once there is a year of data.
 

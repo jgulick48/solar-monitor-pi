@@ -33,11 +33,12 @@ WEATHER_MARKER = "openmeteo-wind-backfilled"     # written by the collector once
 HDD_BASE_F = 65.0
 STATION_MIN_SAMPLES = 200                        # a station's day counts with this many readings (it sends one a minute)
 # (id, title, the day series, unit, digits, the module that has to be on, or None)
-# how days add up to a month: "sum", "avg" (the mean of the days) or "max"; how the change is said: "pct" or "diff"
+# how days add up to a month: "sum", "avg" (the mean of the days), "max" or "min"; how the change is said: "pct" or "diff"
 METRICS = (
     ("solar", "Solar", "site_day_solar_kwh", "kWh", 0, None, "sum", "pct"),
     ("used", "Used", "site_day_used_kwh", "kWh", 0, None, "sum", "pct"),
     ("peak", "Highest load", "site_day_peak_load_kw", "kW", 1, None, "max", "pct"),
+    ("low_soc", "Lowest battery", "site_day_low_soc", "%", 0, None, "min", "diff"),
     ("generator", "Generator", "site_day_generator_hours", "h", 1, None, "sum", "pct"),
     ("propane", "Propane", "propane_day_used_gal", "gal", 0, "propane", "sum", "pct"),
     ("water", "Water", "water_day_used_gal", "gal", 0, "water", "sum", "pct"),
@@ -227,8 +228,8 @@ def _month_days(year, month):
     return (nxt - dt.date(year, month, 1)).days
 
 
-AGG = {"sum": sum, "avg": lambda v: sum(v) / len(v), "max": max}
-WORDS = {"temp": ("warmer", "colder"), "gust": ("stronger", "weaker")}
+AGG = {"sum": sum, "avg": lambda v: sum(v) / len(v), "max": max, "min": min}
+WORDS = {"temp": ("warmer", "colder"), "gust": ("stronger", "weaker"), "low_soc": ("higher", "lower")}
 
 
 def compare(days, today, months=12, agg="sum", show="pct"):
@@ -314,7 +315,7 @@ def _change(c, show="pct", unit="", words=("more", "less")):
         return ""
     if show == "diff":
         n = round(abs(c))
-        return "the same" if n == 0 else f"{n} {unit} {words[0] if c > 0 else words[1]}"
+        return "the same" if n == 0 else f"{n}{'' if unit == '%' else ' '}{unit} {words[0] if c > 0 else words[1]}"
     return f"{abs(c)}% {words[0] if c > 0 else words[1]}" if c else "the same"
 
 

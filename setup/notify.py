@@ -36,7 +36,7 @@ TAG_PRIORITY = {
     "inverter_fault": "critical", "generator": "critical",
     "battery_low": "warning", "dongle_offline": "warning", "no_data": "warning", "backup": "warning",
     "battery_health": "warning", "box_health": "warning", "solar_check": "warning", "overload": "warning",
-    "generator_service": "info", "summary": "info",
+    "generator_service": "info", "summary": "info", "monthly_report": "info",
 }
 CHANNELS = (("ha_app", "Home Assistant app"), ("ntfy", "ntfy"), ("wall", "Wall display"))
 NTFY_PRIORITY = {"critical": 5, "warning": 4, "info": 3}
