@@ -102,7 +102,15 @@ The solar monitor's setup page has a **Boiler probe board** section that does al
 4. Unplug the USB, plug in PoE. From then on **Update over the network** sends a new build to
    `boiler-probes.local`: after renaming ports, or when a box update changes this file.
 
-If the board doesn't show up on USB, hold BOOT and press RESET to put it in its download mode, and try again.
+If the install builds the firmware but can't connect to the board ("Failed to connect", "No serial data
+received"), put it in its download mode by hand: hold BOOT, press and release RESET, release BOOT, and install
+again. The same if the board doesn't show up on USB.
+
+**Chip revision.** ESP32-P4 chips before revision 3 and from revision 3 on need different firmware, and one built
+for the wrong kind never starts: the board resets every second or so and never appears on the network. The firmware
+here is built for revision 3 and later, which is what boards sold now have (the install log names it: "ESP32-P4
+(revision v3.2)"). For an older chip, tick the box under the port names on the setup page (`old_chip: "true"` when
+flashing by hand).
 
 ## Flashing by hand
 

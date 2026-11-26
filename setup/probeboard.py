@@ -35,7 +35,8 @@ PORT = 6053
 NAMES = ["Floor supply", "Floor return", "Boiler supply", "Boiler return", "Hot water outlet", "Slab near boiler",
          "Slab far", "Probe P8"]            # boiler-probes.yaml's defaults, P1-P8
 NAME_MAX = 24
-DEFAULTS = {"names": list(NAMES), "built_names": [], "installed": 0, "ha_added": False}
+DEFAULTS = {"names": list(NAMES), "built_names": [], "installed": 0, "ha_added": False,
+            "old_chip": False}             # an ESP32-P4 before revision 3 needs its own build (boiler-probes.yaml)
 ROOT = "/"                                  # tests point this at a fake root (for /dev)
 DOCKER = ["docker"]
 _lock = threading.Lock()
@@ -83,7 +84,7 @@ def workdir(stack):
     return os.path.join(stack, "state", "esphome")
 
 
-def write_build_files(stack, names):
+def write_build_files(stack, names, old_chip=False):
     """state/esphome/: boiler-probes.yaml (copied), secrets.yaml (this box's) and box.yaml (the port names)."""
     wd = workdir(stack)
     os.makedirs(wd, mode=0o700, exist_ok=True)
@@ -91,6 +92,7 @@ def write_build_files(stack, names):
     ss.write_if_changed(os.path.join(wd, "secrets.yaml"),
                         f"api_encryption_key: {json.dumps(api_key(stack))}\nota_password: {json.dumps(ota_password(stack))}\n", 0o600)
     subs = "".join(f"  p{i}_name: {json.dumps(n)}\n" for i, n in enumerate(names, 1))
+    subs += f"  old_chip: \"{'true' if old_chip else 'false'}\"\n"
     ss.write_if_changed(os.path.join(wd, "box.yaml"),
                         "# Written by the solar monitor (the probe board's port names); edits are overwritten.\n"
                         f"substitutions:\n{subs}\npackages:\n  board: !include boiler-probes.yaml\n", 0o600)
@@ -188,7 +190,7 @@ def run_job(stack, kind):
     _job(stack, kind=kind, status="running", started=int(time.time()), ended=0, step="Preparing the build", log=log,
          message="")
     try:
-        wd = write_build_files(stack, names)
+        wd = write_build_files(stack, names, bool(d.get("old_chip")))
         if subprocess.run(DOCKER + ["image", "inspect", IMAGE], capture_output=True).returncode != 0:
             _job(stack, step="Getting ESPHome (the first time only: about 1.5 GB)")
             if _run_logged(stack, DOCKER + ["pull", IMAGE], log, 3600) != 0:
@@ -205,6 +207,9 @@ def run_job(stack, kind):
         _job(stack, step="Building the firmware and installing it (the first build downloads the ESP32 toolchain "
                          "and takes a while; later ones a few minutes)")
         if _run_logged(stack, cmd + [IMAGE, "run", "box.yaml", "--device", target, "--no-logs"], log, 5400) != 0:
+            if kind == "usb" and any("Failed to connect" in line or "No serial data received" in line for line in log):
+                raise RuntimeError("the firmware was built, but the board didn't go into its download mode by itself. "
+                                   "Hold BOOT, press and release RESET, then release BOOT, and install again")
             raise RuntimeError("the build or the install failed (the log above says why)")
         d = settings(stack)
         d.update(installed=int(time.time()), built_names=names)
