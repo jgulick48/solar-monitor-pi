@@ -2,8 +2,8 @@
 
 What is planned and what is left. The four planned phases below are built (through v0.2.57, with "follow another
 site" to come in the next release). Of the feature ideas further down, the panel and inverter checks, the
-underperformance alert, the box's own health and the overload warning are built; generator fuel and cost and the
-monthly report are open.
+underperformance alert, the box's own health, the overload warning and generator fuel and cost are built; the
+monthly report is open.
 
 ## Before relying on it
 
@@ -86,7 +86,7 @@ working example (actual < 40% of potential for 2 hours, potential > 3 kW, batter
 Alert when the house load comes close to what the inverters can supply (2 × 6000XP: about 12 kW combined, less per
 leg), before a big load trips them. Show peak load per day on the dashboard.
 
-### 5. Generator fuel and cost
+### 5. Generator fuel and cost (built: the Generator page, `setup/genlog.py`)
 - Fuel per run from the run's kWh and the generator type and fuel (setup page already asks for both; typical
   gallons per kWh by size and load, or a measured figure the owner enters).
 - Monthly fuel and cost (fuel price is already on the setup page for the advisor).
