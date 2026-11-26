@@ -3,6 +3,7 @@ Run: python3 -m unittest discover -s tests -v"""
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "setup"))
@@ -163,3 +164,60 @@ class FuelAndCost(unittest.TestCase):
             self.assertEqual((f["generator_fuel_30d"], f["generator_cost_30d"], f["generator_last_run_fuel"]), (1.0, 3.5, 1.0))
             f = genlog.ha_fields(stack, {"generator": "manual"}, now)           # no size, no price: no figures
             self.assertEqual((f["generator_fuel_30d"], f["generator_cost_30d"], f["generator_last_run_fuel"]), (None, None, None))
+
+
+class ForGrafanaAndTheAdvisor(unittest.TestCase):
+    """The log's counts as samples (the Battery and generator dashboard), and its runs per month (the advisor)."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.stack = self.tmp.name
+        os.makedirs(os.path.join(self.stack, "state"))
+        self.t0 = time.mktime(time.strptime("2026-10-01", "%Y-%m-%d"))
+        self.runs = [{"kind": "inverter", "start": self.t0 + d * 86400, "end": self.t0 + d * 86400 + 5400, "hours": 1.5,
+                      "kwh": 6.0, "peak_kw": 5.0} for d in (2, 20, 35)]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_vm_lines(self):
+        st = genlog.load(self.stack)
+        st.update(runs=self.runs, hours={"inverter": 4.5, "charger": 0.0}, processed_until=int(self.t0 + 40 * 86400))
+        genlog.save(self.stack, st)
+        lines = genlog.vm_lines(genlog.status(self.stack, {"generator": "automatic"}, now=self.t0 + 40 * 86400))
+        self.assertEqual(lines, ['site_generator_hours_total{kind="inverter"} 4.5',
+                                 'site_generator_hours_since_service{kind="inverter"} 4.5',
+                                 'site_generator_service_left_hours{kind="inverter"} 195.5'])
+        self.assertEqual(genlog.vm_lines(genlog.status(self.stack, {"generator": "none"}, now=self.t0)), lines)   # it has run
+        os.remove(genlog.path(self.stack))
+        self.assertEqual(genlog.vm_lines(genlog.status(self.stack, {"generator": "none"})), [])
+
+    def test_covers(self):
+        end = self.t0 + 40 * 86400
+        st = {"processed_until": end - 3600, "runs": self.runs}
+        self.assertTrue(genlog.covers(st, self.t0, end))
+        self.assertFalse(genlog.covers({**st, "processed_until": end - 3 * 86400}, self.t0, end))    # still catching up
+        self.assertFalse(genlog.covers({**st, "processed_until": 0}, self.t0, end))
+        full = [dict(self.runs[0], start=self.t0 + 86400 + i) for i in range(genlog.KEEP_RUNS)]
+        self.assertFalse(genlog.covers({**st, "runs": full}, self.t0, end))          # older runs were dropped
+        self.assertTrue(genlog.covers({**st, "runs": full}, self.t0 + 2 * 86400, end))
+
+    def test_by_month(self):
+        by = genlog.by_month(self.runs, self.t0, self.t0 + 30 * 86400)
+        self.assertEqual(by, {"2026-10": {"kwh": 12.0, "starts": 2, "hours": 3.0}})  # the November run is after the period
+
+    def test_advisor_months_from_the_log(self):
+        import advisor
+        months = [{"month": "2026-10", "days": 31.0, "generator_kwh": 99, "generator_starts": 9, "generator_hours": 9.0},
+                  {"month": "2026-11", "days": 9.0, "generator_kwh": 99, "generator_starts": 9, "generator_hours": 9.0}]
+        end = self.t0 + 40 * 86400
+        self.assertEqual(advisor.with_generator_log(months, self.stack, self.t0, end), (months, "history"))   # no log
+        st = genlog.load(self.stack)
+        st.update(runs=self.runs[:2], processed_until=int(end))
+        genlog.save(self.stack, st)
+        out, source = advisor.with_generator_log(months, self.stack, self.t0, end)
+        self.assertEqual(source, "log")
+        self.assertEqual([(m["generator_kwh"], m["generator_starts"], m["generator_hours"]) for m in out], [(12, 2, 3.0), (0, 0, 0.0)])
+        self.assertEqual(out[0]["days"], 31.0)
+        st["processed_until"] = int(self.t0)                         # the log is far behind: keep the history's figures
+        genlog.save(self.stack, st)
+        self.assertEqual(advisor.with_generator_log(months, self.stack, self.t0, end), (months, "history"))

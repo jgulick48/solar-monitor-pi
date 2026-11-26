@@ -941,6 +941,9 @@ def advisor_page():
         f"<td>{v(m['potential_per_day'])}</td><td>{v(m['lost_to_full_per_day'])}</td><td>{v(m['generator_kwh'])}</td>"
         f"<td>{v(m['generator_starts'])}</td><td>{v(m['low_battery_days'])}</td></tr>" for m in a.get("months", []))
     h = a.get("headroom", {})
+    gen_note = {"log": "<p><small>Generator energy and runs: the <a href='/generator'>generator log</a>'s.</small></p>",
+                "history": "<p><small>Generator energy and runs are counted from the 15-minute history: the generator log is "
+                           "off or still working through the history.</small></p>"}.get(d.get("generator_from"), "")
     ag = a.get("automatic_generator")
     body = f"""<h1>Advisor</h1><p><small>Analysed {e(a['generated'])}: {v(d['days'])} days ({e(d['from'])} to {e(d['to'])}),
 sunlight from {e(a['source'])}{', calibrated ' + format(d['calibration'], '.2f') + ' on ' + str(d['calibration_samples']) + ' samples' if d.get('calibration') else ' (not calibrated yet)'}.
@@ -956,6 +959,7 @@ generator hours and fuel are what it takes to make that up ({e(a['site']['invert
 <tr><td>Solar</td><td>array {v(h.get('array_kwp'))} kW, peak seen {v(h.get('peak_pv_kw'))} kW, inverters accept up to {v(h.get('pv_input_limit_kw'))} kW</td></tr></table>
 <h2>By month (per day averages)</h2>
 <table><tr><th>Month</th><th>Days</th><th>Load kWh</th><th>Solar used</th><th>Solar possible</th><th>Lost (full)</th><th>Generator kWh</th><th>Gen runs</th><th>Low days</th></tr>{mo}</table>
+{gen_note}
 <p><a href="/">Start page</a></p>"""
     return page("Advisor", body)
 

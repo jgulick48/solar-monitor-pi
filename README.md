@@ -347,6 +347,11 @@ themselves. Home Assistant gets the figures as sensors (*Site battery health*, *
 *cycles*, *cell temperature low/high*, *capacity estimate*), a *Battery needs attention* alert, and a Battery health
 section on the Solar dashboard. A BMS fault also shows on the wall display.
 
+Grafana has the dashboard *Battery and generator*: the cell spread near full, the highest and lowest cell, cell
+temperatures, state of health, cycles and the capacity estimate over time (a slow fall over the years is the
+batteries ageing), and below them the generator: its power, hours and energy per day, and the hours since its
+service. It uses the same queries as this page and the generator log.
+
 ## Panels and inverters
 
 Some faults look normal at a glance: with two inverters one can stop while the other carries everything, and a
@@ -553,7 +558,10 @@ runs every week (Sunday night) or on demand:
    full. That shows the solar lost because the batteries were full, which the inverters' own readings hide.
 2. **What happened**: load, solar, lost solar, low battery days and generator charging by month, plus
    charging the inverters didn't do themselves (a Chargeverter or other DC charger shows up as the
-   battery's BMS current being higher than the inverters' battery power).
+   battery's BMS current being higher than the inverters' battery power). The generator's energy and runs per
+   month are the generator log's, so they agree with the Generator page and the monthly report; while the log is
+   off or still working through the history, they are counted from the 15-minute history instead, and the page
+   says so.
 3. **Options compared**: the period is replayed with +1/+2/+4 batteries, +25/50/100% panels (capped at
    the inverters' solar input, with an extra inverter where that limits it) and an automatic generator.
    For each it shows the energy the batteries would have lacked to stay above 20% without a generator,

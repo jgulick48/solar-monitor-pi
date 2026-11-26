@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Writes stack/grafana/dashboards/boiler.json and water.json: python3 tools/gen_module_dashboards.py (from the repository root).
+"""Writes stack/grafana/dashboards/boiler.json, water.json and battery-generator.json: python3 tools/gen_module_dashboards.py (from the repository root).
 Edit this file, not the JSON, so the panels stay consistent; tests/test_dashboards.py checks every metric they query."""
 import json
+import os
 import sys
 
 DS = {"type": "prometheus", "uid": "victoriametrics"}
@@ -207,8 +208,64 @@ def water():
                      time_from="now-7d")
 
 
+def battery_generator():
+    """The Battery page's and the generator log's figures over time, with the same queries the pages use."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "setup"))
+    import battery
+    import solar_setup as ss
+    q = battery.Q
+    spread = f"({q['max_cell']} - {q['min_cell']}) * 1000"
+    b = Board()
+    b.add(stat("Battery", [t(q["soc"], instant=True)], unit="percent", decimals=0,
+               thresholds=[{"color": RED, "value": None}, {"color": ORANGE, "value": 25}, {"color": GREEN, "value": 50}]), 4, 4)
+    b.add(stat("Cell spread now", [t(spread, instant=True)], decimals=0,
+               desc="mV between the highest and the lowest cell. It only says much near full: see the panel below."), 4, 4)
+    b.add(stat("State of health", [t(q["soh"], instant=True)], unit="percent", decimals=0,
+               thresholds=[{"color": RED, "value": None}, {"color": GREEN, "value": battery.SOH_WARN}],
+               desc="As the BMS reports it. Empty when it doesn't (the 6000XP sends 0)."), 4, 4)
+    b.add(stat("Cycles", [t(q["cycles"], instant=True)], decimals=0), 4, 4)
+    b.add(stat("Capacity estimate", [t("site_battery_capacity_kwh", instant=True)], unit="kwatth", decimals=1,
+               desc="kWh per 100% of charge, from the long discharges of the last 60 days (the Battery page's figure)."), 4, 4)
+    b.add(stat("Days since a full charge", [t("site_battery_days_since_full", instant=True)], decimals=0,
+               thresholds=[{"color": GREEN, "value": None}, {"color": ORANGE, "value": battery.NOT_FULL_NOTE_D},
+                           {"color": RED, "value": battery.NOT_FULL_WARN_D}]), 4, 4)
+
+    b.row("Battery")
+    b.add(series("Cell spread near full", [t(battery.SPREAD_TOP, "mV")], minv=0, decimals=0,
+                 desc=f"Highest minus lowest cell while the battery is at {battery.FULL_SOC}% or more: under {battery.SPREAD_OK_MV} mV is "
+                      f"good, over {battery.SPREAD_WARN_MV} mV a cell or battery is drifting."), 12, 8)
+    b.add(series("Highest and lowest cell", [t(q["max_cell"], "highest"), t(q["min_cell"], "lowest", "B")], unit="volt", decimals=3), 12, 8)
+    b.add(series("Cell temperatures", [t(q["max_temp"], "warmest"), t(q["min_temp"], "coldest", "B")], unit="celsius",
+                 desc=f"Charging stops at {battery.COLD_C} °C; over {battery.HOT_C} °C is too hot."), 12, 8)
+    b.add(series("State of charge", [t(q["soc"], "%")], unit="percent", minv=0), 12, 8)
+    b.add(series("Capacity estimate", [t("site_battery_capacity_kwh", "kWh per 100%")], unit="kwatth", decimals=1, softmin=0,
+                 desc="One figure an hour: the median of the last estimates. A slow fall over the years is the batteries ageing."), 12, 8)
+    b.add(series("State of health and cycles", [t(q["soh"], "state of health (%)"), t(q["cycles"], "cycles", "B")],
+                 overrides=[("cycles", right_line("cycles"))]), 12, 8)
+
+    b.row("Generator")
+    b.add(stat("Hours since service", [t("max(site_generator_hours_since_service)", instant=True)], unit="h", decimals=1,
+               desc="The generator log's count (Generator page), for the kind closest to its service."), 6, 4)
+    b.add(stat("Hours to the next service", [t("min(site_generator_service_left_hours)", instant=True)], unit="h", decimals=1,
+               thresholds=[{"color": RED, "value": None}, {"color": ORANGE, "value": 0.01}, {"color": GREEN, "value": 20}]), 6, 4)
+    b.add(stat("Hours, last 30 days", [t("sum_over_time(site_day_generator_hours[30d])", instant=True)], unit="h", decimals=1), 6, 4)
+    b.add(stat("Hours in the log", [t("sum(site_generator_hours_total)", instant=True)], unit="h", decimals=0,
+               desc="Every run the log has found, up to 400 days before the box first looked."), 6, 4)
+    b.add(series("Generator power", [t(ss.GEN_POWER, "on the inverters"), t(ss.EXT_CHARGE, "through a DC charger", "B")],
+                 unit="watt", minv=0, desc="What the generator log reads: the inverters' generator input, and charging the "
+                                          "inverters didn't do themselves (a Chargeverter or other DC charger)."), 24, 8)
+    b.add(series("Generator hours per day", [t("last_over_time(site_day_generator_hours[1d])", "hours", interval=DAYS)],
+                 unit="h", bars=True, interval=DAYS, minv=0), 12, 8)
+    b.add(series("Generator energy per day", [t("last_over_time(site_day_generator_kwh[1d])", "kWh", interval=DAYS)],
+                 unit="kwatth", bars=True, interval=DAYS, minv=0), 12, 8)
+    b.add(series("Hours since service", [t("site_generator_hours_since_service", "{{kind}}")], unit="h", minv=0,
+                 desc="Climbs while the generator runs and drops to 0 when a service is recorded on the Generator page."), 24, 7)
+    return dashboard("battery-generator", "Battery and generator",
+                     "Battery health over time (the Battery page's figures) and the generator log.", b.panels, time_from="now-30d")
+
+
 root = sys.argv[1] if len(sys.argv) > 1 else "."
-for name, d in (("boiler", boiler()), ("water", water())):
+for name, d in (("boiler", boiler()), ("water", water()), ("battery-generator", battery_generator())):
     with open(f"{root}/stack/grafana/dashboards/{name}.json", "w") as f:
         json.dump(d, f, indent=1, ensure_ascii=False)
         f.write("\n")

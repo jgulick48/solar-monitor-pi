@@ -206,6 +206,18 @@ def status(stack, site, now=None):
     }
 
 
+def vm_lines(s, now=None):
+    """The figures the page works out, as samples for Grafana (the collector, hourly): the capacity estimate and
+    the days since a full charge. The cells' own readings are already there."""
+    now = now or time.time()
+    out = []
+    if s.get("capacity_kwh"):
+        out.append(f"site_battery_capacity_kwh {s['capacity_kwh']:g}")
+    if s.get("last_full"):
+        out.append(f"site_battery_days_since_full {max(now - s['last_full'], 0) / 86400:.2f}")
+    return out
+
+
 def bms_line(s):
     """Which inverter the battery's data comes from, for the pages."""
     if not s["bms_inverters"]:
