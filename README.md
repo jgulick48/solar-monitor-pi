@@ -18,6 +18,7 @@ read, never changed.
 | Advisor | Weekly analysis: batteries, panels, inverter or generator? | `http://<pi>/advisor` |
 | Backups | Nightly backup to a USB stick, and restore | `http://<pi>/backup` |
 | Battery health | Cell spread near full, temperatures, SOH, cycles, capacity check, BMS faults | `http://<pi>/battery` |
+| Panels and inverters | A PV string or an inverter making far less than usual; the site far below the sunlight | `http://<pi>/panels` |
 
 | Generator log | Every generator run, hours since the last service, service reminder | `http://<pi>/generator` |
 | Wall display | Dashboard and up to two cameras on a screen plugged into the Pi's HDMI port | `http://<pi>/display` |
@@ -200,7 +201,7 @@ copies, not the originals: make your own dashboard in Settings -> Dashboards and
 line per item: green works, yellow works but deserves a look, red doesn't work, grey is optional and not set up.
 Problems come first, each with what to do and a link to where it is fixed. The box checks the site details, the
 inverter dongles, that data is being recorded, Home Assistant (running, and its owner account made), the solar
-forecast, the box itself (temperature, power, disk, services) and the clock. Enabled modules add their own lines:
+forecast, the panels and inverters, the box itself (temperature, power, disk, services) and the clock. Enabled modules add their own lines:
 notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras and freeze
 protection. Open it after first setup, and whenever something seems off.
 
@@ -331,6 +332,33 @@ follows the BMS's own charge counter, so it checks the BMS and the setup page's 
 themselves. Home Assistant gets the figures as sensors (*Site battery health*, *cell spread when full*, *state of health*,
 *cycles*, *cell temperature low/high*, *capacity estimate*), a *Battery needs attention* alert, and a Battery health
 section on the Solar dashboard. A BMS fault also shows on the wall display.
+
+## Panels and inverters
+
+Some faults look normal at a glance: with two inverters one can stop while the other carries everything, and a
+tripped string breaker only shows as "a bit less solar". The **Panels** page (`http://<pi>/panels`) checks every
+5 minutes:
+
+| Check | Reported when |
+|---|---|
+| Each PV string | It makes under 20% of what its usual share of the site's solar would give now (and that is 300 W or more), over the last 2 hours. All of one inverter's strings out is reported as that inverter. |
+| Each inverter's output | It supplies under 10% of its usual share of the house (500 W or more) for 30 minutes while the others carry it. |
+| The whole site | Under 40% of what the sunlight should give over the last 2 full hours: snow, dirt, a tripped main PV breaker. |
+
+There is nothing to set up. A string's usual share is learned from the same 2 hours of the day over the last 4 weeks
+(strings facing different ways have shares that change through the day), and needs 5 comparable days first. Nothing
+is judged in poor light or while the battery is at 95% or more: the inverters then hold the panels back, and not
+evenly. On a site whose battery is full by late morning every day, that leaves the morning for these checks.
+
+The whole-site check needs to know what the sunlight should give. With a weather station that has a solar sensor
+that is measured, and a low reading is an alert after 2 hours. Without one it comes from the weather forecast, which
+can miss cloud: it is then only noted on the page, and becomes an alert when the last day of sunlight was as low. It
+starts once the advisor has tuned the forecast to the site (a few weeks of data).
+
+A finding stays until the same check passes again, so it doesn't clear at dusk and come back at dawn. Home Assistant
+gets *Site solar check* (ok, note, warn), a *Site solar needs attention* problem sensor and one alert through the
+usual notifications; it is also a line on the check-up page and a card on the start page. A dongle that is offline or
+silent has its own alerts already.
 
 ## Generator log and service reminder
 

@@ -168,6 +168,9 @@ views:
           - type: heading
             heading: This box
           - type: tile
+            entity: sensor.site_solar_check
+            name: Panels and inverters
+          - type: tile
             entity: sensor.site_box_health
             name: Monitor box
           - type: tile

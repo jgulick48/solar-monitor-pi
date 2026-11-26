@@ -16,6 +16,8 @@
     it backfills 92 days. Timestamps are the end of each hour (Open-Meteo
     reports the mean of the preceding hour). This sends the site's location to
     Open-Meteo (open-meteo.com, free API, no key).
+  * Every 5 minutes, the panel and inverter checks (solarcheck.py): a string or an inverter making far less than
+    usual, the whole site far below what the sunlight should give.
   * From the same requests, the solar forecast: expected output per hour for
     today and the next five days in state/forecast.json, scaled by the
     advisor's calibration against Open-Meteo (actual output / irradiance model)
@@ -36,6 +38,7 @@ import modules  # noqa: E402
 import hastates  # noqa: E402
 import history  # noqa: E402
 import loadprofile  # noqa: E402
+import solarcheck  # noqa: E402
 import weather  # noqa: E402
 import wx  # noqa: E402
 
@@ -199,6 +202,7 @@ def main():
     last_om = 0.0
     last_profile, profile_use = 0.0, None
     last_history = time.time() - 3300               # first a few minutes after starting, then hourly
+    last_check = 0.0
     hooks = {}
     seen = {}
     site_changed(args.stack, seen)
@@ -244,6 +248,13 @@ def main():
                     log(line)
             except Exception as e:  # noqa: BLE001 - keep collecting
                 log("history: storing days failed:", e)
+        if time.time() - last_check >= 300:         # strings, inverters and the site against what is usual (solarcheck.py)
+            last_check = time.time()
+            try:
+                for line in solarcheck.run(args.stack):
+                    log(line)
+            except Exception as e:  # noqa: BLE001 - keep collecting
+                log("solar check failed:", e)
         modules.run_due(args.stack, hooks)          # the enabled modules' own schedules (remote support, weather, cameras, generator log)
         if args.once:
             return
