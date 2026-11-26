@@ -100,13 +100,19 @@ def write_build_files(stack, names):
 # --------------------------------------------------------------------------
 # The ESP32 on USB
 # --------------------------------------------------------------------------
+USB_IDS = ("espressif", "303a",     # an ESP32's own USB port
+           "1a86")                  # a WCH USB-serial chip: the ESP32-P4-ETH's USB-C goes through a CH343, which names
+#                                     itself "1a86 USB Single Serial" and not the board (seen on the first board)
+
+
 def usb_boards():
-    """ESP32s plugged into the Pi's USB: /dev/serial/by-id names from Espressif (vendor 303a: the ESP32-P4's own USB
-    port), resolved to /dev/ttyACM* paths."""
+    """ESP32s plugged into the Pi's USB: /dev/serial/by-id names from Espressif or from the board's USB-serial chip
+    (USB_IDS), resolved to /dev/ttyACM* paths. The box uses no other USB serial devices (its radios are on the
+    network), so a WCH adapter here is taken to be the board."""
     out = []
     for p in sorted(glob.glob(os.path.join(ROOT, "dev", "serial", "by-id", "*"))):
         n = os.path.basename(p).lower()
-        if "espressif" in n or "303a" in n:
+        if any(x in n for x in USB_IDS) and os.path.realpath(p) not in out:
             out.append(os.path.realpath(p))
     return out
 

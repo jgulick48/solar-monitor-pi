@@ -103,6 +103,13 @@ class ProbeBoard(unittest.TestCase):
         self.assertIn("no ESP32 found", probeboard.start(self.stack, "usb"))
         tty = self.plug_in()
         self.assertEqual(probeboard.usb_boards(), [tty])                 # the Espressif one, not the FTDI adapter
+        # the ESP32-P4-ETH's USB-C is a WCH CH343 bridge, which doesn't say "Espressif"
+        by_id = os.path.join(self.root, "dev", "serial", "by-id")
+        for n in os.listdir(by_id):
+            os.remove(os.path.join(by_id, n))
+        self.assertEqual(probeboard.usb_boards(), [])
+        os.symlink(tty, os.path.join(by_id, "usb-1a86_USB_Single_Serial_5C93018101-if00"))
+        self.assertEqual(probeboard.usb_boards(), [tty])
 
     def test_install_over_usb(self):
         self.fake_docker(inspect=1)                                      # no ESPHome image yet: pulled first
