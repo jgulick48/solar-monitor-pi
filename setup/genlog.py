@@ -18,6 +18,11 @@ service are kept in state/generator.json. The collector (solar-collector.service
 update() every few minutes; the first call works through the existing history (up to 400 days)
 a month at a time.
 
+Fuel and cost are worked out when shown, never stored, so a corrected generator size or fuel price reprices the
+whole log (fuel()): the owner's measured gallons per hour when entered, else a typical figure for the generator's
+size and fuel at the load it actually ran at (the advisor's curves). For a generator on a DC charger the load is the
+charging power divided by the charger's efficiency (0.92). Cost: the fuel price from the setup page.
+
 The start page shows the hours since the last service and has a "serviced" button
 (/generator); Home Assistant gets the same figures from /api/ha and a reminder when a
 service is due.
@@ -49,6 +54,76 @@ CHUNK = 86400         # seconds of history per query
 MAX_CHUNKS = 31       # per update() call, so the first pass doesn't hold up the collector
 LAG = 120             # leave the newest two minutes: the bridge may not have written them yet
 KEEP_RUNS = 500
+CHARGER_EFFICIENCY = 0.92   # a DC charger's output over what it takes from the generator
+
+
+def _num(v):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if x > 0 else None
+
+
+def fuel_basis(site):
+    """How fuel is worked out for this site: ("measured", gal/h) | ("typical", (kW, fuel)) | (None, why not)."""
+    site = site or {}
+    gph = _num(site.get("generator_gph"))
+    if gph:
+        return "measured", gph
+    kw = _num(site.get("generator_kw"))
+    if not kw:
+        return None, "enter the generator's size (or its measured fuel use) on the setup page"
+    return "typical", (kw, site.get("generator_fuel") if site.get("generator_fuel") in ("gasoline", "propane", "diesel") else "gasoline")
+
+
+def fuel(run, site):
+    """Gallons one run used, or None when there is nothing to work it out from."""
+    how, v = fuel_basis(site)
+    hours = run.get("hours") or 0
+    if how is None or hours <= 0:
+        return None
+    if how == "measured":
+        return v * hours
+    import advisor
+    kw, kind = v
+    load = (run.get("kwh") or 0) / hours / (CHARGER_EFFICIENCY if run.get("kind") == "charger" else 1.0)
+    return advisor.FUEL[kind](kw, min(max(load / kw, 0.0), 1.0)) * hours
+
+
+def cost(gal, site):
+    price = _num(((site or {}).get("costs") or {}).get("fuel_per_gal"))
+    return None if gal is None or not price else gal * price
+
+
+def totals(runs, site):
+    """{"runs", "hours", "kwh", "fuel", "cost"} of some runs; fuel and cost None when they can't be worked out."""
+    f = [fuel(r, site) for r in runs]
+    gal = sum(f) if f and all(x is not None for x in f) else (0.0 if not runs and fuel_basis(site)[0] else None)
+    c = cost(gal, site)
+    return {"runs": len(runs), "hours": round(sum(r["hours"] for r in runs), 1), "kwh": round(sum(r["kwh"] for r in runs), 1),
+            "fuel": None if gal is None else round(gal, 1), "cost": None if c is None else round(c, 2)}
+
+
+def months(runs, site, now=None, n=12):
+    """[{"month": "2026-11", ...totals}] newest first, for the last n months that have runs (by a run's start)."""
+    by = {}
+    for r in runs:
+        by.setdefault(time.strftime("%Y-%m", time.localtime(r["start"])), []).append(r)
+    return [{"month": m, **totals(by[m], site)} for m in sorted(by, reverse=True)[:n]]
+
+
+def fuel_note(site):
+    """One sentence on where the fuel figures come from."""
+    how, v = fuel_basis(site)
+    price = _num(((site or {}).get("costs") or {}).get("fuel_per_gal"))
+    tail = (f" Cost at ${price:.2f} a gallon." if price else " Enter the fuel price on the setup page for the cost.")
+    if how == "measured":
+        return f"Fuel: {v:g} gallons an hour, as measured (setup page)." + tail
+    if how == "typical":
+        return (f"Fuel is an estimate: typical use of a {v[0]:g} kW {v[1]} generator at the load each run carried. "
+                "A measured gallons-per-hour figure on the setup page replaces it." + tail)
+    return f"No fuel figures: {v}."
 
 
 def path(stack):
@@ -172,8 +247,13 @@ def status(stack, site, now=None):
             "last_run": runs[-1] if runs else None,
             "runs_30d": len(recent), "hours_30d": round(sum(r["hours"] for r in recent), 1),
             "kwh_30d": round(sum(r["kwh"] for r in recent), 1),
+            "fuel_30d": totals(recent, site)["fuel"], "cost_30d": totals(recent, site)["cost"],
         })
     return out
+
+
+def _sum(vals, digits):
+    return None if any(v is None for v in vals) else round(sum(vals), digits)
 
 
 def ha_fields(stack, site, now=None):
@@ -182,7 +262,8 @@ def ha_fields(stack, site, now=None):
     if not s["kinds"]:
         return {"generator_running": s["running"], "generator_service_due": False, "generator_hours_since_service": None,
                 "generator_service_interval": None, "generator_service_left": None, "generator_last_run": None,
-                "generator_last_run_hours": None, "generator_runs_30d": None, "generator_hours_30d": None}
+                "generator_last_run_hours": None, "generator_runs_30d": None, "generator_hours_30d": None,
+                "generator_fuel_30d": None, "generator_cost_30d": None, "generator_last_run_fuel": None}
     k = max(s["kinds"], key=lambda x: x["since_service"] / x["interval"])
     last = max((x["last_run"] for x in s["kinds"] if x["last_run"]), key=lambda r: r["end"], default=None)
     iso = lambda ts: datetime.datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds")  # noqa: E731
@@ -193,6 +274,9 @@ def ha_fields(stack, site, now=None):
         "generator_last_run": iso(last["end"]) if last else None, "generator_last_run_hours": last and round(last["hours"], 1),
         "generator_runs_30d": sum(x["runs_30d"] for x in s["kinds"]),
         "generator_hours_30d": round(sum(x["hours_30d"] for x in s["kinds"]), 1),
+        "generator_fuel_30d": _sum([x["fuel_30d"] for x in s["kinds"]], 1),
+        "generator_cost_30d": _sum([x["cost_30d"] for x in s["kinds"]], 2),
+        "generator_last_run_fuel": None if not last or fuel(last, site) is None else round(fuel(last, site), 1),
     }
 
 

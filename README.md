@@ -444,6 +444,13 @@ already run if the oil was changed earlier). Home Assistant gets *Site generator
 *running* and *service due* sensors and sends a reminder when a service is due. The generator power everywhere (wall
 display, Home Assistant, daily summary) now includes a generator charging through a DC charger.
 
+**Fuel and cost.** Each run on the Generator page also shows the fuel it used and what that cost, with totals by
+month and for the last 30 days. The fuel comes from your own *measured fuel use* (gallons per hour, on the setup
+page under Generator) when you enter it; otherwise it is an estimate: the typical use of a generator of that size
+and fuel at the load the run actually carried. The cost uses the fuel price under Costs. Nothing is stored: correct
+the size or the price and the whole log is repriced. Home Assistant gets *Site generator fuel 30 days* (with the
+cost as an attribute). Figures are in gallons, as the fuel price is.
+
 State: `state/generator.json`; `setup/genlog.py` (run by the collector every 5 minutes; `genlog.py update` by hand).
 
 ## Remote access (Cloudflare Tunnel, optional)

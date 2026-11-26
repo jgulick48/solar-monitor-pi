@@ -48,6 +48,14 @@ def migrate(stack, old, version):
     return old
 
 
+def _gal(v):
+    return "&ndash;" if v is None else f"{v:.1f} gal"
+
+
+def _money(v):
+    return "&ndash;" if v is None else f"${v:,.2f}"
+
+
 def _hm(ts):
     return time.strftime("%a %b %-d %H:%M", time.localtime(ts))
 
@@ -72,6 +80,12 @@ def page(stack, msg="", code=200):
     s = genlog.status(stack, _site(stack))
     st = genlog.load(stack)
     cards = ""
+    site = _site(stack)
+
+    def fuel30(k):
+        if k["fuel_30d"] is None:
+            return ""
+        return f", about {k['fuel_30d']:g} gal" + (f" ({_money(k['cost_30d'])})" if k["cost_30d"] is not None else "")
     for k in s["kinds"]:
         last = k["last_run"]
         last_txt = (f"{_hm(last['start'])}, {last['hours']:.1f} h, {last['kwh']:g} kWh") if last else "none yet"
@@ -79,7 +93,7 @@ def page(stack, msg="", code=200):
 {'<b>Service due.</b> ' if k['due'] else ''}{k['since_service']:g} hours since the last service
 ({'serviced ' + html.escape(k['serviced_on']) if k['serviced_on'] else 'no service recorded yet: counted from the start of the history'});
 service every {k['interval']} hours, {max(k['left'], 0):g} to go.{' <b>Running now.</b>' if k['running'] else ''}<br>
-<small>Last run: {last_txt}. Last 30 days: {k['runs_30d']} run(s), {k['hours_30d']:g} h, {k['kwh_30d']:g} kWh.
+<small>Last run: {last_txt}. Last 30 days: {k['runs_30d']} run(s), {k['hours_30d']:g} h, {k['kwh_30d']:g} kWh{fuel30(k)}.
 {k['total_hours']:g} hours in all.</small>
 <form method="post" action="/generator/serviced" style="margin-top:8px"><input type="hidden" name="kind" value="{k['kind']}">
 <label>Hours it has run since that service (0 if just now) <input name="hours_since" value="0" inputmode="decimal" style="max-width:120px"></label>
@@ -87,7 +101,13 @@ service every {k['interval']} hours, {max(k['left'], 0):g} to go.{' <b>Running n
     if not cards:
         cards = "<p>No generator runs found in the history yet.</p>"
     rows = "".join(f"<tr><td>{_hm(r['start'])}</td><td>{r['hours']:.1f} h</td><td>{r['kwh']:g} kWh</td><td>{r['peak_kw']:g} kW</td>"
+                   f"<td>{_gal(genlog.fuel(r, site))}</td><td>{_money(genlog.cost(genlog.fuel(r, site), site))}</td>"
                    f"<td>{'GEN input' if r['kind'] == 'inverter' else 'DC charger'}</td></tr>" for r in reversed(st["runs"][-50:]))
+    mrows = "".join(f"<tr><td>{time.strftime('%B %Y', time.strptime(m['month'], '%Y-%m'))}</td><td>{m['runs']}</td><td>{m['hours']:g} h</td>"
+                    f"<td>{m['kwh']:g} kWh</td><td>{_gal(m['fuel'])}</td><td>{_money(m['cost'])}</td></tr>"
+                    for m in genlog.months(st["runs"], site))
+    monthly = (f"<h2>By month</h2><table><tr><th>Month</th><th>Runs</th><th>Ran</th><th>Energy</th><th>Fuel</th><th>Cost</th></tr>"
+               f"{mrows}</table><p><small>{html.escape(genlog.fuel_note(site))}</small></p>" if mrows else "")
     note = ""
     if s["backfilling"]:
         note = f"<p><small>Still reading the older history (up to {_hm(s['processed_until'])}); this takes a few minutes.</small></p>"
@@ -95,7 +115,8 @@ service every {k['interval']} hours, {max(k['left'], 0):g} to go.{' <b>Running n
 <p><small>Runs are found in the inverter history: power on the inverters' generator input, or charging the inverters didn't do
 themselves (a generator on a Chargeverter or other DC charger). Service intervals: 200 hours for a generator on the GEN input,
 100 hours for one charging through a DC charger. Home Assistant reminds you when a service is due.</small></p>
-<h2>Runs</h2><table><tr><th>Started</th><th>Ran</th><th>Energy</th><th>Peak</th><th>Connected to</th></tr>{rows or '<tr><td colspan=5>none</td></tr>'}</table>
+{monthly}
+<h2>Runs</h2><table><tr><th>Started</th><th>Ran</th><th>Energy</th><th>Peak</th><th>Fuel</th><th>Cost</th><th>Connected to</th></tr>{rows or '<tr><td colspan=7>none</td></tr>'}</table>
 <p><a href="/">Back</a></p>"""
     return Response(code, "Generator", body)
 
@@ -121,6 +142,11 @@ def form_section(stack):
     return f"""<fieldset id="generator"><legend>Generator</legend><label>How is the generator started? <select name="generator">{modes}</select></label>
 <div class="row"><label>Generator size in kW (optional) <input name='generator_kw' type='text' value='{html.escape(str(site.get('generator_kw', '')))}' inputmode='decimal'></label>
 <label>Fuel <select name="generator_fuel">{fuels}</select></label></div>
+<label>Measured fuel use, gallons per hour (optional)
+<input name='generator_gph' type='text' value='{html.escape(str(site.get('generator_gph', '')))}' inputmode='decimal' placeholder='e.g. 0.6'></label>
+<small>The generator log works out each run's fuel and cost (with the fuel price under Costs). Without this it uses a
+typical figure for the generator's size and fuel; with it, your own: fill the tank, run it, and divide what it took
+to refill by the hours it ran.</small>
 <label>Chargeverter (or other DC charger) set to, in amps (optional)
 <input name='charger_amps' type='text' value='{html.escape(str(site.get('charger_amps', '')))}' inputmode='decimal' placeholder='e.g. 40'></label>
 <small>The current it's set to charge the battery at. With it, the advice to start the generator also says how long to
@@ -153,16 +179,30 @@ def _amps(form):
     return f"{x:g}"
 
 
+def _gph(form):
+    v = form.get("generator_gph", "").strip()
+    if not v:
+        return ""
+    try:
+        x = float(v)
+    except ValueError:
+        raise FieldError("generator_gph", f"Measured fuel use: '{v}' is not a number of gallons per hour")
+    if not 0.05 <= x <= 20:
+        raise FieldError("generator_gph", "Measured fuel use must be between 0.05 and 20 gallons per hour")
+    return f"{x:g}"
+
+
 def form_check(stack, form):
     _kw(form)
     _amps(form)
+    _gph(form)
 
 
 def form_save(stack, form):
     import modules
     mode = form.get("generator") if form.get("generator") in dict(MODES) else "manual"
     modules.save(stack, "generator", {"mode": mode})
-    _set_site(stack, generator=mode, generator_kw=_kw(form), charger_amps=_amps(form),
+    _set_site(stack, generator=mode, generator_kw=_kw(form), charger_amps=_amps(form), generator_gph=_gph(form),
               generator_fuel=form.get("generator_fuel") if form.get("generator_fuel") in FUELS else "gasoline")
     return []
 

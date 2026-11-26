@@ -110,6 +110,26 @@ class GeneratorModule(unittest.TestCase):
         m, fn = modules.route(self.stack, "POST", "/generator/serviced")
         self.assertEqual(fn(self.stack, {"kind": "inverter", "hours_since": "abc"}).code, 400)
         self.assertIn("Service recorded.", fn(self.stack, {"kind": "inverter", "hours_since": "2"}).body)
+        # a run on the page with its fuel and cost, and the month's line
+        st = genlog.load(self.stack)
+        st["runs"] = [{"kind": "charger", "start": 1_795_000_000, "end": 1_795_007_200, "hours": 2.0, "kwh": 9.2, "peak_kw": 4.8}]
+        st["hours"]["charger"] = 2.0
+        genlog.save(self.stack, st)
+        m, fn = modules.route(self.stack, "GET", "/generator")
+        self.site(generator="manual", generator_gph="0.5", costs={"fuel_per_gal": "4"})
+        body = fn(self.stack, {}).body
+        self.assertIn("<td>1.0 gal</td><td>$4.00</td><td>DC charger</td>", body)
+        self.assertIn("<h2>By month</h2>", body)
+        self.assertIn("0.5 gallons an hour, as measured", body)
+        self.site(generator="manual", generator_gph="", generator_kw="", costs={})
+        self.assertIn("<td>&ndash;</td><td>&ndash;</td><td>DC charger</td>", fn(self.stack, {}).body)
+        # the measured figure on the setup page
+        self.assertIn("name='generator_gph'", modules.form_sections(self.stack))
+        with self.assertRaises(modules.FieldError) as e:
+            modules.form_check(self.stack, {"module_generator_shown": "1", "generator_gph": "lots"})
+        self.assertEqual(e.exception.field, "generator_gph")
+        modules.form_apply(self.stack, {"module_generator_shown": "1", "generator": "manual", "generator_gph": "0.60"})
+        self.assertEqual(self.site()["generator_gph"], "0.6")
         old = genlog.update
         genlog.update = lambda stack: 2
         try:

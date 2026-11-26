@@ -106,6 +106,14 @@ views:
                 entity: sensor.site_generator_hours_since_service
                 state_not: unknown
           - type: tile
+            entity: sensor.site_generator_fuel_30_days
+            name: Generator fuel, 30 days
+            color: purple
+            visibility:
+              - condition: state
+                entity: sensor.site_generator_fuel_30_days
+                state_not: unknown
+          - type: tile
             entity: sensor.site_generator_last_run
             name: Generator last ran
             color: purple
