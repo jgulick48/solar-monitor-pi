@@ -5,4 +5,4 @@ fab/*/*-placed*
 fab/*/*.ses
 fab/*/*.kicad_prl
 fab/*/freerouting.log
-fab/*/carrier-smd-pos.csv
+fab/*/carrier-*-pos.csv

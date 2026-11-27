@@ -70,17 +70,47 @@ To go with it (enclosure and wiring):
 | 3–8 | DS18B20 waterproof probes, silicone cable | One per port (G, D, V) |
 | 0–2 | SCT-013 current clamps, 1 V output | CT1, CT2: plug straight in |
 
+## DIN-rail version
+
+The same circuit on a 111.5 × 88 mm board for the DIN-rail case (`../enclosure/boiler-probes-din.scad`). It uses
+the same pins as the board above, so the firmware (`../boiler-probes.yaml`) and the parts list are the same.
+
+| THT | SMD |
+| --- | --- |
+| ![](fab/din-tht/render-top.png) | ![](fab/din-smd/render-top.png) |
+
+On the rail, everything plugs in from above or below and nothing from the sides, so other modules can sit against it:
+
+| Where | What |
+| --- | --- |
+| Top edge | CT1 and CT2 (left), then P1–P4. The ESP board's USB-C jack is above CT2, reached through the case's top |
+| Bottom edge | The ESP board's RJ45 jack (left), then P5–P8 and HEAT |
+| Left | The ESP32-P4-ETH on end: RJ45 down, USB-C up, its BOOT side and the PoE module's overhang toward the left edge |
+| Middle | OLED, BTN and SPARE headers, in the open, where their leads have the case's full height |
+| Four notches in the edge | Top (between CT2 and P1), two on the right, bottom left: the case's pillars stand in them |
+| 5 × M3 holes | The case's standoffs |
+
+What differs from the box board:
+
+- **RESET** is on the ESP board's inner edge and can't be reached from outside the case; BOOT can, through the left
+  wall. To flash over USB, hold BOOT while plugging the network (PoE) cable in, or take the cover off.
+- **The clamp jacks sit under the ESP board's USB end** (they are 5 mm high, the ESP board is 11 mm up).
+- **HEAT** is an ordinary bottom-edge port (24 VAC on its outer two pins, as before).
+
+Not built or tested. The routed boards' DRC lists only ground pads that join the pour through fewer thermal spokes
+than KiCad likes; nothing is unconnected.
+
 ## Files
 
 | File | What |
 | --- | --- |
 | `build_board.py` | Builds the board in KiCad 9's Python: parts, placement, nets, labels; then imports the routes and adds the ground pours |
-| `build.sh` | The whole build in Docker: place, route with [Freerouting](https://github.com/freerouting/freerouting) 2.1.0, ground pours, DRC, Gerbers, drill files, renders, and for SMD the JLCPCB files |
+| `build.sh` | The whole build in Docker: place, route with [Freerouting](https://github.com/freerouting/freerouting) 2.1.0, ground pours, DRC, Gerbers, drill files, renders, and for SMD the JLCPCB files. Variants: `tht`, `smd`, `din-tht`, `din-smd` (all four by default) |
 | `jlc_files.py` | JLCPCB's BOM and placement (CPL) files for the SMD version |
-| `fab/<tht or smd>/carrier-*.kicad_pcb` | The routed board, to open in KiCad |
-| `fab/<tht or smd>/carrier-*-gerbers.zip` | **Upload this to the PCB maker**: Gerbers and drill files |
-| `fab/smd/carrier-smd-jlc-bom.csv`, `-cpl.csv` | For JLCPCB's assembly service (top side) |
-| `fab/<tht or smd>/drc.rpt` | KiCad's design rule check |
+| `fab/<variant>/carrier-*.kicad_pcb` | The routed board, to open in KiCad |
+| `fab/<variant>/carrier-*-gerbers.zip` | **Upload this to the PCB maker**: Gerbers and drill files |
+| `fab/smd/` and `fab/din-smd/`: `carrier-*-jlc-bom.csv`, `-cpl.csv` | For JLCPCB's assembly service (top side) |
+| `fab/<variant>/drc.rpt` | KiCad's design rule check |
 
 ## Status
 
@@ -99,4 +129,4 @@ To go with it (enclosure and wiring):
 ## Building
 
 On a machine with Docker, put `freerouting.jar` (v2.1.0 from the Freerouting releases page) in this folder and run
-`./build.sh` (or `./build.sh tht` / `./build.sh smd`). Freerouting's routes differ a little from run to run.
+`./build.sh` (or name the variants: `./build.sh tht`, `./build.sh din-tht din-smd`). Freerouting's routes differ a little from run to run.

@@ -58,9 +58,10 @@ class EnclosureFitsCarrier(unittest.TestCase):
         self.assertEqual(scad("port_x"), sorted({x for _n, _s, x, _g in self.c["PORTS"]}))
 
     def test_jacks_and_heat(self):
-        jacks = re.findall(r'\("(J1[26])", "(CT[12])", ([\d.]+), "', self.src)
+        box = self.src[self.src.index("def build_box"):]          # the DIN layout has its own jacks (DIN_JACKS)
+        jacks = re.findall(r'\("(J1[26])", "(CT[12])", ([\d.]+), "', box)
         self.assertEqual(scad("ct_jack_y"), [self.H - float(y) for _r, _l, y in sorted(jacks, key=lambda j: j[1])])
-        pin1 = float(re.search(r'self\.terminal\("J11", "HEAT", [\d.]+, ([\d.]+),', self.src).group(1))
+        pin1 = float(re.search(r'self\.terminal\("J11", "HEAT", [\d.]+, ([\d.]+),', box).group(1))
         self.assertEqual([round(v, 2) for v in scad("heat_y")], [round(self.H - pin1, 2), round(self.H - pin1 + 2 * 5.08, 2)])
 
 
