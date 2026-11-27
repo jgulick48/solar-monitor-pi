@@ -1,0 +1,27 @@
+** Drc report for carrier-din-smd.kicad_pcb **
+** Created on 2026-11-27T07:06:39+0000 **
+** Report includes: Errors, Warnings, Exclusions **
+
+** Found 4 DRC violations **
+[starved_thermal]: Thermal relief connection to zone incomplete (layer F.Cu; zone min spoke count 2; actual 1)
+    Local override; error
+    @(0.5000 mm, 0.5000 mm): Zone [GND] on F.Cu, priority 0
+    @(26.3900 mm, 47.0500 mm): PTH pad 8 [GND] of J1
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; zone min spoke count 2; actual 1)
+    Local override; error
+    @(0.5000 mm, 0.5000 mm): Zone [GND] on B.Cu, priority 0
+    @(26.3900 mm, 47.0500 mm): PTH pad 8 [GND] of J1
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; 2 spokes connected to isolated island)
+    Local override; error
+    @(0.5000 mm, 0.5000 mm): Zone [GND] on B.Cu, priority 0
+    @(50.0000 mm, 40.0000 mm): PTH pad 1 [GND] of J13
+[starved_thermal]: Thermal relief connection to zone incomplete (layer B.Cu; 1 spokes connected to isolated island)
+    Local override; error
+    @(0.5000 mm, 0.5000 mm): Zone [GND] on B.Cu, priority 0
+    @(8.6100 mm, 34.3500 mm): PTH pad 13 [GND] of J2
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **

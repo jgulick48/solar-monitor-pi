@@ -13,6 +13,7 @@ reads the readings from Home Assistant. The wiki's *Boiler, propane and notifica
 | Waveshare ESP32-P4-ETH with the PoE module | ESP32-P4 with IP101 Ethernet; 2 × 20 header pins underneath, which plug into the carrier |
 | Carrier board | `carrier/`: 8 pluggable probe ports with their pull-ups, the heat-call and clamp inputs, OLED and button headers; Gerbers for a through-hole and an SMD version, and the through-hole parts list in its README |
 | Enclosure (3D printed) | `enclosure/`: base and cover for the carrier and the board, with the ports in its walls and an OLED window (some sizes still to be measured) |
+| DIN-rail version | The same circuit on a board laid out for a DIN rail (`carrier/`, the `din-tht` and `din-smd` boards) and a case that clips onto a 35 mm rail (`enclosure/boiler-probes-din.scad`): ports up and down, nothing on the sides. Same pins, same firmware |
 | PoE switch port or injector | 802.3af |
 | 3 to 8 × DS18B20 waterproof probes | Stainless sleeve with **silicone** cable (rated to about 125 °C); 6 mm sleeves fit most wells |
 | 9 × 3-pin 5.08 mm pluggable terminal blocks | 8 probe ports and HEAT (e.g. uxcell's sets) |
