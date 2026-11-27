@@ -79,6 +79,18 @@ class DinCaseFitsDinCarrier(unittest.TestCase):
                     self.assertAlmostEqual(abs(p - n), 0.5)
             self.assertTrue(px0 + 2 <= sx <= px1 - 2 and py0 + 2 <= sy <= py1 - 2, (sx, sy))
 
+    def test_latch_screws_clear_the_port_pins(self):
+        """The latch's anchor screws come through the floor under the bottom ports: their heads stay 5 mm (centre
+        to centre) from the ports' pins, which build_din() puts 10 mm in from the bottom edge, 5.08 mm apart."""
+        c = self.c
+        gap, wall = scad("gap"), scad("wall")
+        pins = [(x + d, c["DIN_H"] - 10.0) for _n, s, x, _g in c["DIN_PORTS"] if s == "bottom" for d in (-5.08, 0, 5.08)]
+        pins += [(c["DIN_HEAT_X"] + d, c["DIN_H"] - 10.0) for d in (-5.08, 5.08)]
+        for d in (-1, 1):
+            sx = scad("latch_x") + d * scad("anchor_screw_dx") - wall - gap         # case x -> board x
+            sy = c["DIN_H"] - (scad("anchor_screw_y") - wall - gap)                 # case y (up) -> board y (down)
+            self.assertGreaterEqual(min(((sx - px) ** 2 + (sy - py) ** 2) ** 0.5 for px, py in pins), 5.0)
+
     def test_nothing_sits_in_a_notch(self):
         """Ports, jacks, HEAT and mounting holes stay clear of the cut-outs."""
         c = self.c

@@ -63,33 +63,41 @@ modules), 93.4 mm high, 45.2 mm deep, plus 5.5 mm behind for the rail.
 
 ![Base, cover, hooks and latch](images/din-both-front.png)
 
-| From behind: two hooks and the latch on the rail | Base from the front | Latch, as printed | Hook, as printed |
-| --- | --- | --- | --- |
-| ![](images/din-both-back.png) | ![](images/din-base-top.png) | ![](images/din-latch.png) | ![](images/din-hook.png) |
+| From behind: two hooks and the sliding latch on the rail | Base from the front |
+| --- | --- |
+| ![](images/din-both-back.png) | ![](images/din-base-top.png) |
+
+| Latch, as printed | Latch guide, as printed | Hook, as printed |
+| --- | --- | --- |
+| ![](images/din-latch.png) | ![](images/din-latch-guide.png) | ![](images/din-hook.png) |
 
 - **Parts:** `din-base.stl` (the back), `din-cover.stl` (walls and front), `din-cover-text.stl` (the lettering, for a
-  second colour), `din-hook.stl` (print two) and `din-latch.stl`.
+  second colour), `din-hook.stl` (print two), `din-latch.stl` and `din-latch-guide.stl`.
 - **What faces where:** CT1, CT2, USB and P1–P4 face up; the network jack, P5–P8 and HEAT face down. The OLED, the
   WAKE button and every label are on the front. Nothing is on the right side; the left side has only the BOOT hole.
 - **Joining the halves:** four M3 × 12 self-tapping screws from the front, down bores in the cover into pillars in
   the base. The pillars stand in four notches of the carrier's edge, so they take no room along the walls.
-- **On the rail:** the two hooks hang on the rail's top edge. The latch is a 46 mm arm with a tooth that snaps behind
-  the bottom edge when the case is pushed on. To take the case off, pull the latch's tab (it shows below the case)
-  down with a screwdriver and swing the bottom out.
-- **Hooks and latch** screw to the back with six M3 × 6 self-tapping screws **from inside**, before the carrier goes
-  in. Their heads sit under the carrier, at least 5 mm from any solder pin.
+- **On the rail:** the two hooks hang on the rail's top edge. The latch is a slider that moves up and down in a
+  guide on the back, with a tooth at its top that goes behind the rail's bottom edge. Its spring is printed with it:
+  a zigzag inside the slider, between the slider and an anchor block that is screwed to the case. Pushing the case
+  onto the rail presses the tooth down over the edge, and the spring snaps it back. To take the case off, pull the
+  latch's tab (it shows below the case) down about 3 mm with a screwdriver and swing the bottom out.
+- **Fitting the latch:** screw the guide on, push the slider in from the bottom end until its shoulders stop, then
+  push the anchor block up 1.5 mm against the spring so its holes line up, and screw it down.
+- **Hooks, guide and anchor** screw to the back with eight M3 × 6 self-tapping screws **from inside**, before the
+  carrier goes in. Their heads sit under the carrier, at least 5 mm from any solder pin.
 - **RESET** can't be reached with the cover on (see the carrier's README); BOOT is behind a hole in the left wall.
 
-Print the base open side up and the cover front face down, as for the box. Print the hooks and the latch as the
-STLs lie, far face down: the slot for the rail's edge is then open to the top and needs no supports, and the latch's
-arm bends along its layers.
+Print the base open side up and the cover front face down, as for the box. Print the hooks, the latch and its guide
+as the STLs lie; none needs supports. The latch's spring is 1.2 mm thick with 1.2 mm gaps: print it with three walls
+and check that the gaps come out open.
 
 Not printed or tested. Besides the measurements below, which this case shares with the box, check on a first
-print: that the hooks and tooth fit your rail (`rail_lip` is 1.0 mm; some heavy rails are 1.5), that the latch's arm
-is springy enough (`latch_arm_t`), and that the carrier's notches clear the pillars.
+print: that the hooks and tooth fit your rail (`rail_lip` is 1.0 mm; some heavy rails are 1.5), that the latch
+slides freely (`latch_fit`) and its spring is neither limp nor stiff (`spring_t`, `spring_n`), and that the carrier's notches clear the pillars.
 
-Render it like the box, with `boiler-probes-din.scad` and `PART` set to `base`, `cover`, `cover-text`, `hook` or
-`latch`.
+Render it like the box, with `boiler-probes-din.scad` and `PART` set to `base`, `cover`, `cover-text`, `hook`,
+`latch` or `latch-guide`.
 
 ## Still to measure
 
