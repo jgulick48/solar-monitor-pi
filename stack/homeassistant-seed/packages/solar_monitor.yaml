@@ -370,6 +370,13 @@ rest:
         unit_of_measurement: gal
         icon: mdi:gas-station
         json_attributes: [generator_cost_30d]
+      # Fuel on hand (entered on the box's Generator page, counted down with each run) and the hours of running it gives
+      - name: Site generator fuel on hand
+        unique_id: site_generator_fuel_left
+        value_template: "{{ value_json.generator_fuel_left }}"
+        unit_of_measurement: gal
+        icon: mdi:gas-station-outline
+        json_attributes: [generator_fuel_hours]
       # The box itself (boxhealth.py): temperature, power supply, disk, SSD, containers, dongle drop-outs
       - name: Site box health
         unique_id: site_box_health

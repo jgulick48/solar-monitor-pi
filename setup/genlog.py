@@ -23,6 +23,9 @@ whole log (fuel()): the owner's measured gallons per hour when entered, else a t
 size and fuel at the load it actually ran at (the advisor's curves). For a generator on a DC charger the load is the
 charging power divided by the charger's efficiency (0.92). Cost: the fuel price from the setup page.
 
+Fuel on hand (fuel_on_hand()): the owner enters the gallons in the cans or the tank after filling up; the box takes
+off what each run since then used (the same figures as the log) and says how many hours of running are left.
+
 The start page shows the hours since the last service and has a "serviced" button
 (/generator); Home Assistant gets the same figures from /api/ha and a reminder when a
 service is due.
@@ -111,6 +114,60 @@ def months(runs, site, now=None, n=12):
     for r in runs:
         by.setdefault(time.strftime("%Y-%m", time.localtime(r["start"])), []).append(r)
     return [{"month": m, **totals(by[m], site)} for m in sorted(by, reverse=True)[:n]]
+
+
+def open_runs(st, now=None):
+    """Runs still going, shaped like finished ones ({"kind", "start", "end", "hours", "kwh"})."""
+    out = []
+    for kind, run in (st.get("open") or {}).items():
+        end = run["last_on"] + STEP
+        out.append({"kind": kind, "start": run["start"], "end": end, "hours": (end - run["start"]) / 3600,
+                    "kwh": run["wh"] / 1000})
+    return out
+
+
+def fuel_since(st, site, since):
+    """Gallons used since `since`: every run that ended after it (only its part after `since`), and the run going
+    now. None when there is nothing to work fuel out from."""
+    if fuel_basis(site)[0] is None:
+        return None
+    gal = 0.0
+    for r in st["runs"] + open_runs(st):
+        if r["end"] <= since or r["hours"] <= 0:
+            continue
+        part = (r["end"] - max(r["start"], since)) / max(r["end"] - r["start"], 1)
+        gal += (fuel(r, site) or 0.0) * min(1.0, max(0.0, part))
+    return gal
+
+
+def fuel_rate(st, site):
+    """Gallons an hour to expect from the next run: the measured figure; else what the latest run used; else the
+    typical figure for the generator at half load. None when there is nothing to work it out from."""
+    how, v = fuel_basis(site)
+    if how is None:
+        return None
+    if how == "measured":
+        return v
+    runs = [r for r in st["runs"] + open_runs(st) if r["hours"] >= 0.25]
+    if runs:
+        last = max(runs, key=lambda r: r["end"])
+        return fuel(last, site) / last["hours"]
+    import advisor
+    return advisor.FUEL[v[1]](v[0], 0.5)
+
+
+def fuel_on_hand(st, site, entered, at):
+    """What is left of the fuel the owner entered: {"gal", "hours", "entered", "at", "used"}, or None when nothing
+    was entered or fuel can't be worked out. `entered` gallons were on hand at time `at`."""
+    if entered is None or not at:
+        return None
+    used = fuel_since(st, site, at)
+    rate = fuel_rate(st, site)
+    if used is None or not rate:
+        return None
+    gal = max(0.0, float(entered) - used)
+    return {"gal": round(gal, 1), "hours": round(gal / rate, 1), "entered": float(entered), "at": at,
+            "used": round(used, 1), "rate": round(rate, 2)}
 
 
 def fuel_note(site):
