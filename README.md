@@ -202,8 +202,8 @@ line per item: green works, yellow works but deserves a look, red doesn't work, 
 Problems come first, each with what to do and a link to where it is fixed. The box checks the site details, the
 inverter dongles, that data is being recorded, Home Assistant (running, and its owner account made), the solar
 forecast, the panels and inverters, the box itself (temperature, power, disk, services) and the clock. Enabled modules add their own lines:
-notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras, freeze
-protection and away mode. Open it after first setup, and whenever something seems off.
+notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras and freeze
+protection. Open it after first setup, and whenever something seems off.
 
 ## Away mode
 

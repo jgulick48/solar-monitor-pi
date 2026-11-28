@@ -34,10 +34,10 @@ PRIORITIES = ("critical", "warning", "info")
 # The solar package's alerts (packages/solar_monitor.yaml) don't name a priority: theirs, by tag.
 TAG_PRIORITY = {
     "inverter_fault": "critical", "generator": "critical",
+    "away_battery": "warning", "away_water": "warning", "away_report": "info", "away_ended": "info",
     "battery_low": "warning", "dongle_offline": "warning", "no_data": "warning", "backup": "warning",
     "battery_health": "warning", "box_health": "warning", "solar_check": "warning", "overload": "warning",
     "generator_service": "info", "summary": "info", "monthly_report": "info",
-    "away_battery": "warning", "away_water": "warning", "away_report": "info", "away_ended": "info",
 }
 CHANNELS = (("ha_app", "Home Assistant app"), ("ntfy", "ntfy"), ("wall", "Wall display"))
 NTFY_PRIORITY = {"critical": 5, "warning": 4, "info": 3}
