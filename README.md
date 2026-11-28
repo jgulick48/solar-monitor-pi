@@ -202,8 +202,15 @@ line per item: green works, yellow works but deserves a look, red doesn't work, 
 Problems come first, each with what to do and a link to where it is fixed. The box checks the site details, the
 inverter dongles, that data is being recorded, Home Assistant (running, and its owner account made), the solar
 forecast, the panels and inverters, the box itself (temperature, power, disk, services) and the clock. Enabled modules add their own lines:
-notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras and freeze
-protection. Open it after first setup, and whenever something seems off.
+notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras, freeze
+protection and the boiler probe board. Open it after first setup, and whenever something seems off.
+
+The **boiler probe board's** lines come straight from the board (its own web page at `boiler-probes.local`), not
+through Home Assistant, so they work while it is being installed: whether it is on the network, what each probe port
+reads, and what the two pump clamps and the heat call read. The box remembers which ports have had a probe. A port
+that had one and has none now shows red by its number and name ("P3 (Boiler supply)"), which is what a pulled plug or
+a loose wire looks like; a port that never had one is only listed as unused. After taking a probe out on purpose,
+press *Forget missing probes* under *Boiler probe board* on the setup page.
 
 ## Following another site
 
