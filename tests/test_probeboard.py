@@ -199,6 +199,126 @@ class ProbeBoard(unittest.TestCase):
         self.assertIn("location.replace('/setup#probeboard')", html)
         self.assertNotIn("location.hash='probeboard'; location.reload();}}catch", html)
 
+    # ---------------------------------------------------------------- the check-up page
+    def events(self, **readings):
+        """The board's event stream: every probe port by its default name, the clamps and the heat call."""
+        vals = {"floor_supply": 41.25, "floor_return": 35.0, "boiler_supply": 60.5, "boiler_return": None,
+                "hot_water_outlet": 48.0, "slab_near_boiler": None, "slab_far": None, "probe_p8": None, **readings}
+        lines = ["retry: 30000", "event: ping", 'data: {"title":"Boiler probes","ota":true}', ""]
+        for k, v in vals.items():
+            lines += ["event: state", "data: " + json.dumps({"id": f"sensor-{k}", "value": v, "state": "NA" if v is None else f"{v} °C"}), ""]
+        lines += ["event: state", 'data: {"id":"sensor-boiler_pump_current","value":0.42,"state":"0.42 A"}', "",
+                  "event: state", 'data: {"name_id":"sensor/Floor pump current","name":"Floor pump current","value":0,"state":"0.00 A"}', "",
+                  "event: state", 'data: {"id":"binary_sensor-call_for_heat","value":true,"state":"ON"}', "",
+                  "event: log", "data: [I][sensor:094]: 'Floor supply': Sending state 41.25", "",
+                  "event: state", "data: not json", ""]
+        return lambda: lines
+
+    def installed(self, **kw):
+        d = probeboard.settings(self.stack)
+        d.update(installed=int(time.time()), built_names=list(probeboard.NAMES), **kw)
+        probeboard.save(self.stack, d)
+
+    def test_events(self):
+        got = probeboard.live(self.events())
+        self.assertEqual(got[("sensor", "floor_supply")], 41.25)
+        self.assertIsNone(got[("sensor", "probe_p8")])                       # a port with no probe
+        self.assertEqual(got[("sensor", "floor_pump_current")], 0.0)         # the newer id form, found by name
+        self.assertIs(got[("binary_sensor", "call_for_heat")], True)
+        self.assertNotIn(("log", ""), got)
+        with self.assertRaises(OSError):
+            probeboard.live(lambda: ["event: ping", "data: {}"])            # answered, but no readings
+
+    def test_fetch_events_from_a_stream_that_stays_open(self):
+        """The board keeps the connection open after its readings: fetch_events stops when it goes quiet."""
+        import http.server
+        import threading
+        lines = self.events()()
+        release = threading.Event()
+
+        class Board(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200 if self.path == "/events" else 404)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.write(("\r\n".join(lines) + "\r\n").encode())
+                self.wfile.flush()
+                release.wait(10)                                             # ...and says nothing more
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Board)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            t0 = time.time()
+            got = probeboard.parse_events(probeboard.fetch_events("127.0.0.1", srv.server_address[1]))
+            self.assertLess(time.time() - t0, probeboard.EVENTS_WAIT + 1)
+            self.assertEqual(got[("sensor", "hot_water_outlet")], 48.0)
+            self.assertIs(got[("binary_sensor", "call_for_heat")], True)
+        finally:
+            release.set()
+            srv.shutdown()
+            srv.server_close()
+        with self.assertRaises(OSError):
+            probeboard.fetch_events("127.0.0.1", srv.server_address[1])     # nothing listening any more
+
+    def test_checks(self):
+        self.assertEqual([c["state"] for c in mod.checks(self.stack)], ["off"])            # not installed: optional
+        self.installed()
+
+        def down():
+            raise OSError("Name or service not known")
+        c = mod.checks(self.stack, down)
+        self.assertEqual((len(c), c[0]["state"]), (1, "bad"))
+        self.assertIn("boiler-probes.local", c[0]["text"])
+        self.assertEqual(probeboard.seen(self.stack), [])
+        board, ports, inputs = mod.checks(self.stack, self.events())
+        self.assertEqual((board["state"], ports["state"], inputs["state"]), ("ok", "ok", "ok"))
+        self.assertIn("4 of 8 ports", board["text"])
+        self.assertIn("P1 Floor supply 106.2 °F", ports["text"])              # the site's units (US by default)
+        self.assertIn("No probe on P4, P6, P7, P8.", ports["text"])
+        self.assertIn("CT1 (boiler pump) 0.42 A; CT2 (floor pump) 0.00 A; call for heat on", inputs["text"])
+        self.assertEqual(probeboard.seen(self.stack), [1, 2, 3, 5])
+        # P3's plug is pulled: it had a probe, so that is a fault; P4 never had one and still isn't
+        _, ports, _ = mod.checks(self.stack, self.events(boiler_supply=None))
+        self.assertEqual(ports["state"], "bad")
+        self.assertIn("No probe answers on P3 (Boiler supply)", ports["text"])
+        self.assertNotIn("P4", ports["text"])
+        self.assertEqual(probeboard.seen(self.stack), [1, 2, 3, 5])           # still remembered
+        # taken out on purpose: forgotten, and the page says so
+        self.assertIn("P1, P2, P3, P5", mod.setup_section(self.stack))
+        mod.forget(self.stack, {})
+        _, ports, _ = mod.checks(self.stack, self.events(boiler_supply=None))
+        self.assertEqual(ports["state"], "ok")
+        self.assertIn("No probe on P3, P4", ports["text"])
+        # nothing plugged in yet
+        mod.forget(self.stack, {})
+        empty = {k: None for k in ("floor_supply", "floor_return", "boiler_supply", "hot_water_outlet")}
+        self.assertEqual(mod.checks(self.stack, self.events(**empty))[1]["state"], "warn")
+
+    def test_ports_follow_the_built_names_and_metric(self):
+        self.installed()
+        d = probeboard.settings(self.stack)
+        d.update(built_names=["Kitchen loop"] + probeboard.NAMES[1:], names=["Renamed since"] + probeboard.NAMES[1:])
+        probeboard.save(self.stack, d)
+        json.dump({"units": "metric"}, open(os.path.join(self.stack, "state", "site.json"), "w"))
+        lines = self.events()() + ["event: state", 'data: {"id":"sensor-kitchen_loop","value":21.5,"state":"21.5 °C"}']
+        ports = mod.checks(self.stack, lambda: lines)[1]
+        self.assertIn("P1 Kitchen loop 21.5 °C", ports["text"])              # the name the firmware has, not the new one
+
+    def test_the_collector_remembers_ports(self):
+        probeboard.remember(self.stack, self.events())                        # not installed: nothing
+        self.assertEqual(probeboard.seen(self.stack), [])
+        self.installed()
+
+        def down():
+            raise OSError("no route")
+        probeboard.remember(self.stack, down)                                 # offline: nothing, and no error
+        probeboard.remember(self.stack, self.events())
+        self.assertEqual(probeboard.seen(self.stack), [1, 2, 3, 5])
+        self.assertIn(300, mod.MODULE.every)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,14 +14,23 @@ running esphome/boiler-probes.yaml.
     Assistant ties it to the board's MAC address the first time it connects.
 
 One job runs at a time, in the background; state/probeboard-job.json has its progress for the setup page.
+
+The check-up page reads the board itself, not Home Assistant: live() takes what the board's own web page streams
+(http://boiler-probes.local/events) and ports() says, per port, whether a probe answers and what it reads. The ports
+that have had a probe are remembered (state/probeboard-seen.json), so one that goes missing shows as a fault and an
+unused port doesn't.
 """
 import base64
 import datetime
 import glob
+import http.client
 import json
+import math
 import os
+import re
 import secrets
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -291,3 +300,133 @@ def add_to_ha(stack):
     d["ha_added"] = True
     save(stack, d)
     return ["added to Home Assistant" if r.returncode == 0 else f"added, but Home Assistant didn't start: {r.stderr.strip()[-200:]}"]
+
+
+# --------------------------------------------------------------------------
+# The board's own readings, for the check-up page
+# --------------------------------------------------------------------------
+CLAMPS = (("CT1", "Boiler pump current"), ("CT2", "Floor pump current"))   # boiler-probes.yaml's names
+HEAT_CALL = "Call for heat"
+EVENTS_WAIT = 2.5       # seconds listened to at most: the board sends every reading as soon as one connects
+EVENTS_QUIET = 0.8      # ...and nothing more for this long means it has sent them all
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]+", "_", str(s or "").lower()).strip("_")
+
+
+def fetch_events(host=HOST, port=80):
+    """The lines the board's web page streams on connecting (server-sent events). Raises OSError when the board
+    doesn't answer."""
+    conn = http.client.HTTPConnection(host, port, timeout=3)
+    lines = []
+    try:
+        conn.connect()
+        sock = conn.sock                # kept: the connection lets go of it when the answer has no length
+        conn.request("GET", "/events", headers={"Accept": "text/event-stream"})
+        r = conn.getresponse()
+        if r.status != 200:
+            raise OSError(f"the board answered {r.status}")
+        sock.settimeout(EVENTS_QUIET)
+        end = time.time() + EVENTS_WAIT
+        while time.time() < end:
+            try:
+                line = r.readline()
+            except (socket.timeout, TimeoutError):
+                if lines:
+                    break
+                continue
+            if not line:
+                break
+            lines.append(line.decode("utf-8", "replace").rstrip("\r\n"))
+        r.close()
+    except http.client.HTTPException as e:
+        raise OSError(str(e)) from None
+    finally:
+        conn.close()
+    return lines
+
+
+def parse_events(lines):
+    """{(domain, name): value} from the stream's "state" events: value is a number, True / False, or None for a
+    sensor with no reading (a port with no probe). The name is normalised ("Floor supply" -> "floor_supply"); an
+    entity is found by its name when the event carries one and by its id either way, whichever form the ESPHome
+    version uses ("sensor-floor_supply", "sensor/Floor supply")."""
+    out = {}
+    event = ""
+    for line in lines:
+        if line.startswith("event:"):
+            event = line[6:].strip()
+            continue
+        if not line.startswith("data:") or event != "state":
+            continue
+        try:
+            d = json.loads(line[5:].strip())
+        except ValueError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        eid = str(d.get("name_id") or d.get("id") or "")
+        m = re.match(r"^([a-z_]+)[-/](.+)$", eid)
+        if not m:
+            continue
+        domain = m.group(1)
+        v = d.get("value")
+        if domain == "sensor":
+            v = float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+        elif domain == "binary_sensor":
+            v = v if isinstance(v, bool) else {"ON": True, "OFF": False}.get(str(d.get("state") or "").upper())
+        else:
+            continue
+        for name in {_norm(m.group(2)), _norm(d.get("name"))} - {""}:
+            out[(domain, name)] = v
+    return out
+
+
+def live(fetch=None):
+    """What the board reads now ({(domain, name): value}); raises OSError when it doesn't answer or sends nothing."""
+    got = parse_events((fetch or fetch_events)())
+    if not got:
+        raise OSError("the board sent no readings")
+    return got
+
+
+def seen_path(stack):
+    return os.path.join(stack, "state", "probeboard-seen.json")
+
+
+def seen(stack):
+    """Port numbers (1-8) that have had a probe."""
+    return sorted({int(p) for p in ss.load_json(seen_path(stack), {}).get("ports", []) if str(p).isdigit() and 1 <= int(p) <= 8})
+
+
+def forget(stack):
+    """Forget which ports have had a probe (after taking one out on purpose)."""
+    ss.write_if_changed(seen_path(stack), json.dumps({"ports": []}) + "\n", 0o644)
+
+
+def ports(stack, readings):
+    """[{"port": 1-8, "name", "c": °C or None, "missing": had a probe before and has none now}] from live()'s
+    readings, by the names the board was built with. Remembers the ports that have a probe now."""
+    d = settings(stack)
+    names = [clean_name(n, NAMES[i]) for i, n in enumerate(((d["built_names"] or d["names"]) + NAMES)[:8])]
+    before = seen(stack)
+    out = []
+    for i, n in enumerate(names, 1):
+        c = readings.get(("sensor", _norm(n)))
+        out.append({"port": i, "name": n, "c": c, "missing": c is None and i in before})
+    now = sorted(set(before) | {p["port"] for p in out if p["c"] is not None})
+    if now != before:
+        ss.write_if_changed(seen_path(stack), json.dumps({"ports": now}) + "\n", 0o644)
+    return out
+
+
+def remember(stack, fetch=None):
+    """The collector, every few minutes: note which ports have a probe, so a port counts as used without anyone
+    opening the check-up page. Nothing happens when the board isn't installed or doesn't answer."""
+    if not settings(stack)["installed"]:
+        return
+    try:
+        ports(stack, live(fetch))
+    except OSError:
+        pass
