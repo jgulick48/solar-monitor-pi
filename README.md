@@ -41,7 +41,10 @@ read, never changed.
 1. Flash the image to the SSD, plug it into the Pi's blue USB 3 port, connect Ethernet, power on.
 2. Wait about five minutes, then open `http://solar-monitor.local/` (or the Pi's IP from the router).
 3. The start page lists the dongles it found. Click **Finish setup** and enter the location, time zone,
-   batteries, panels and generator. Saving applies it to Home Assistant and Grafana.
+   batteries, panels and generator. Saving applies it to Home Assistant and Grafana. The setup page lists its
+   sections down the left side (a row of buttons under the header on a phone): the ones saved together with
+   **Save site settings** have a green edge, the ones with their own button a blue edge. The list follows the
+   page as it scrolls and marks sections with unsaved changes.
 4. Open Home Assistant from the start page and create your account. The inverter entities are already
    there.
 

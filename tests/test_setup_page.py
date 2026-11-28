@@ -80,6 +80,47 @@ class SetupPage(unittest.TestCase):
         self.assertIn("data-port='3000'", page)
         self.assertNotIn("class=on", solar_web.page("Not found", ""))
 
+    def test_section_list_down_the_side(self):
+        """Every section of the setup page is in the list beside it, in page order, and each link has its target."""
+        page = solar_web.setup_page(solar_web.load_site())
+        nav = re.search(r"<nav class='sidenav'.*?</nav>", page, re.S).group(0)
+        links = re.findall(r"<a href='#([\w-]+)'( class=sep)?>([^<]+)</a>", nav)
+        names = [n for _h, _c, n in links]
+        self.assertEqual(names[:3], ["Optional features", "Location", "Batteries"])
+        self.assertIn("Prices", names)                                  # not "Prices (optional, for the advisor's ...)"
+        self.assertIn("Second array", names)
+        self.assertEqual(names[-1], "SSH access")
+        self.assertLess(nav.index("Saved together"), nav.index("Saved separately"))
+        self.assertTrue(all(sep for h, sep, n in links if n in ("Remote access", "Remote support", "SSH access")))
+        self.assertFalse(any(sep for h, sep, n in links if n in ("Location", "Updates", "Generator")))
+        hrefs = [h for h, _c, _n in links]
+        self.assertEqual(len(hrefs), len(set(hrefs)))
+        for h in hrefs:
+            self.assertEqual(len(re.findall(rf"""\bid=["']?{re.escape(h)}["' >]""", page)), 1, h)
+        # a main-form section's target is its fieldset, a separately saved one's is its heading
+        self.assertIn('<fieldset id="sec-location"><legend>Location</legend>', page)
+        self.assertRegex(page, r"<section class='own'><h2 id=\"remote\">")
+        # fieldsets inside another section are not sections; ids that were there are kept
+        self.assertEqual(page.count('id="screen"'), 1)
+        self.assertNotIn("Sound check", nav)
+        # the list sits beside the page, after its heading; the form and its save bar are inside the main column
+        self.assertRegex(page, r"<h1>Site setup</h1><div class='setup-layout'><nav class='sidenav'")
+        self.assertLess(page.index("class='setup-main'"), page.index('id="site-form"'))
+        self.assertIn(".sidenav a')", page)                             # the script that follows the scroll position
+
+    def test_sections_of_a_page_fragment(self):
+        body = ('<h1>x</h1><form id="site-form"><fieldset id=\'features\'><legend>Optional features</legend></fieldset>'
+                '<fieldset><legend>Screen &amp; sound (optional, if fitted)</legend><fieldset><legend>Inner</legend></fieldset></fieldset>'
+                '<fieldset><legend>Screen &amp; sound</legend></fieldset><div class="savebar"></div></form>'
+                "<section class='own'><h2 id=\"probeboard\">Boiler probe board</h2><form><fieldset><legend>Firmware</legend></fieldset></form></section>")
+        out, secs = solar_web.setup_sections(body)
+        self.assertEqual(secs, [("form", "features", "Optional features"), ("form", "sec-screen-sound", "Screen & sound"),
+                                ("form", "sec-screen-sound-2", "Screen & sound"), ("own", "probeboard", "Boiler probe board")])
+        self.assertIn('<fieldset id="sec-screen-sound"><legend>Screen &amp; sound (optional, if fitted)</legend><fieldset><legend>Inner', out)
+        self.assertEqual(solar_web.setup_sections("<p>no form</p>"), ("<p>no form</p>", []))
+        self.assertEqual(solar_web.setup_sidenav([]), "")
+        self.assertIn("<a href='#sec-screen-sound'>Screen &amp; sound</a>", solar_web.setup_sidenav(secs))
+
     def test_mark_select(self):
         body = "<label>Time zone <select name='time_zone'><option>A</option></select></label>"
         out = solar_web.mark_field(body, "time_zone", "unknown time zone")
