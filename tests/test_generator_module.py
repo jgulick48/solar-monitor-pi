@@ -264,6 +264,9 @@ class GeneratorModule(unittest.TestCase):
         self.assertEqual(modules.settings(self.stack, "generator")["fuel_low_h"], 3.0)   # kept
         self.assertIn("no longer tracked", fuel(self.stack, {"stop": "1"}).body)
         self.assertIsNone(modules.ha_fields(self.stack, self.site())["generator_fuel_left"])
+        # a config export leaves the count out: it belongs to this box at this moment
+        import configfile
+        self.assertEqual(configfile.DROP["modules/generator.json"], ("settings.fuel_gal", "settings.fuel_at"))
         # saving the setup page keeps the fuel that was entered
         fuel(self.stack, {"fuel_gal": "7"})
         modules.form_apply(self.stack, {"module_generator_shown": "1", "generator": "manual"})
