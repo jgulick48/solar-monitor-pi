@@ -465,7 +465,39 @@ background:var(--bg);border-top:1px solid var(--line);box-shadow:0 -4px 12px rgb
 .own-intro{margin:56px 0 0;padding-top:20px;border-top:2px solid var(--line)} .own-intro h2{margin:0;padding:0;border:0}
 section.own{border:1px solid var(--line);border-radius:10px;margin:16px 0;padding:4px 16px 12px;
 background:color-mix(in srgb,var(--fg) 3%,var(--bg))} section.own h2{margin:12px 0 4px;padding:0;border:0}
-@media (max-width:600px){body{padding:12px} fieldset{padding:6px 12px 14px} .row label{flex-basis:100%} .savebar{margin:16px -12px 0;padding:8px 12px}}"""
+@media (max-width:600px){body{padding:12px} fieldset{padding:6px 12px 14px} .row label{flex-basis:100%} .savebar{margin:16px -12px 0;padding:8px 12px}}
+/* setup page: the list of sections down the left side (a row of chips under the header on a narrow screen), and
+   sections that are easy to tell apart: a coloured edge and a heading bar each, green for the ones saved together,
+   blue for the ones with their own button */
+:root{--own:#2a6fd6} @media (prefers-color-scheme:dark){:root{--own:#6aa5ff}}
+body:has(.setup-layout){max-width:1180px}
+.setup-layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:28px;align-items:start}
+.sidenav{position:sticky;top:64px;max-height:calc(100vh - 150px);overflow-y:auto;font-size:14.5px;padding:4px 6px 4px 0}
+.sidenav .grp{margin:14px 0 4px;padding-left:10px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.sidenav .grp:first-child{margin-top:0}
+.sidenav a{display:block;padding:5px 10px;margin:1px 0;border-left:3px solid transparent;border-radius:0 6px 6px 0;color:var(--fg);text-decoration:none;line-height:1.3}
+.sidenav a:hover{background:color-mix(in srgb,var(--accent) 10%,var(--bg))}
+.sidenav a.on{border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--bg));font-weight:600}
+.sidenav a.sep.on{border-left-color:var(--own);background:color-mix(in srgb,var(--own) 14%,var(--bg))}
+.sidenav a.dirty::after{content:" \25CF";color:var(--warn)}
+.setup-main #site-form>fieldset{border-left:5px solid var(--accent);margin:26px 0;padding:6px 18px 18px;background:color-mix(in srgb,var(--fg) 2.5%,var(--bg))}
+.setup-main #site-form>fieldset>legend{font-size:1.15em;padding:3px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.setup-main #site-form>fieldset.now,.setup-main section.own.now{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 45%,transparent)}
+.setup-main section.own{border-left:5px solid var(--own);margin:26px 0}
+.setup-main section.own.now{box-shadow:0 0 0 2px color-mix(in srgb,var(--own) 45%,transparent)}
+.setup-main section.own>h2{font-size:1.25em}
+.setup-main section.own>h2::after{content:"own button";margin-left:10px;padding:2px 8px;border-radius:10px;font-size:11.5px;font-weight:600;
+vertical-align:middle;color:var(--own);border:1px solid var(--own)}
+.setup-main section.own fieldset{background:var(--bg)}
+@media (max-width:1000px){.setup-layout{display:block}
+.sidenav{top:49px;z-index:12;display:flex;gap:6px;max-height:none;overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:none;
+margin:0 -16px 8px;padding:8px 16px;background:var(--bg);border-bottom:1px solid var(--line)}
+.sidenav .grp{display:none}
+.sidenav a{flex:none;border:1px solid var(--line);border-radius:16px;padding:4px 12px;margin:0}
+.sidenav a.sep{border-color:color-mix(in srgb,var(--own) 55%,var(--line))}
+.sidenav a.on{border-color:var(--accent)} .sidenav a.sep.on{border-color:var(--own)}
+.setup-layout [id]{scroll-margin-top:118px}}
+@media (max-width:600px){.sidenav{margin:0 -12px 8px;padding:8px 12px}}"""
 
 
 NAV = [("/", "Home", "Solar monitor"), ("/check", "Check-up", "Check-up"), ("/setup", "Setup", "Site setup"),
@@ -620,6 +652,64 @@ def mark_field(body, name, error):
     return body[:m.start()] + bad + body[m.end():end] + f"<span class='fielderr'>{html.escape(error)}</span>" + body[end:]
 
 
+def _slug(text, used):
+    base = re.sub(r"[^a-z0-9]+", "-", html.unescape(re.sub(r"<[^>]+>", "", text)).lower()).strip("-") or "section"
+    slug, n = "sec-" + base, 2
+    while slug in used:
+        slug, n = f"sec-{base}-{n}", n + 1
+    used.add(slug)
+    return slug
+
+
+def _short(title):
+    """A section's name for the list: without tags, and without a trailing "(optional, ...)"."""
+    t = html.unescape(re.sub(r"<[^>]+>", "", title)).strip()
+    return re.sub(r"\s*\((?:optional|e\.g\.)[^)]*\)\s*$", "", t) or t
+
+
+def setup_sections(body):
+    """The setup page's sections, for the list down its left side: (body with an id on every section, sections).
+    Sections are the top-level fieldsets of the main form ("form", saved together) and the modules' own sections
+    under "Saved separately" ("own", each with its own button): [(kind, id, name)], in page order."""
+    start = body.find('id="site-form"')
+    end = body.find('<div class="savebar"', start)
+    if start < 0 or end < 0:
+        return body, []
+    out, found, used, depth, pos = [], [], set(re.findall(r"""\bid=["']?([\w-]+)""", body)), 0, 0
+    form = body[start:end]
+    for m in re.finditer(r"<fieldset\b([^>]*)>\s*<legend>(.*?)</legend>|<fieldset\b[^>]*>|</fieldset>", form, re.S):
+        tag = m.group(0)
+        if tag.startswith("</"):
+            depth -= 1
+            continue
+        depth += 1
+        if depth != 1 or m.group(2) is None:
+            continue
+        got = re.search(r"""\bid=["']?([\w-]+)""", m.group(1))
+        sid = got.group(1) if got else _slug(_short(m.group(2)), used)
+        if not got:
+            out.append(form[pos:m.start()] + f'<fieldset id="{sid}"' + tag[len("<fieldset"):])
+            pos = m.end()
+        found.append(("form", sid, _short(m.group(2))))
+    form = "".join(out) + form[pos:]
+    rest = body[end:]
+    for m in re.finditer(r"""<section class='own'>\s*<h2\b[^>]*\bid=["']?([\w-]+)["']?[^>]*>(.*?)</h2>""", rest, re.S):
+        found.append(("own", m.group(1), _short(m.group(2))))
+    return body[:start] + form + rest, found
+
+
+def setup_sidenav(sections):
+    """The list of sections: the ones saved together first, then the ones saved separately."""
+    e = html.escape
+    parts = []
+    for kind, head in (("form", "Saved together"), ("own", "Saved separately")):
+        mine = [x for x in sections if x[0] == kind]
+        if mine:
+            parts.append(f"<div class='grp'>{head}</div>" + "".join(
+                f"<a href='#{e(sid)}'{' class=sep' if kind == 'own' else ''}>{e(name)}</a>" for _, sid, name in mine))
+    return f"<nav class='sidenav' aria-label='Sections of this page'>{''.join(parts)}</nav>" if parts else ""
+
+
 SETUP_JS = """<script>(()=>{
 const f=document.querySelector('#site-form'); if(!f) return;
 const bar=document.querySelector('#savebar'), st=bar.querySelector('.state'); let dirty=false, sending=false;
@@ -629,6 +719,17 @@ f.addEventListener('change',e=>{if(!e.target.closest('[data-nosave]')) mark();
   const c=e.target; if(c.matches('input[type=checkbox][name^=module_]')){const p=c.closest('label').querySelector('.pending');
   if(p) p.classList.toggle('on', c.checked!==c.defaultChecked);}});
 f.addEventListener('submit',e=>{const b=e.submitter; if(b&&b.hasAttribute('formaction')) return; sending=true;});
+// the list of sections: show where the page is, and which sections have unsaved changes
+const links=[...document.querySelectorAll('.sidenav a')], secs=links.map(a=>document.querySelector('[id="'+a.hash.slice(1)+'"]'));
+const spy=()=>{let cur=0; const line=innerHeight*0.3; secs.forEach((s,i)=>{if(s&&s.getBoundingClientRect().top<=line) cur=i;});
+  if(innerHeight+scrollY>=document.body.scrollHeight-4) cur=secs.length-1;
+  links.forEach((a,i)=>{a.classList.toggle('on',i===cur); const b=secs[i]&&(secs[i].closest('section.own')||secs[i]); if(b) b.classList.toggle('now',i===cur);
+    if(i===cur) a.setAttribute('aria-current','true'); else a.removeAttribute('aria-current');});
+  const on=links[cur]; if(on&&on.parentElement.scrollWidth>on.parentElement.clientWidth) on.scrollIntoView({block:'nearest',inline:'nearest'});};
+if(links.length){addEventListener('scroll',spy,{passive:true}); addEventListener('resize',spy); spy();}
+const flag=e=>{if(e.target.closest('[data-nosave]')) return; const fs=e.target.closest('#site-form>fieldset');
+  const a=fs&&fs.id&&document.querySelector('.sidenav a[href="#'+fs.id+'"]'); if(a){a.classList.add('dirty'); a.title='Unsaved changes';}};
+f.addEventListener('input',flag); f.addEventListener('change',flag);
 addEventListener('beforeunload',e=>{if(dirty&&!sending){e.preventDefault(); e.returnValue='';}});
 // Test, restart and similar buttons inside the form: run them without leaving the page, so edits stay
 f.querySelectorAll('button[formaction]').forEach(b=>b.addEventListener('click',async e=>{
@@ -774,6 +875,11 @@ the screen's forecast and the solar forecast, which also sends the site location
 {own}{SETUP_JS}{scroll_to(target)}"""
     if error_field:
         body = mark_field(body, error_field, error)
+    body, sections = setup_sections(body)
+    side = setup_sidenav(sections)
+    if side:                                         # the heading spans both columns; the list sits beside the rest
+        head, rest = body.split("</h1>", 1)
+        body = f"{head}</h1><div class='setup-layout'>{side}<div class='setup-main'>{rest}</div></div>"
     return page("Site setup", body)
 
 
