@@ -384,6 +384,7 @@ def generator_advice(site, now_vals, now, tz, fc=None, load=None, force=False):
         at_rise = usable - loadprofile.energy_kwh(load, now, next_rise)
     rise_soc = round(min(100.0, max(0.0, floor + at_rise / kwh * 100)))
     base = {"sunset": sset.strftime("%H:%M"), "empty_at": empty_at and _hhmm(empty_at, now, site),
+            "empty_in_h": empty_at and round((empty_at - now).total_seconds() / 3600, 2),   # for the reminders (genwatch.py)
             "need_kwh": round(need, 1), "forecast_tomorrow_kwh": fsum and fsum["tomorrow"],
             "sunrise": hm(next_rise, site), "sunrise_soc": rise_soc,
             "lowest_kwh": round(lowest, 2)}          # the lowest the battery gets above the alert level (below 0: short)

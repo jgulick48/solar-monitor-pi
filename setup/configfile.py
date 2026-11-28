@@ -47,6 +47,8 @@ SECRET = {"protect.json": ("api_key",), "display.json": ("cameras",),
           "modules/notifications.json": ("settings.ntfy_token", "settings.ntfy_topic")}
 SECRET_RE = re.compile(r"(token|api_?key|password|passwd|secret|psk)", re.I)
 MAX_BYTES = 512 * 1024
+# the fuel on hand is a count on one box at one moment, not a setting
+DROP["modules/generator.json"] = ("settings.fuel_gal", "settings.fuel_at")
 
 
 class ConfigError(Exception):

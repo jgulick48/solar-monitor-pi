@@ -416,6 +416,26 @@ When the battery will last with a margin (the larger of 0.5 kWh and 5% of the ba
 down." That is said once per run by the wall display's voice and sent as a notification; Home Assistant has
 *Site generator can stop*. It only advises: an auto-start generator follows the inverter's own stop setting.
 
+**Following a run.** For a generator somebody has to walk out to, the box follows each run as it happens (both
+switches are in the generator's section of the setup page, on by default):
+
+- **Started and stopped.** A notice when the generator has run for 3 minutes ("Running since 17:42, giving about
+  4.8 kW. Battery 41%. It needs to run about 2 h 30 min...") and when it has been off for 5: how long it ran, the
+  energy, the fuel and cost, the battery before and after, and the fuel on hand. If it stopped while the box was
+  still saying "keep it running" (somebody shut it down early, or it ran out of fuel), the notice is a warning and
+  says how many kWh are still needed.
+- **Reminders that follow the battery.** Home Assistant says "start the generator" once, again before sunset and
+  every 4 hours. For a generator started by hand the box adds a reminder each time the battery has fallen 10 more
+  points while it still isn't running, and one "Start the generator now" when the battery is within 2 hours of the
+  low-battery level, never within 30 minutes of the last word. They are critical alerts, so they come through in
+  quiet hours.
+- **Fuel on hand.** On the Generator page, enter the gallons in the cans or the tank after filling up. The box
+  takes off what each run uses (the log's own fuel figures: your measured gallons per hour, else the typical figure
+  for the generator's size at the load it carried) and shows the gallons and the hours of running left there, on
+  the start page and in Home Assistant (*Site generator fuel on hand*). It warns once when fewer hours are left
+  than you set (2 by default), and a reminder says so when the fuel on hand is less than the run that is needed.
+  It is a count, not a gauge: correct it whenever you check the tank.
+
 **Solar to spare.** Once the battery is full, solar the house doesn't use is thrown away. With the battery at 90% or
 reaching it within the hour, and the panels able to make at least 1 kW more than the expected use for an hour or
 more, the wall display says "About 2 kW of solar to spare until 3:00 PM: a good time to run big loads" (the figure
