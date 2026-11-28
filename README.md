@@ -212,6 +212,25 @@ that had one and has none now shows red by its number and name ("P3 (Boiler supp
 a loose wire looks like; a port that never had one is only listed as unused. After taking a probe out on purpose,
 press *Forget missing probes* under *Boiler probe board* on the setup page.
 
+## Away mode
+
+For when nobody is at the property (setup page: *Optional features* → **Away mode**, then its switch on the start
+page or under *Away mode* on the setup page, with an optional last day away). Nothing is switched: the alerts speak
+earlier, and a report comes every day, so silence is never the only sign that all is well.
+
+- **Freeze:** with freeze protection on, its "cold inside" level is raised (5 °F / 2.8 °C by default), and a hard
+  freeze in the forecast is told even when the heat and the battery look fine.
+- **Battery:** a warning when the battery has been within 15 points of the low-battery level for 10 minutes, while
+  there is still time to come and start a generator.
+- **Water:** with the water module watching the pump, any pump run is told, at most every 6 hours with the runs since
+  the last word. Untick it if something uses water while you are away (an ice maker, a softener).
+- **Daily report**, at 08:00 unless changed: the battery now, yesterday's lowest level, solar and generator hours,
+  the watched temperatures, propane and the water pump. It is titled "All is well at <site>" when the check-up page
+  has nothing red and no alert is open; otherwise "Away check: 2 things to look at", with those first.
+
+It turns itself off the day after the last day away and says so. Home Assistant gets *Site away mode*. The margins
+and the report time travel with a config export; being away does not.
+
 ## Following another site
 
 A second box can show a site's inverters as if they were its own: a box at home showing the cabin, say. It must not

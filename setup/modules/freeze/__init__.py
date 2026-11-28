@@ -23,6 +23,15 @@ def settings(stack):
     return {**engine.DEFAULTS, **modules.settings(stack, "freeze")}
 
 
+def effective(stack):
+    """The settings as they apply now: in away mode the cold threshold is raised by its margin ("away": True)."""
+    import away
+    s = settings(stack)
+    if not away.active(stack):
+        return s
+    return {**s, "below_c": float(s["below_c"]) + away.freeze_margin(stack), "away": True}
+
+
 def chosen(stack):
     return sorted(set(settings(stack)["sensors"]))
 
@@ -119,7 +128,7 @@ def _alert_text(v):
 
 
 def card(stack):
-    s = settings(stack)
+    s = effective(stack)
     if not s["sensors"]:
         return "<div class='card'><b>Freeze protection</b>: pick the temperatures to watch in <a href='/setup#freeze'>setup</a>.</div>"
     site = _site(stack)
@@ -130,11 +139,11 @@ def card(stack):
     fc = f" Forecast low in the next 24 hours: {engine.show(low[0], us)}." if low else ""
     warn = "".join(f"<br><b>{html.escape(engine.RULES[r][2])}</b>: {html.escape(v['text'].get(r, ''))}"
                    for r in engine.RULES if r in v["active"])
-    return (f"<div class='card'><b>Freeze protection</b>: {temps}; alert below {engine.show(s['below_c'], us)}.{fc}{warn}</div>")
+    return (f"<div class='card'><b>Freeze protection</b>: {temps}; alert below {engine.show(s['below_c'], us)}{' (raised while away)' if s.get('away') else ''}.{fc}{warn}</div>")
 
 
 def ha_fields(stack, site):
-    s = settings(stack)
+    s = effective(stack)
     v = engine.summary(stack, s, site)
     low, fc = v["lowest"], v["forecast_low"]
     return {"freeze_alert": _alert_text(v) or "none",
@@ -145,7 +154,7 @@ def ha_fields(stack, site):
 
 
 def display_panel(stack, site):
-    s = settings(stack)
+    s = effective(stack)
     if not s["sensors"]:
         return {"title": "Freeze protection", "level": "warn", "note": "Pick the temperatures to watch in setup", "tiles": []}
     us = engine.us(site)
@@ -184,7 +193,7 @@ def _boiler_fault(stack, site):
 
 
 def every_minute(stack):
-    s = settings(stack)
+    s = effective(stack)
     if not s["sensors"]:
         return []
     site = _site(stack)
@@ -192,11 +201,11 @@ def every_minute(stack):
     def alert(tag, title, message, priority):
         return notify.alert(stack, tag, title, message, priority)
     return engine.step(stack, s, engine.readings(stack, s, site), site, time.time(), alert, soc=_soc(),
-                       boiler_fault=_boiler_fault(stack, site), low=engine.forecast_low(stack))
+                       boiler_fault=_boiler_fault(stack, site), low=engine.forecast_low(stack), away=bool(s.get("away")))
 
 
 def checks(stack):
-    s = settings(stack)
+    s = effective(stack)
     link = ("/setup#freeze", "Setup")
     if not s["sensors"]:
         return [{"title": "Freeze protection", "state": "bad", "link": link,
