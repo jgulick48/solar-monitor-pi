@@ -36,11 +36,12 @@ import solar_setup as ss
 FORMAT = 1
 ITERATIONS = 600000
 # modules whose settings describe the site and travel with it; the rest belong to one box
-PORTABLE = ("boiler", "cameras", "freeze", "generator", "notifications", "probeboard", "propane", "voice", "water", "weather")
+PORTABLE = ("away", "boiler", "cameras", "freeze", "generator", "notifications", "probeboard", "propane", "voice", "water", "weather")
 LOCAL = ("backup", "follow", "hahistory", "share", "ssh", "support", "tunnel", "zigbee", "zwave")
 PLAIN = ("site.json", "display.json", "weather.json", "update.json", "protect.json")
 # per file: keys that are this box's state, not settings (dotted paths), and keys that are the only ones kept
-DROP = {"protect.json": ("ha_added", "applied_quality"), "weather.json": ("probe", "scan", "last_push")}
+DROP = {"protect.json": ("ha_added", "applied_quality"), "weather.json": ("probe", "scan", "last_push"),
+        "modules/away.json": ("settings.away", "settings.since", "settings.until")}   # being away isn't a setting
 ONLY = {"modules/probeboard.json": ("settings.names",)}
 # per file: secrets by dotted path; any other key that looks like one (SECRET_RE) is treated the same
 SECRET = {"protect.json": ("api_key",), "display.json": ("cameras",),

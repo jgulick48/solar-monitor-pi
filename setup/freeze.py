@@ -9,7 +9,8 @@ Three rules, checked once a minute (step()):
     Cleared once it is back 1 °C above the threshold.
   * risk (warning): a hard freeze (20 °F / -6.7 °C by default) is forecast within 24 hours while the heat or the
     power is in doubt: the boiler module reports a fault, or the battery is at or below the site's low level. This
-    comes hours before anything in the house gets cold. The forecast is the weather module's (wx-forecast.json).
+    comes hours before anything in the house gets cold. In away mode (away.py) it is told whatever the heat and the
+    battery say, and the cold threshold is raised by away mode's margin. The forecast is the weather module's (wx-forecast.json).
   * sensor (warning): a watched sensor has given no reading for 30 minutes, so it protects nothing.
 
 Temperatures are kept in °C; pages and messages use the site's units. State: state/freeze.json.
@@ -126,9 +127,10 @@ def lowest(rd):
     return min(ok, key=lambda r: r["c"]) if ok else None
 
 
-def step(stack, s, rd, site, now=None, alert=None, soc=None, boiler_fault="", low=None):
+def step(stack, s, rd, site, now=None, alert=None, soc=None, boiler_fault="", low=None, away=False):
     """One minute: check the rules, raise and clear their alerts. rd: readings(); soc: the battery's level (%);
-    boiler_fault: the boiler module's fault text ("" for none, or with the module off); low: forecast_low().
+    boiler_fault: the boiler module's fault text ("" for none, or with the module off); low: forecast_low();
+    away: nobody is at the property (away mode), which is reason enough to tell of a hard freeze in the forecast.
     `alert(tag, title, message, priority)` sends. Returns log lines."""
     now = now or time.time()
     st = load(stack)
@@ -161,6 +163,8 @@ def step(stack, s, rd, site, now=None, alert=None, soc=None, boiler_fault="", lo
         why.append(f"the boiler has a fault ({boiler_fault})")
     if soc is not None and soc <= floor:
         why.append(f"the battery is low ({soc:.0f}%)")
+    if away and not why:
+        why.append("nobody is at the property (away mode)")
     if low and low[0] <= float(s.get("hard_freeze_c", DEFAULTS["hard_freeze_c"])) and why:
         at = time.strftime("%-I:%M %p" if u else "%H:%M", time.localtime(low[1]))
         coldest = lowest(rd)

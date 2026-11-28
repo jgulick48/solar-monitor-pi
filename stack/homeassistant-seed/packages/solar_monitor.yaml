@@ -491,6 +491,12 @@ rest:
         value_template: "{{ value_json.box_power_problem }}"
         device_class: problem
         icon: mdi:power-plug-off
+      # Away mode (the box's start page or setup page): nobody is at the property, alerts speak earlier
+      - name: Site away mode
+        unique_id: site_away_mode
+        availability: "{{ value_json.away_mode is defined and value_json.away_mode is not none }}"
+        value_template: "{{ value_json.away_mode }}"
+        icon: mdi:home-export-outline
       - name: Site generator can stop
         unique_id: site_generator_can_stop
         # a hand-started generator is running and the battery now lasts until the sun is back

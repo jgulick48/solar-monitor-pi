@@ -202,8 +202,27 @@ line per item: green works, yellow works but deserves a look, red doesn't work, 
 Problems come first, each with what to do and a link to where it is fixed. The box checks the site details, the
 inverter dongles, that data is being recorded, Home Assistant (running, and its owner account made), the solar
 forecast, the panels and inverters, the box itself (temperature, power, disk, services) and the clock. Enabled modules add their own lines:
-notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras and freeze
-protection. Open it after first setup, and whenever something seems off.
+notifications (somewhere to send, and the last alert delivered), backup, remote access, cameras, freeze
+protection and away mode. Open it after first setup, and whenever something seems off.
+
+## Away mode
+
+For when nobody is at the property (setup page: *Optional features* → **Away mode**, then its switch on the start
+page or under *Away mode* on the setup page, with an optional last day away). Nothing is switched: the alerts speak
+earlier, and a report comes every day, so silence is never the only sign that all is well.
+
+- **Freeze:** with freeze protection on, its "cold inside" level is raised (5 °F / 2.8 °C by default), and a hard
+  freeze in the forecast is told even when the heat and the battery look fine.
+- **Battery:** a warning when the battery has been within 15 points of the low-battery level for 10 minutes, while
+  there is still time to come and start a generator.
+- **Water:** with the water module watching the pump, any pump run is told, at most every 6 hours with the runs since
+  the last word. Untick it if something uses water while you are away (an ice maker, a softener).
+- **Daily report**, at 08:00 unless changed: the battery now, yesterday's lowest level, solar and generator hours,
+  the watched temperatures, propane and the water pump. It is titled "All is well at <site>" when the check-up page
+  has nothing red and no alert is open; otherwise "Away check: 2 things to look at", with those first.
+
+It turns itself off the day after the last day away and says so. Home Assistant gets *Site away mode*. The margins
+and the report time travel with a config export; being away does not.
 
 ## Following another site
 
